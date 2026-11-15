@@ -89,15 +89,16 @@ object Roms {
                 ?.let { roots += it.path }
             walk(vol, null, 0, vol, found)
         }
+        Ports.entries(ctx).takeIf { it.isNotEmpty() }?.let { found["ports"] = it.toMutableList() }
         val list = JSONArray()
-        val order = systems.map { it.id } + "_unassigned"
+        val order = systems.map { it.id } + "ports" + "_unassigned"
         for (id in order) {
             val roms = found[id] ?: continue
             val sys = systems.firstOrNull { it.id == id }
             roms.sortBy { it.getString("name").lowercase() }
             list.put(JSONObject()
                 .put("id", id)
-                .put("name", sys?.name ?: "Nicht zugeordnet")
+                .put("name", sys?.name ?: if (id == "ports") "Ports & Recomps" else "Nicht zugeordnet")
                 .put("count", roms.size)
                 .put("size", roms.sumOf { it.getLong("size") })
                 .put("roms", JSONArray(roms)))

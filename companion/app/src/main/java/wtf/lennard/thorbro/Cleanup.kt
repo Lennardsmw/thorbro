@@ -55,7 +55,7 @@ object Cleanup {
         for (i in 0 until scan.length()) {
             val sys = scan.getJSONObject(i)
             val id = sys.getString("id")
-            if (id == "_unassigned") continue
+            if (id == "_unassigned" || id == "ports") continue
             val roms = sys.getJSONArray("roms").let { a -> (0 until a.length()).map { a.getJSONObject(it) } }.filter { !it.getBoolean("dir") }
             if (id == "switch") {
                 // several updates for one game: all but the newest are outdated

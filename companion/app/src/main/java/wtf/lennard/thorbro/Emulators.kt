@@ -50,7 +50,11 @@ object Emulators {
     fun installed(ctx: Context) = all.filter { runCatching { ctx.packageManager.getPackageInfo(it.pkg, 0) }.isSuccess }
 
     /** the user's pick, else the first installed emulator that handles the console */
+    /** ports are apps of their own */
+    private val portApp = Emu("app", "App", "", "", Pass.DATA, systems = setOf("ports"))
+
     fun forSystem(ctx: Context, system: String): Emu? {
+        if (system == "ports") return portApp
         val inst = installed(ctx)
         val chosen = Prefs.of(ctx).getString("emu.$system", null)
         return inst.firstOrNull { it.id == chosen && system in it.systems } ?: inst.firstOrNull { system in it.systems }
@@ -67,6 +71,8 @@ object Emulators {
                 .put("current", forSystem(ctx, s.id)?.id)
                 .put("options", JSONArray(options.map { JSONObject().put("id", it.id).put("name", it.name) })))
         }
+        if (Ports.installed(ctx).isNotEmpty()) per.put("ports", JSONObject().put("current", "app")
+            .put("options", JSONArray(listOf(JSONObject().put("id", "app").put("name", "App")))))
         return JSONObject()
             .put("systems", per)
             .put("folderGrants", JSONArray(trees(ctx).map { DocumentsContract.getTreeDocumentId(it) }))
@@ -103,6 +109,11 @@ object Emulators {
 
     /** {ok} or {error, code}; code "need_folder_grant" means: open ThorBro on the device and grant the ROM folder */
     fun launch(ctx: Context, system: String, rom: File, emuId: String? = null): JSONObject {
+        if (system == "ports") {
+            val p = Ports.known.firstOrNull { rom.name == "${it.name}.port" } ?: return JSONObject().put("error", "Unbekannter Port")
+            return if (Apps.launch(ctx, p.pkg)) JSONObject().put("ok", true).put("emulator", p.name)
+                else JSONObject().put("error", "${p.name} ist nicht installiert")
+        }
         val emu = (emuId?.let { id -> installed(ctx).firstOrNull { it.id == id } }) ?: forSystem(ctx, system)
             ?: return JSONObject().put("error", "Kein passender Emulator installiert").put("code", "no_emulator")
         val file = target(system, rom) ?: return JSONObject().put("error", "Keine startbare Datei im Spielordner").put("code", "no_file")

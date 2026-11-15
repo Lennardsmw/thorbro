@@ -61,6 +61,12 @@ object RommSync {
                 if (rom != null && (f.listFiles()?.isNotEmpty() == true)) out += SaveItem(f, "switch", rom, true)
             }
         }
+        // ports/recomps: their save folder belongs to the port's placeholder entry
+        val portEntries = Ports.entries(ctx)
+        for ((p, dir) in Ports.saveDirs(ctx)) {
+            val entry = portEntries.firstOrNull { it.optString("portId") == p.id } ?: continue
+            out += SaveItem(dir, "ports", entry, true)
+        }
         return out.distinctBy { it.file.path.lowercase() }
     }
 

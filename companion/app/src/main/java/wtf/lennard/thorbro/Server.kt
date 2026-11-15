@@ -321,6 +321,11 @@ object Server {
                     json(JSONObject().put("auto", RommSync.auto(ctx)))
                 }
 
+                get("/api/players") {
+                    if (denied(ctx)) return@get
+                    json(Players.overview(ctx))
+                }
+
                 // ---- background jobs ----
                 get("/api/jobs/{id}") {
                     if (denied(ctx)) return@get

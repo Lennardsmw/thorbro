@@ -50,6 +50,7 @@ object Saves {
             add(Location("saves-$tag", "Ordner „${File(v, "Saves").name}“ (${if (tag == "sd") "SD" else "intern"})", "Switch/Eden-Export", File(v, "Saves")))
             add(Location("saves2-$tag", "Ordner „saves“ (${if (tag == "sd") "SD" else "intern"})", "Switch/Syncthing", File(v, "saves"), Regex("^(?!\\.st).*")))
         }
+        for ((p, dir) in Ports.saveDirs(ctx)) add(Location("port-${p.id}", p.name, "Port/Recomp", dir))
         add(Location("dolphin-gc", "Dolphin GameCube", "Dolphin", File(dataDir, "org.dolphinemu.dolphinemu/files/GC")))
         add(Location("dolphin-wii", "Dolphin Wii", "Dolphin", File(dataDir, "org.dolphinemu.dolphinemu/files/Wii/title")))
         add(Location("nethersx2", "NetherSX2 Memory Cards", "NetherSX2", File(dataDir, "xyz.aethersx2.android/files/memcards")))

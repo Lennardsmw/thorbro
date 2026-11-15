@@ -22,7 +22,7 @@ object EsDe {
 
     fun export(ctx: Context, dest: File, job: Jobs.Job): JSONObject {
         val scan = Roms.scan(ctx, false).getJSONArray("systems")
-        val systems = (0 until scan.length()).map { scan.getJSONObject(it) }.filter { it.getString("id") != "_unassigned" }
+        val systems = (0 until scan.length()).map { scan.getJSONObject(it) }.filter { it.getString("id") !in setOf("_unassigned", "ports") }
         val total = systems.sumOf { it.getInt("count") }.coerceAtLeast(1)
         var doneN = 0; var games = 0; var images = 0
         val summary = JSONArray()

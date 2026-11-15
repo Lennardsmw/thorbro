@@ -78,8 +78,8 @@ fun GamesScreen() {
     var sel by remember { mutableStateOf(0) }
     var open by remember { mutableStateOf<JSONObject?>(null) }
     val list = systems
-    if (list == null) { Title("Spiele"); Line("Suche Spiele …", Muted); return }
-    if (list.isEmpty()) { Title("Spiele"); Line("Keine Spiele gefunden. Lege sie unter ROMs/<Konsole> ab.", Muted); return }
+    if (list == null) { Line("Suche Spiele …", Muted); return }
+    if (list.isEmpty()) { Line("Keine Spiele gefunden. Lege sie unter ROMs/<Konsole> ab.", Muted); return }
     val cur = list[sel.coerceIn(0, list.size - 1)]
     val meta by produceState<JSONObject?>(null, cur.id) { value = withContext(Dispatchers.IO) { runCatching { Media.metaFor(ctx, cur.id, cur.roms) }.getOrNull() } }
 
@@ -117,6 +117,7 @@ private fun cover(sys: String, r: JSONObject, m: JSONObject): File? {
     val ctx = LocalContext.current
     val f by produceState<File?>(null, r.getString("path"), m.optString("cover")) {
         value = withContext(Dispatchers.IO) {
+            if (sys == "ports") return@withContext wtf.lennard.thorbro.Ports.icon(ctx, r.optString("package"))
             Cocoon.media(ctx, sys, r.getString("path"), "icon")
                 ?: m.optString("cover").takeIf { it.isNotEmpty() }?.let { runCatching { Media.cover(ctx, sys, it) }.getOrNull() }
         }
@@ -142,7 +143,7 @@ private fun GameCard(sys: String, r: JSONObject, m: JSONObject, onOpen: () -> Un
 }
 
 @Composable
-private fun GameDetail(sys: String, r: JSONObject, m: JSONObject, onClose: () -> Unit) {
+fun GameDetail(sys: String, r: JSONObject, m: JSONObject, onClose: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var msg by remember { mutableStateOf("") }

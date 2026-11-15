@@ -61,6 +61,10 @@ object Pads {
     var rx by mutableFloatStateOf(0f); var ry by mutableFloatStateOf(0f)
     var lt by mutableFloatStateOf(0f); var rt by mutableFloatStateOf(0f)
     var lastFrom by mutableStateOf("")
+    /** set while ThorBro waits for "press a button on the controller for player N" */
+    var assigning by mutableStateOf(0)
+    var assignArmedAt = 0L
+    var onAssigned: ((Int, InputDevice) -> Unit)? = null
 
     private fun isPad(d: InputDevice?) = d != null && !d.isVirtual &&
         (d.sources and InputDevice.SOURCE_GAMEPAD == InputDevice.SOURCE_GAMEPAD || d.sources and InputDevice.SOURCE_JOYSTICK == InputDevice.SOURCE_JOYSTICK)
@@ -76,6 +80,10 @@ object Pads {
 
     fun onKey(e: KeyEvent) {
         if (!isPad(e.device)) return
+        if (assigning > 0 && e.action == KeyEvent.ACTION_DOWN && System.currentTimeMillis() - assignArmedAt > 400) {
+            val slot = assigning; assigning = 0
+            e.device?.let { d -> onAssigned?.invoke(slot, d) }
+        }
         pressed[e.keyCode] = e.action == KeyEvent.ACTION_DOWN
         lastFrom = e.device?.name ?: ""
     }
@@ -142,12 +150,37 @@ fun ControllerScreen() {
     }
 
     LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item { Title("Controller") }
         item {
             FocusCard(Modifier.fillMaxWidth()) {
                 Label("Verbunden")
                 if (Pads.pads.isEmpty()) Line("Kein externer Controller verbunden (die Thor-Tasten zählen mit).", Muted)
                 Pads.pads.forEach { p -> Row(verticalAlignment = Alignment.CenterVertically) { StatusDot(true); Big(p.name); if (p.battery.isNotEmpty()) Line("  ·  Akku ${p.battery}", Muted) } }
+            }
+        }
+        item {
+            FocusCard(Modifier.fillMaxWidth()) {
+                Label("Spieler – gilt automatisch in Dolphin, auch nach Neuverbinden")
+                val players = remember(tick) { wtf.lennard.thorbro.Players.overview(ctx) }
+                DisposableEffect(Unit) {
+                    Pads.onAssigned = { slot, d -> wtf.lennard.thorbro.Players.assign(ctx, slot, d); tick++ }
+                    onDispose { Pads.onAssigned = null; Pads.assigning = 0 }
+                }
+                val arr = players.getJSONArray("players")
+                for (i in 0 until arr.length()) {
+                    val p = arr.getJSONObject(i); val slot = p.getInt("slot")
+                    Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Spieler $slot", Modifier.width(100.dp), fontSize = 16.sp)
+                        if (Pads.assigning == slot) Text("Jetzt eine Taste auf dem Controller drücken …", Modifier.weight(1f), color = Accent)
+                        else {
+                            if (!p.isNull("name")) StatusDot(p.optBoolean("connected"))
+                            Text(if (p.isNull("name")) "—" else p.optString("name") + if (p.optBoolean("connected")) "" else " (nicht verbunden)", Modifier.weight(1f), color = if (p.isNull("name")) Muted else androidx.compose.ui.graphics.Color.White)
+                        }
+                        Act("Zuweisen") { Pads.assigning = slot; Pads.assignArmedAt = System.currentTimeMillis() }
+                        Spacer(Modifier.width(8.dp))
+                        if (!p.isNull("name")) Act("Leeren") { wtf.lennard.thorbro.Players.clear(ctx, slot); tick++ }
+                    }
+                }
+                if (players.optString("lastApply").isNotEmpty()) Line("Zuletzt übernommen: " + players.optString("lastApply"), Muted)
             }
         }
         item {
@@ -192,8 +225,8 @@ fun ControllerScreen() {
         item {
             FocusCard(Modifier.fillMaxWidth()) {
                 Label("In den Emulatoren")
-                Line("RetroArch erkennt bekannte Controller automatisch. Eden, Azahar, Dolphin, PPSSPP, melonDS und NetherSX2 nehmen jeden " +
-                    "verbundenen Controller als Eingabe; die Tastenbelegung legst du einmal im Emulator fest.", Muted)
+                Line("Dolphin: Die Spieler oben werden bei jedem Verbinden automatisch eingetragen, die Tastenbelegung bleibt. " +
+                    "RetroArch erkennt bekannte Controller selbst. Für Eden, Azahar und die anderen legst du die Belegung einmal im Emulator fest.", Muted)
             }
         }
     }

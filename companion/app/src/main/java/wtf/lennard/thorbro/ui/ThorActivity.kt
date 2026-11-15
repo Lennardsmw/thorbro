@@ -68,21 +68,21 @@ import java.net.NetworkInterface
 
 /** Native ThorBro on the device: gamepad first, only what matters. */
 class ThorActivity : ComponentActivity() {
-    private val tab = mutableIntStateOf(0)
+    private val screen = androidx.compose.runtime.mutableStateOf<Screen?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (!ThorService.running) ThorService.start(this)
         if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
-        setContent { ThorTheme { Root(tab.intValue) { tab.intValue = it } } }
+        setContent { ThorTheme { Root(screen.value) { screen.value = it } } }
     }
 
     // L1 / R1 switch sections; every key and stick move also feeds the controller tester
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         Pads.onKey(event)
         if (event.action == KeyEvent.ACTION_DOWN) when (event.keyCode) {
-            KeyEvent.KEYCODE_BUTTON_L1 -> { tab.intValue = (tab.intValue + TABS.size - 1) % TABS.size; return true }
-            KeyEvent.KEYCODE_BUTTON_R1 -> { tab.intValue = (tab.intValue + 1) % TABS.size; return true }
+            KeyEvent.KEYCODE_BUTTON_B, KeyEvent.KEYCODE_BACK -> if (screen.value != null && !detailOpen) { screen.value = null; return true }
+            KeyEvent.KEYCODE_BUTTON_R1 -> if (screen.value == null) { screen.value = Screen.GAMES; return true }
         }
         return super.dispatchKeyEvent(event)
     }
@@ -98,36 +98,34 @@ class ThorActivity : ComponentActivity() {
     }
 
     companion object {
-        val TABS = listOf("Start", "Spiele", "Sync", "Controller", "Einstellungen")
+        /** a dialog handles B itself */
+        @Volatile var detailOpen = false
     }
 }
 
 @Composable
-private fun Root(tab: Int, setTab: (Int) -> Unit) {
-    Row(Modifier.fillMaxSize().background(Bg)) {
-        NavigationRail(containerColor = Panel) {
-            Spacer(Modifier.height(12.dp))
-            Text("ThorBro", color = Accent, fontSize = 15.sp, modifier = Modifier.padding(bottom = 12.dp))
-            val icons = listOf(Icons.Filled.Home, Icons.Filled.VideogameAsset, Icons.Filled.Sync, Icons.Filled.SportsEsports, Icons.Filled.Settings)
-            ThorActivity.TABS.forEachIndexed { i, name ->
-                NavigationRailItem(
-                    selected = tab == i, onClick = { setTab(i) },
-                    icon = { Icon(icons[i], contentDescription = name) }, label = { Text(name, fontSize = 11.sp) },
-                    colors = NavigationRailItemDefaults.colors(indicatorColor = Accent),
-                )
+private fun Root(screen: Screen?, open: (Screen?) -> Unit) {
+    var detail by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<HomeGame?>(null) }
+    if (screen == null) {
+        HomeScreen(open = { open(it) }, showDetail = { detail = it })
+    } else {
+        Column(Modifier.fillMaxSize().background(Bg)) {
+            StatusBar(screen.label)
+            Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 32.dp, vertical = 8.dp)) {
+                when (screen) {
+                    Screen.GAMES -> GamesScreen()
+                    Screen.SYNC -> SyncScreen()
+                    Screen.SAVES -> SavesScreen()
+                    Screen.CONTROLLER -> ControllerScreen()
+                    Screen.SETTINGS -> SettingsScreen()
+                }
             }
-            Spacer(Modifier.weight(1f))
-            Text("L1 / R1", color = Muted, fontSize = 10.sp, modifier = Modifier.padding(bottom = 10.dp))
+            ButtonHints("A" to "Auswählen", "B" to "Zurück")
         }
-        Box(Modifier.weight(1f).fillMaxSize().padding(20.dp)) {
-            when (tab) {
-                0 -> StartScreen()
-                1 -> GamesScreen()
-                2 -> SyncScreen()
-                3 -> ControllerScreen()
-                else -> SettingsScreen()
-            }
-        }
+    }
+    detail?.let { g ->
+        ThorActivity.detailOpen = true
+        GameDetail(g.system, g.rom, g.meta) { detail = null; ThorActivity.detailOpen = false }
     }
 }
 
@@ -137,57 +135,6 @@ fun ipv4(): Pair<String?, String?> {
     val mesh = addrs.firstOrNull { it.startsWith("100.") }
     val lan = addrs.firstOrNull { !it.startsWith("100.") }
     return lan to mesh
-}
-
-@Composable
-private fun StartScreen() {
-    val ctx = LocalContext.current
-    var tick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) { while (true) { delay(5000); tick++ } }
-    val (lan, mesh) = remember(tick) { ipv4() }
-    val code = remember(tick) { Prefs.token(ctx) }
-    val watcher = remember(tick) { SaveWatcher.last }
-    var update by remember { mutableStateOf<JSONObject?>(null) }
-    LaunchedEffect(Unit) { update = withContext(Dispatchers.IO) { runCatching { Updater.check(ctx) }.getOrNull() } }
-    val rommOn = remember(tick) { Romm.status(ctx).optBoolean("connected") }
-
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item { Title("Bereit") }
-        item {
-            FocusCard(Modifier.fillMaxWidth(), onClick = {}) {
-                Row(verticalAlignment = Alignment.CenterVertically) { StatusDot(ThorService.running); Big(if (ThorService.running) "ThorBro läuft" else "Server gestoppt") }
-                Spacer(Modifier.height(8.dp))
-                Label("Im Browser öffnen")
-                lan?.let { Line("http://$it:${ThorService.PORT}") }
-                mesh?.let { Line("http://$it:${ThorService.PORT}   (NetBird, von überall)") }
-                Spacer(Modifier.height(8.dp))
-                Label("Kopplungscode")
-                Text(code, fontSize = 30.sp, fontFamily = FontFamily.Monospace, color = Accent)
-            }
-        }
-        item {
-            FocusCard(Modifier.fillMaxWidth(), onClick = {}) {
-                Label("Spielstände")
-                Row(verticalAlignment = Alignment.CenterVertically) { StatusDot(rommOn); Big(if (rommOn) "Mit RomM verbunden" else "RomM nicht verbunden") }
-                Line(watcher.optString("state", "–"), Muted)
-            }
-        }
-        item {
-            FocusCard(Modifier.fillMaxWidth(), onClick = {}) {
-                Label("Version ${update?.optString("current") ?: ""}")
-                val u = update
-                when {
-                    u == null -> Line("Suche nach Updates …", Muted)
-                    u.optBoolean("available") -> {
-                        Big("Update ${u.optString("latest")} verfügbar", Accent)
-                        val scope = rememberCoroutineScope()
-                        Acts { Act("Jetzt installieren", primary = true) { scope.launch(Dispatchers.IO) { Updater.update(ctx) } } }
-                    }
-                    else -> Line("Aktuell", Ok)
-                }
-            }
-        }
-    }
 }
 
 @Composable
@@ -203,7 +150,6 @@ private fun SyncScreen() {
     val st = remember(tick) { Romm.status(ctx) }
 
     LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item { Title("Sync") }
         item {
             FocusCard(Modifier.fillMaxWidth()) {
                 Label("RomM")
@@ -261,8 +207,18 @@ private fun SettingsScreen() {
 
     fun open(action: String) = ctx.startActivity(Intent(action, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 
+    val (lan, mesh) = remember(tick) { ipv4() }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Title("Einstellungen") }
+        item {
+            FocusCard(Modifier.fillMaxWidth()) {
+                Row(verticalAlignment = Alignment.CenterVertically) { StatusDot(ThorService.running); Big(if (ThorService.running) "ThorBro läuft" else "Server gestoppt") }
+                Label("Im Browser öffnen")
+                lan?.let { Line("http://$it:${ThorService.PORT}") }
+                mesh?.let { Line("http://$it:${ThorService.PORT}   (NetBird, von überall)") }
+                Label("Kopplungscode")
+                Text(Prefs.token(ctx), fontSize = 28.sp, fontFamily = FontFamily.Monospace, color = Accent)
+            }
+        }
         item { PermRow("Zugriff auf alle Dateien", "Spiele hochladen, Spielstände sichern", p.getBoolean("allFiles")) { open(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION) } }
         item { PermRow("Über anderen Apps anzeigen", "Spiele und Apps aus der Ferne starten", p.getBoolean("overlay")) { open(Settings.ACTION_MANAGE_OVERLAY_PERMISSION) } }
         item { PermRow("Apps installieren", "APKs und ThorBro-Updates", p.getBoolean("install")) { open(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES) } }
@@ -306,6 +262,40 @@ private fun PermRow(title: String, sub: String, ok: Boolean, fix: () -> Unit) {
             StatusDot(ok)
             Column(Modifier.weight(1f)) { Big(title); Label(sub) }
             if (!ok) Act("Erlauben", primary = true, onClick = fix)
+        }
+    }
+}
+
+@Composable
+private fun SavesScreen() {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var data by remember { mutableStateOf<JSONObject?>(null) }
+    var busy by remember { mutableStateOf("") }
+    var tick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(tick) { data = withContext(Dispatchers.IO) { runCatching { Saves.overview(ctx) }.getOrNull() } }
+    val locs = data?.optJSONArray("locations")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } } ?: emptyList()
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item {
+            Acts {
+                Act("Alles jetzt sichern", primary = true, enabled = busy.isEmpty()) {
+                    busy = "sichert …"
+                    scope.launch { withContext(Dispatchers.IO) { runCatching { Saves.backup(ctx, null) } }; busy = ""; tick++ }
+                }
+                Text(busy.ifEmpty { "Gesichert wird automatisch, sobald ein Spiel speichert." }, color = Muted)
+            }
+        }
+        if (data == null) item { Line("Lade …", Muted) }
+        locs.forEach { l ->
+            item {
+                FocusCard(Modifier.fillMaxWidth(), onClick = {}) {
+                    Big(l.optString("name"))
+                    val snaps = l.optJSONArray("snapshots")
+                    val newest = snaps?.optJSONObject(0)?.optLong("time")
+                    Line("${l.optString("emulator")} · ${l.optInt("files")} Dateien · ${snaps?.length() ?: 0} Sicherungen" +
+                        (newest?.let { " · zuletzt " + java.text.DateFormat.getDateTimeInstance().format(java.util.Date(it)) } ?: ""), Muted)
+                }
+            }
         }
     }
 }
