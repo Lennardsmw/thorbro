@@ -25,7 +25,12 @@ class ThorService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startInForeground()
+        startInForeground(capture = intent?.action == ACTION_CAPTURE)
+        if (intent?.action == ACTION_CAPTURE) {
+            @Suppress("DEPRECATION")
+            val data = intent.getParcelableExtra<Intent>("data")
+            if (data != null) runCatching { Screen.start(applicationContext, intent.getIntExtra("code", 0), data) }
+        }
         if (server == null) {
             val s = Server.create(applicationContext, PORT)
             server = s
@@ -46,10 +51,11 @@ class ThorService : Service() {
         server = null
         thread(name = "thorbro-stop") { s?.stop(500, 1500) }
         Transfers.releaseAll()
+        Screen.stop()
         super.onDestroy()
     }
 
-    private fun startInForeground() {
+    private fun startInForeground(capture: Boolean = false) {
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CHANNEL, "ThorBro server", NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(
@@ -62,10 +68,11 @@ class ThorService : Service() {
             .setContentIntent(open)
             .setOngoing(true)
             .build()
-        if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else {
-            startForeground(1, n)
+        val proj = if (capture || Screen.running) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION else 0
+        when {
+            Build.VERSION.SDK_INT >= 34 -> startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or proj)
+            proj != 0 -> startForeground(1, n, proj)
+            else -> startForeground(1, n)
         }
     }
 
@@ -89,6 +96,7 @@ class ThorService : Service() {
 
     companion object {
         const val PORT = 7330
+        const val ACTION_CAPTURE = "wtf.lennard.thorbro.CAPTURE"
         private const val CHANNEL = "server"
         @Volatile var running = false
 

@@ -103,6 +103,9 @@ dialog#romDetail .hero { height: 170px; margin: -16px -16px 14px; background: ce
 .snaps { margin-top: 8px; font-size: 13px; }
 .snaps td { padding: 3px 8px 3px 0; }
 .dupe label { display: flex; gap: 8px; align-items: baseline; font-size: 14px; overflow-wrap: anywhere; }
+.screenwrap { background: #000; border-radius: 10px; min-height: 200px; display: flex; justify-content: center; }
+.screenwrap img { max-width: 100%; max-height: calc(100vh - 160px); }
+.ra { color: #d9a400; }
 dialog#romDetail::backdrop { background: rgba(0, 0, 0, .55); }
 .detail { display: grid; grid-template-columns: 220px 1fr; gap: 16px; }
 .dcover { width: 100%; border-radius: 8px; background: var(--bg); aspect-ratio: 3 / 4; object-fit: contain; }

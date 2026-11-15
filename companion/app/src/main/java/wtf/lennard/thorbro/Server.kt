@@ -11,8 +11,13 @@ import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.plugins.cors.routing.CORS
 import io.ktor.server.request.receiveChannel
+import io.ktor.server.request.receiveText
 import io.ktor.server.response.header
 import io.ktor.server.response.respondBytes
+import io.ktor.server.response.respondBytesWriter
+import io.ktor.utils.io.writeFully
+import io.ktor.utils.io.writeStringUtf8
+import kotlinx.coroutines.delay
 import io.ktor.server.response.respondFile
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.RoutingContext
@@ -183,6 +188,73 @@ object Server {
                 post("/api/cleanup/junk") {
                     if (denied(ctx)) return@post
                     json(withContext(Dispatchers.IO) { Cleanup.removeJunk(ctx) })
+                }
+
+                // ---- screen mirror ----
+                get("/api/screen") {
+                    if (denied(ctx)) return@get
+                    json(JSONObject().put("running", Screen.running).put("width", Screen.width).put("height", Screen.height).put("frameAt", Screen.frameAt))
+                }
+                post("/api/screen/start") {
+                    if (denied(ctx)) return@post
+                    ctx.startActivity(android.content.Intent(ctx, MainActivity::class.java)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                        .putExtra(MainActivity.EXTRA_CAPTURE, true))
+                    json(JSONObject().put("ok", true).put("note", "Auf dem Thor „Jetzt starten“ tippen"))
+                }
+                post("/api/screen/stop") {
+                    if (denied(ctx)) return@post
+                    Screen.stop()
+                    json(JSONObject().put("ok", true))
+                }
+                get("/api/screen/frame.jpg") {
+                    if (denied(ctx)) return@get
+                    val f = Screen.frame ?: return@get fail("kein Bild", HttpStatusCode.NotFound)
+                    call.response.header(HttpHeaders.CacheControl, "no-store")
+                    call.respondBytes(f, ContentType.Image.JPEG)
+                }
+                get("/api/screen/stream") {
+                    if (denied(ctx)) return@get
+                    call.response.header(HttpHeaders.CacheControl, "no-store")
+                    call.respondBytesWriter(ContentType.parse("multipart/x-mixed-replace; boundary=thorbroframe")) {
+                        var sent = 0L
+                        while (Screen.running && !isClosedForWrite) {
+                            val f = Screen.frame
+                            if (f != null && Screen.frameAt != sent) {
+                                sent = Screen.frameAt
+                                writeStringUtf8("--thorbroframe\r\nContent-Type: image/jpeg\r\nContent-Length: ${f.size}\r\n\r\n")
+                                writeFully(f)
+                                writeStringUtf8("\r\n")
+                                flush()
+                            }
+                            delay(40)
+                        }
+                    }
+                }
+
+                // ---- RetroAchievements ----
+                get("/api/ra") {
+                    if (denied(ctx)) return@get
+                    json(RetroAchievements.status(ctx))
+                }
+                post("/api/ra/config") {
+                    if (denied(ctx)) return@post
+                    val b = runCatching { JSONObject(call.receiveText()) }.getOrDefault(JSONObject())
+                    RetroAchievements.configure(ctx, b.optString("user", null), b.optString("key", null))
+                    json(RetroAchievements.status(ctx))
+                }
+                get("/api/ra/system") {
+                    if (denied(ctx)) return@get
+                    val id = q("system") ?: return@get fail("system missing")
+                    val res = withContext(Dispatchers.IO) {
+                        runCatching {
+                            val scan = Roms.scan(ctx, false).getJSONArray("systems")
+                            val sys = (0 until scan.length()).map { scan.getJSONObject(it) }.firstOrNull { it.getString("id") == id }
+                            val roms = sys?.getJSONArray("roms")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } } ?: emptyList()
+                            RetroAchievements.forSystem(ctx, id, roms)
+                        }.getOrElse { JSONObject().put("_error", it.message) }
+                    }
+                    json(res)
                 }
 
                 // ---- background jobs ----

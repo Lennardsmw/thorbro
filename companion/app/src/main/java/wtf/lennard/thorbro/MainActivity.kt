@@ -73,11 +73,19 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         if (!ThorService.running) ThorService.start(this)
         if (intent?.getBooleanExtra(EXTRA_PICK_FOLDER, false) == true) pickRomFolder()
+        if (intent?.getBooleanExtra(EXTRA_CAPTURE, false) == true) askCapture()
+    }
+
+    /** Android shows its own "start recording / casting?" dialog */
+    private fun askCapture() {
+        val mpm = getSystemService(android.media.projection.MediaProjectionManager::class.java)
+        startActivityForResult(mpm.createScreenCaptureIntent(), REQ_CAPTURE)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (intent.getBooleanExtra(EXTRA_PICK_FOLDER, false)) pickRomFolder()
+        if (intent.getBooleanExtra(EXTRA_CAPTURE, false)) askCapture()
     }
 
     /** Emulators get ROMs through this folder grant (like Cocoon / ES-DE do). */
@@ -93,6 +101,11 @@ class MainActivity : Activity() {
     @Deprecated("Activity result API needs androidx; plain Activity is enough here")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_CAPTURE && resultCode == RESULT_OK && data != null) {
+            startForegroundService(Intent(this, ThorService::class.java).setAction(ThorService.ACTION_CAPTURE)
+                .putExtra("code", resultCode).putExtra("data", data))
+            moveTaskToBack(true)
+        }
         if (requestCode == REQ_TREE && resultCode == RESULT_OK) data?.data?.let {
             contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             refresh()
@@ -101,7 +114,9 @@ class MainActivity : Activity() {
 
     companion object {
         const val EXTRA_PICK_FOLDER = "pickRomFolder"
+        const val EXTRA_CAPTURE = "capture"
         private const val REQ_TREE = 42
+        private const val REQ_CAPTURE = 43
     }
 
     override fun onResume() {

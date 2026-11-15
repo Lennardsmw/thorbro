@@ -35,6 +35,7 @@ function showTab(name) {
   if (name === 'roms' && !romData) loadRoms(false);
   if (name === 'apps') loadApps();
   if (name === 'saves') loadSaves();
+  if (name === 'screen') screenStatus();
   if (name === 'files') loadFiles(currentDir);
   if (name === 'device') loadDevice();
 }
@@ -78,13 +79,49 @@ async function loadDevice() {
         <input id="updFeed" style="width:100%">
         <label class="btn" style="margin-top:6px">APK von diesem Gerät installieren<input id="selfApk" type="file" accept=".apk" hidden></label>
       </details></div>
+    <div class="card"><h3>RetroAchievements</h3>
+      <div class="muted" id="raState"></div>
+      <input id="raUser" placeholder="Benutzername" style="width:100%;margin-top:6px">
+      <input id="raKey" type="password" placeholder="Web-API-Key (retroachievements.org/settings)" style="width:100%;margin-top:6px" autocomplete="off">
+      <button id="raSave" style="margin-top:6px">Speichern</button></div>
     <div class="card"><h3>Berechtigungen</h3>
       ${perm(p.allFiles, 'Zugriff auf alle Dateien')}${perm(p.overlay, 'Apps fernstarten')}${perm(p.install, 'APKs installieren')}
       ${p.allFiles && p.overlay && p.install ? '' : '<p class="muted">Fehlende Rechte in der ThorBro-App auf dem Thor erteilen.</p>'}</div>`;
   loadUpdateConfig();
   loadStorage(false);
+  api('/api/ra').then(({ body }) => {
+    raStatus = body;
+    $('#raUser').value = body.user || '';
+    $('#raState').textContent = body.configured ? `Verbunden als ${body.user}. Erfolge erscheinen im ROMs-Tab.` : 'Noch nicht eingerichtet.';
+  }).catch(() => {});
   fillVolumes();
 }
+
+document.addEventListener('click', async (e) => {
+  if (e.target.id !== 'raSave') return;
+  const body = JSON.stringify({ user: $('#raUser').value, key: $('#raKey').value });
+  raStatus = (await api('/api/ra/config', { method: 'POST', body, headers: { 'Content-Type': 'application/json' } })).body;
+  $('#raKey').value = '';
+  Object.keys(raCache).forEach((k) => delete raCache[k]);
+  $('#raState').textContent = raStatus.configured ? `Verbunden als ${raStatus.user}.` : 'Benutzername und Key fehlen.';
+  toast('RetroAchievements gespeichert');
+});
+
+// ---------- screen mirror ----------
+async function screenStatus() {
+  const { body } = await api('/api/screen');
+  $('#screenInfo').textContent = body.running ? `Live, ${body.width}×${body.height}` : 'Aus. „Bildschirm anzeigen“ und auf dem Thor bestätigen.';
+  $('#screenShot').href = `/api/screen/frame.jpg?${authQ()}`;
+  if (body.running && !$('#screenImg').src.includes('stream')) $('#screenImg').src = `/api/screen/stream?${authQ()}&t=${Date.now()}`;
+  if (!body.running) $('#screenImg').removeAttribute('src');
+  return body.running;
+}
+$('#screenStart').onclick = async () => {
+  await api('/api/screen/start', { method: 'POST' });
+  $('#screenInfo').textContent = 'Auf dem Thor „Jetzt starten“ tippen …';
+  for (let i = 0; i < 60; i++) { await sleep(1000); if (await screenStatus()) return; }
+};
+$('#screenStop').onclick = async () => { await api('/api/screen/stop', { method: 'POST' }); screenStatus(); };
 
 // ---------- storage overview ----------
 async function loadStorage(refresh) {
@@ -464,7 +501,10 @@ const coverOf = (sysId, r, m) => (m.media || []).includes('icon') ? mediaUrl(sys
 const fmtTime = (s) => (s >= 3600 ? Math.floor(s / 3600) + ' h ' : '') + Math.round((s % 3600) / 60) + ' min';
 
 let emus = null;
-async function loadEmus() { try { emus = (await api('/api/emulators')).body; } catch { emus = null; } }
+async function loadEmus() {
+  try { emus = (await api('/api/emulators')).body; } catch { emus = null; }
+  try { raStatus = (await api('/api/ra')).body; } catch { raStatus = null; }
+}
 async function loadRoms(refresh) {
   $('#romStats').textContent = 'Suche ROMs …';
   loadEmus().then(renderRoms);
@@ -480,7 +520,16 @@ async function loadRoms(refresh) {
   renderRoms();
 }
 
+const raCache = {};
+async function loadRA(id) {
+  if (raCache[id] || !raStatus?.configured || !raStatus.systems.includes(id)) return;
+  raCache[id] = {};
+  try { raCache[id] = (await api('/api/ra/system?' + q({ system: id }))).body; } catch {}
+  renderRoms();
+}
+let raStatus = null;
 async function loadMeta(id) {
+  loadRA(id);
   if (metaCache[id] || metaLoading[id] || id === '_unassigned') return;
   metaLoading[id] = true;
   $('#romStats').dataset.extra = ' · lade Cover & Infos …'; renderStats();
@@ -522,6 +571,7 @@ function romCard(r, sysId) {
     ${canPlay && (!sw || sw.base) ? `<button class="playbtn primary" data-play="${esc(r.path)}" data-play-sys="${esc(sysId)}">▶ Spielen</button>` : ''}
     ${cover}
     <div class="rtitle">${m.favorite ? '<span class="fav">★</span> ' : ''}${esc(title)}</div>
+    ${(() => { const ra = (raCache[sysId] || {})[r.path]; return ra && ra.gameId ? `<div class="rmeta ra">🏆 ${ra.awarded ?? 0}/${ra.achievements} Erfolge</div>` : ''; })()}
     <div class="rmeta">${esc(line) || '&nbsp;'}</div>
     <div class="rbadges">${m.region ? `<span class="badge">${esc(m.region)}</span>` : ''}${swBadges || `<span class="badge">${esc(r.ext)}</span>`}<span class="muted">${fmt(sw ? sw.size : r.size)}</span></div>
   </div>`;
@@ -590,7 +640,10 @@ function openRom(path, sysId) {
           ${row('Jahr', m.year)}${row('Entwickler', m.developer)}${row('Publisher', m.publisher)}
           ${row('Genre', m.genre)}${row('Spieler', m.players)}${row('Bewertung', m.rating ? m.rating + ' / 10' : '')}
           ${row('Gespielt', m.playtime ? fmtTime(m.playtime) + (m.playcount ? ` · ${m.playcount}×` : '') : '')}
-          ${row('Region', m.region)}${row('Tags', tags)}${row('Quelle', m.source === 'cocoon' ? 'Cocoon' : (m.matched || m.cover ? 'libretro' : ''))}
+          ${row('Region', m.region)}${row('Tags', tags)}
+          ${(() => { const ra = (raCache[sysId] || {})[r.path]; if (!ra) return ''; return ra.gameId
+            ? `<tr><td class="muted">RetroAchievements</td><td><a href="https://retroachievements.org/game/${ra.gameId}" target="_blank" rel="noopener">${ra.achievements} Erfolge, ${ra.points} Punkte</a> · freigeschaltet ${ra.awarded ?? 0}${ra.awardedHardcore ? ` (Hardcore ${ra.awardedHardcore})` : ''}</td></tr>`
+            : row('RetroAchievements', 'nicht erkannt (Hash ' + ra.hash.slice(0, 8) + '…)'); })()}${row('Quelle', m.source === 'cocoon' ? 'Cocoon' : (m.matched || m.cover ? 'libretro' : ''))}
           ${row('Title-ID', m.titleId)}${row('Erkannt als', m.matched)}
           ${row('Datei', r.file)}${row('Größe', fmt(r.size))}${row('Ort', volLabel(r.path) + ' ' + folder.replace(r.volume, ''))}
         </table>

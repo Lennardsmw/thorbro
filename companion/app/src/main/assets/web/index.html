@@ -14,6 +14,7 @@
     <button data-tab="roms">ROMs</button>
     <button data-tab="saves">Spielstände</button>
     <button data-tab="cleanup">Aufräumen</button>
+    <button data-tab="screen">Bildschirm</button>
     <button data-tab="apps">Apps</button>
     <button data-tab="files">Dateien</button>
     <button data-tab="device">Gerät</button>
@@ -80,6 +81,16 @@
       <span id="cleanInfo" class="muted grow"></span>
     </div>
     <div id="cleanResult"></div>
+  </section>
+
+  <section id="screen" class="tab" hidden>
+    <div class="row">
+      <button id="screenStart" class="primary">Bildschirm anzeigen</button>
+      <button id="screenStop">Beenden</button>
+      <a id="screenShot" class="btn" download="thor-screenshot.jpg">Screenshot speichern</a>
+      <span id="screenInfo" class="muted grow"></span>
+    </div>
+    <div class="screenwrap"><img id="screenImg" alt=""></div>
   </section>
 
   <section id="apps" class="tab" hidden>
