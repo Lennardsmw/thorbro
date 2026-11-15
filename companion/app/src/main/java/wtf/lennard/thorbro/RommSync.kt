@@ -80,6 +80,8 @@ object RommSync {
     private fun stateFile(ctx: Context) = File(ctx.filesDir, "romm-save-state.json")
     private fun state(ctx: Context): JSONObject = runCatching { JSONObject(stateFile(ctx).readText()) }.getOrDefault(JSONObject())
     private fun remoteKey(s: JSONObject) = "${s.getInt("id")}@${s.optString("updated_at")}"
+    private fun remoteTime(s: JSONObject): Long = runCatching { java.time.OffsetDateTime.parse(s.getString("updated_at")).toInstant().toEpochMilli() }
+        .getOrElse { java.time.LocalDateTime.parse(s.getString("updated_at").take(19)).toInstant(java.time.ZoneOffset.UTC).toEpochMilli() }
 
     private fun uploadedFile(ctx: Context) = File(ctx.filesDir, "romm-saves-uploaded.json")
     private fun uploaded(ctx: Context): JSONObject = runCatching { JSONObject(uploadedFile(ctx).readText()) }.getOrDefault(JSONObject())
@@ -128,10 +130,11 @@ object RommSync {
             done += rom.getLong("size")
         }
         if (withSaves) {
-            val r = syncSaves(ctx, job)
-            savesUp = r.optInt("uploaded"); r.optJSONArray("errors")?.let { for (i in 0 until it.length()) errors.put(it.get(i)) }
+            // fetch first, then upload: a newer save from another device must not be overwritten
             val d = pullSaves(ctx)
             savesDown = d.optInt("downloaded"); d.optJSONArray("errors")?.let { for (i in 0 until it.length()) errors.put(it.get(i)) }
+            val r = syncSaves(ctx, job)
+            savesUp = r.optInt("uploaded"); r.optJSONArray("errors")?.let { for (i in 0 until it.length()) errors.put(it.get(i)) }
         }
         return JSONObject().put("romsUploaded", romsUp).put("savesUploaded", savesUp).put("savesDownloaded", savesDown).put("errors", errors)
     }
@@ -148,10 +151,13 @@ object RommSync {
             if (prev?.optString("local") == hash) continue
             val romId = bySlug[slugFor(s.system)]?.let { remoteFiles[it]?.get(s.rom.getString("file")) }
             if (romId == null) { skipped++; continue }
-            // RomM has a newer save we have not seen yet: let pullSaves decide, don't overwrite it blindly
-            if (prev != null && s.isFolder) {
+            // RomM has a save we have not seen yet (another device): only upload when ours is newer
+            if (s.isFolder) {
                 val newest = runCatching { Romm.listSaves(ctx, romId).maxByOrNull { it.optString("updated_at") } }.getOrNull()
-                if (newest != null && remoteKey(newest) != prev.optString("remote")) continue
+                if (newest != null && remoteKey(newest) != prev?.optString("remote")) {
+                    val localTime = s.file.walkTopDown().filter { it.isFile }.maxOfOrNull { it.lastModified() } ?: 0L
+                    if (localTime <= remoteTime(newest) + 30_000) continue
+                }
             }
             job?.message = "Spielstand ${s.file.name}"
             try {
@@ -186,10 +192,8 @@ object RommSync {
                 val localChanged = localHash != prev?.optString("local")
                 if (!remoteChanged) continue
                 if (localChanged) { // both changed (or first sync): the newer one wins
-                    val remoteTime = runCatching { java.time.OffsetDateTime.parse(newest.getString("updated_at")).toInstant().toEpochMilli() }
-                        .getOrElse { java.time.LocalDateTime.parse(newest.getString("updated_at").take(19)).toInstant(java.time.ZoneOffset.UTC).toEpochMilli() }
                     val localTime = s.file.walkTopDown().filter { it.isFile }.maxOfOrNull { it.lastModified() } ?: 0L
-                    if (remoteTime <= localTime + 30_000) continue // local is newer: syncSaves uploads it
+                    if (remoteTime(newest) <= localTime + 30_000) continue // local is newer: syncSaves uploads it
                 }
                 val zip = File(ctx.cacheDir, "romm-save-${newest.getInt("id")}.zip")
                 Romm.downloadSave(ctx, newest.getInt("id"), zip)

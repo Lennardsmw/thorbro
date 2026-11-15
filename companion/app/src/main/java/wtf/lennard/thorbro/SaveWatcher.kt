@@ -59,6 +59,7 @@ object SaveWatcher {
                 val res = JSONObject().put("at", System.currentTimeMillis())
                 if (RommSync.auto(ctx) && Romm.status(ctx).optBoolean("connected")) {
                     if (onWifi(ctx)) {
+                        runCatching { RommSync.pullSaves(ctx) }
                         val r = runCatching { RommSync.syncSaves(ctx, null) }.getOrElse { JSONObject().put("error", it.message) }
                         res.put("state", if (r.has("error")) "Fehler: ${r.optString("error")}" else "synchronisiert: ${r.optInt("uploaded")} hochgeladen").put("result", r)
                     } else {

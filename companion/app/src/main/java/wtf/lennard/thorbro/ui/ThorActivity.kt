@@ -163,8 +163,8 @@ private fun SyncScreen() {
                     Act("Spielstände synchronisieren", primary = true, enabled = busy.isEmpty() && st.optBoolean("connected")) {
                         busy = "synchronisiert …"
                         scope.launch {
-                            val r = withContext(Dispatchers.IO) { runCatching { RommSync.syncSaves(ctx, null) }.getOrElse { JSONObject().put("error", it.message) } }
                             val d = withContext(Dispatchers.IO) { runCatching { RommSync.pullSaves(ctx) }.getOrElse { JSONObject().put("error", it.message) } }
+                            val r = withContext(Dispatchers.IO) { runCatching { RommSync.syncSaves(ctx, null) }.getOrElse { JSONObject().put("error", it.message) } }
                             busy = ""; SaveWatcherNote.last = if (r.has("error")) "Fehler: ${r.optString("error")}"
                                 else "${r.optInt("uploaded")} hochgeladen, ${d.optInt("downloaded")} heruntergeladen" +
                                     (if (r.optInt("skippedNoGame") > 0) ", ${r.optInt("skippedNoGame")} warten auf ihr Spiel in RomM" else "")
