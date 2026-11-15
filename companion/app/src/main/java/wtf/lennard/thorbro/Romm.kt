@@ -1,0 +1,185 @@
+package wtf.lennard.thorbro
+
+import android.content.Context
+import android.os.Build
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+import java.util.UUID
+import kotlin.concurrent.thread
+
+/**
+ * Client for a RomM server (github.com/rommapp/romm): browse its library and copy games onto the device.
+ * Sign-in uses RomM's device flow: ThorBro shows a code, the user approves it in RomM's web UI.
+ */
+object Romm {
+    private val scopes = listOf("me.read", "platforms.read", "roms.read", "assets.read", "assets.write", "firmware.read")
+
+    fun url(ctx: Context) = (Prefs.of(ctx).getString("rommUrl", "") ?: "").trimEnd('/')
+    private fun token(ctx: Context) = Prefs.of(ctx).getString("rommToken", "") ?: ""
+    private fun deviceId(ctx: Context) = Prefs.of(ctx).getString("rommDevice", null)
+        ?: UUID.randomUUID().toString().also { Prefs.of(ctx).edit().putString("rommDevice", it).apply() }
+
+    @Volatile private var pending: JSONObject? = null
+
+    fun status(ctx: Context): JSONObject = JSONObject().put("url", url(ctx)).put("connected", token(ctx).isNotEmpty())
+        .put("pending", pending)
+
+    fun disconnect(ctx: Context) { Prefs.of(ctx).edit().remove("rommToken").apply(); pending = null }
+
+    /** starts the device sign-in; returns the code to approve in RomM */
+    fun connect(ctx: Context, baseUrl: String): JSONObject {
+        val base = baseUrl.trim().trimEnd('/')
+        Prefs.of(ctx).edit().putString("rommUrl", base).remove("rommToken").apply()
+        val body = JSONObject()
+            .put("client_device_identifier", deviceId(ctx))
+            .put("name", "ThorBro (${Build.MODEL})")
+            .put("client", "ThorBro")
+            .put("platform", "android")
+            .put("client_version", ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName)
+            .put("requested_scopes", JSONArray(scopes))
+        val init = JSONObject(request(ctx, "POST", "/api/auth/device/init", body.toString(), auth = false))
+        val p = JSONObject()
+            .put("userCode", init.getString("user_code"))
+            .put("verifyUrl", base + init.getString("verification_path_complete"))
+            .put("expiresIn", init.getInt("expires_in"))
+        pending = p
+        val deviceCode = init.getString("device_code")
+        val interval = init.optInt("interval", 5).coerceAtLeast(2) * 1000L
+        val until = System.currentTimeMillis() + init.getInt("expires_in") * 1000L
+        thread(name = "romm-auth") {
+            while (System.currentTimeMillis() < until && pending === p) {
+                Thread.sleep(interval)
+                val res = runCatching { request(ctx, "POST", "/api/auth/device/token", JSONObject().put("device_code", deviceCode).toString(), auth = false) }
+                val tok = res.getOrNull()?.let { runCatching { JSONObject(it).optString("access_token") }.getOrNull() }
+                if (!tok.isNullOrEmpty()) {
+                    Prefs.of(ctx).edit().putString("rommToken", tok).apply()
+                    pending = null
+                    return@thread
+                }
+            }
+            if (pending === p) pending = null
+        }
+        return p
+    }
+
+    // ---------- library ----------
+
+    /** RomM platform slug -> ThorBro console id (folder name on the device) */
+    private val slugMap = mapOf("3ds" to "n3ds", "ngc" to "gc", "dc" to "dreamcast", "genesis" to "megadrive", "genesis-slash-megadrive" to "megadrive",
+        "sms" to "mastersystem", "tg16" to "pcengine", "turbografx16--1" to "pcengine", "ngpc" to "ngp", "neo-geo-pocket-color" to "ngp",
+        "wonderswan-color" to "wonderswan", "ps" to "psx", "playstation" to "psx")
+
+    fun systemFor(slug: String): String = slugMap[slug] ?: Roms.systems.firstOrNull { it.id == slug }?.id ?: slug
+
+    fun platforms(ctx: Context): JSONArray {
+        val arr = JSONArray(request(ctx, "GET", "/api/platforms"))
+        val out = JSONArray()
+        for (i in 0 until arr.length()) {
+            val p = arr.getJSONObject(i)
+            if (p.optInt("rom_count") == 0) continue
+            out.put(JSONObject().put("id", p.getInt("id")).put("name", p.optString("display_name").ifEmpty { p.optString("name") })
+                .put("slug", p.optString("fs_slug")).put("system", systemFor(p.optString("fs_slug"))).put("count", p.optInt("rom_count"))
+                .put("size", p.optLong("fs_size_bytes")))
+        }
+        return out
+    }
+
+    fun roms(ctx: Context, platformId: Int, search: String?): JSONObject {
+        val q = "platform_ids=$platformId&limit=500&order_by=name" + (search?.takeIf { it.isNotBlank() }?.let { "&search_term=" + URLEncoder.encode(it, "UTF-8") } ?: "")
+        val page = JSONObject(request(ctx, "GET", "/api/roms?$q"))
+        val items = page.optJSONArray("items") ?: JSONArray()
+        // which of them are already on the device (by file name in the console folder)
+        val local = Roms.scan(ctx, false).getJSONArray("systems").let { s ->
+            (0 until s.length()).flatMap { i -> s.getJSONObject(i).getJSONArray("roms").let { a -> (0 until a.length()).map { a.getJSONObject(it).getString("file") } } }.toSet()
+        }
+        val out = JSONArray()
+        for (i in 0 until items.length()) {
+            val r = items.getJSONObject(i)
+            out.put(JSONObject().put("id", r.getInt("id")).put("name", r.optString("name").ifEmpty { r.optString("fs_name_no_tags") })
+                .put("file", r.optString("fs_name")).put("size", r.optLong("fs_size_bytes")).put("multi", r.optBoolean("has_multiple_files"))
+                .put("summary", r.optString("summary")).put("hasCover", r.optString("path_cover_small").isNotEmpty())
+                .put("system", systemFor(r.optString("platform_fs_slug")))
+                .put("onDevice", r.optString("fs_name") in local))
+        }
+        return JSONObject().put("total", page.optInt("total", out.length())).put("items", out)
+    }
+
+    fun cover(ctx: Context, romId: Int): ByteArray? {
+        val r = JSONObject(request(ctx, "GET", "/api/roms/$romId/simple"))
+        val path = r.optString("path_cover_small").ifEmpty { r.optString("path_cover_large") }.ifEmpty { return null }
+        val c = open(ctx, "GET", if (path.startsWith("http")) path else "/assets/romm/resources/$path".replace("//", "/"))
+        return if (c.responseCode == 200) c.inputStream.use { it.readBytes() } else null
+    }
+
+    /** copies a game from RomM into <ROMs>/<console>/ ; multi-file games arrive as zip and get unpacked */
+    fun download(ctx: Context, romId: Int, romsRoot: File, job: Jobs.Job): JSONObject {
+        val r = JSONObject(request(ctx, "GET", "/api/roms/$romId/simple"))
+        val system = systemFor(r.optString("platform_fs_slug"))
+        val name = r.getString("fs_name")
+        val multi = r.optBoolean("has_multiple_files")
+        val dir = File(romsRoot, system).apply { mkdirs() }
+        val target = File(dir, if (multi) "$name.zip" else name)
+        val part = File(target.path + ".thorbro-part")
+        val total = r.optLong("fs_size_bytes")
+        val path = "/api/roms/$romId/content/" + URLEncoder.encode(target.name, "UTF-8").replace("+", "%20")
+        val c = open(ctx, "GET", path, rangeFrom = if (part.exists()) part.length() else 0)
+        if (c.responseCode !in listOf(200, 206)) error("RomM antwortet mit HTTP ${c.responseCode}")
+        val append = c.responseCode == 206
+        job.message = name
+        Transfers.begin(ctx)
+        try {
+            c.inputStream.use { inp ->
+                FileOutputStream(part, append).use { out ->
+                    val buf = ByteArray(1 shl 20)
+                    var done = if (append) part.length() else 0L
+                    while (true) {
+                        val n = inp.read(buf); if (n < 0) break
+                        out.write(buf, 0, n); done += n
+                        if (total > 0) job.progress = done.toDouble() / total * (if (multi) 0.9 else 1.0)
+                    }
+                }
+            }
+        } finally { Transfers.end() }
+        if (target.exists()) target.delete()
+        part.renameTo(target)
+        if (multi) {
+            job.message = "entpacke $name"
+            Archives.extract(target, File(dir, name), deleteAfter = true, job = job)
+        }
+        Roms.invalidate()
+        return JSONObject().put("path", if (multi) File(dir, name).path else target.path).put("system", system)
+    }
+
+    // ---------- HTTP ----------
+
+    private fun open(ctx: Context, method: String, path: String, body: String? = null, auth: Boolean = true, rangeFrom: Long = 0): HttpURLConnection {
+        val base = url(ctx).ifEmpty { error("Keine RomM-Adresse eingetragen") }
+        val c = URL(if (path.startsWith("http")) path else base + path).openConnection() as HttpURLConnection
+        c.requestMethod = method
+        c.connectTimeout = 10_000; c.readTimeout = 120_000
+        c.setRequestProperty("User-Agent", "ThorBro")
+        c.setRequestProperty("Accept", "application/json")
+        if (auth) token(ctx).takeIf { it.isNotEmpty() }?.let { c.setRequestProperty("Authorization", "Bearer $it") }
+        if (rangeFrom > 0) c.setRequestProperty("Range", "bytes=$rangeFrom-")
+        if (body != null) {
+            c.doOutput = true
+            c.setRequestProperty("Content-Type", "application/json")
+            c.outputStream.use { it.write(body.toByteArray()) }
+        }
+        return c
+    }
+
+    private fun request(ctx: Context, method: String, path: String, body: String? = null, auth: Boolean = true): String {
+        val c = open(ctx, method, path, body, auth)
+        val code = c.responseCode
+        val text = (if (code < 400) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() } ?: ""
+        if (code == 401) error("RomM: nicht angemeldet")
+        if (code >= 400) error("RomM HTTP $code: ${text.take(200)}")
+        return text
+    }
+}

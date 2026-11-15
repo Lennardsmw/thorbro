@@ -257,6 +257,46 @@ object Server {
                     json(res)
                 }
 
+                // ---- RomM library ----
+                get("/api/romm") {
+                    if (denied(ctx)) return@get
+                    json(Romm.status(ctx))
+                }
+                post("/api/romm/connect") {
+                    if (denied(ctx)) return@post
+                    val u = q("url") ?: return@post fail("url missing")
+                    json(withContext(Dispatchers.IO) { runCatching { Romm.connect(ctx, u) }.getOrElse { JSONObject().put("error", it.message) } })
+                }
+                post("/api/romm/disconnect") {
+                    if (denied(ctx)) return@post
+                    Romm.disconnect(ctx); json(Romm.status(ctx))
+                }
+                get("/api/romm/platforms") {
+                    if (denied(ctx)) return@get
+                    json(withContext(Dispatchers.IO) { runCatching { JSONObject().put("items", Romm.platforms(ctx)) }.getOrElse { JSONObject().put("error", it.message) } })
+                }
+                get("/api/romm/roms") {
+                    if (denied(ctx)) return@get
+                    val pid = q("platform")?.toIntOrNull() ?: return@get fail("platform missing")
+                    json(withContext(Dispatchers.IO) { runCatching { Romm.roms(ctx, pid, q("search")) }.getOrElse { JSONObject().put("error", it.message) } })
+                }
+                get("/api/romm/cover/{id}") {
+                    if (denied(ctx)) return@get
+                    val b = withContext(Dispatchers.IO) { runCatching { Romm.cover(ctx, call.parameters["id"]!!.toInt()) }.getOrNull() }
+                        ?: return@get fail("no cover", HttpStatusCode.NotFound)
+                    call.response.header(HttpHeaders.CacheControl, "max-age=86400")
+                    call.respondBytes(b, ContentType.Image.Any)
+                }
+                post("/api/romm/download") {
+                    if (denied(ctx)) return@post
+                    val id = q("id")?.toIntOrNull() ?: return@post fail("id missing")
+                    val root = q("root")?.let { Storage.resolve(it) }
+                        ?: Roms.scan(ctx, false).optJSONArray("romRoots")?.let { a -> (0 until a.length()).map { File(a.getString(it)) }.lastOrNull() }
+                        ?: File(Storage.primary, "ROMs")
+                    val j = Jobs.start("RomM-Download") { job -> Romm.download(ctx, id, root, job) }
+                    json(j.json())
+                }
+
                 // ---- background jobs ----
                 get("/api/jobs/{id}") {
                     if (denied(ctx)) return@get

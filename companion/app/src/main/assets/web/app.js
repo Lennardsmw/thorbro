@@ -35,6 +35,7 @@ function showTab(name) {
   if (name === 'roms' && !romData) loadRoms(false);
   if (name === 'apps') loadApps();
   if (name === 'saves') loadSaves();
+  if (name === 'library') loadLibrary();
   if (name === 'screen') screenStatus();
   if (name === 'files') loadFiles(currentDir);
   if (name === 'device') loadDevice();
@@ -744,6 +745,57 @@ $('#romDetail').onclick = async (e) => {
       dlg.close(); await loadRoms(true);
     }
   } catch (err) { alert(err.message); }
+};
+
+// ---------- RomM library ----------
+let rommPlatforms = [], rommPid = +store.get('rommPid', 0);
+async function loadLibrary() {
+  const { body: st } = await api('/api/romm');
+  $('#rommSetup').hidden = st.connected; $('#rommBrowse').hidden = !st.connected;
+  if (!st.connected) { $('#rommUrl').value = st.url || ''; if (st.pending) showRommCode(st.pending); return; }
+  const { body } = await api('/api/romm/platforms');
+  if (body.error) { $('#rommInfo').textContent = body.error; return; }
+  rommPlatforms = body.items;
+  if (!rommPlatforms.some((p) => p.id === rommPid)) rommPid = rommPlatforms[0]?.id || 0;
+  $('#rommInfo').textContent = `${st.url} · ${rommPlatforms.reduce((a, p) => a + p.count, 0)} Spiele`;
+  renderRommPlatforms(); loadRommRoms();
+}
+function renderRommPlatforms() {
+  $('#rommPlatforms').innerHTML = rommPlatforms.map((p) => `<button data-romm-pid="${p.id}" class="${p.id === rommPid ? 'active' : ''}">${sysIcon(p.system)}<span class="grow">${esc(p.name)}</span><span class="n">${p.count}</span></button>`).join('');
+}
+async function loadRommRoms() {
+  if (!rommPid) return;
+  $('#rommList').innerHTML = '<p class="muted">Lade …</p>';
+  const { body } = await api('/api/romm/roms?' + q({ platform: rommPid, search: $('#rommSearch').value }));
+  if (body.error) { $('#rommList').innerHTML = `<p class="err">${esc(body.error)}</p>`; return; }
+  const p = rommPlatforms.find((x) => x.id === rommPid);
+  $('#rommList').innerHTML = `<div class="romhead">${sysIcon(p.system, 'headicon')}<h2>${esc(p.name)}</h2><span class="muted">${body.total} Spiele · ${fmt(p.size)}</span></div>
+    <div class="covergrid">${body.items.map((r) => `<div class="romcard" title="${esc(r.file)}">
+      ${r.hasCover ? `<img class="cover" loading="lazy" alt="${esc(r.name)}" src="/api/romm/cover/${r.id}?${authQ()}">` : `<div class="cover nocover">${sysIcon(r.system, 'bigicon')}<span>${esc(r.name)}</span></div>`}
+      <div class="rtitle">${esc(r.name)}</div>
+      <div class="rbadges"><span class="muted">${fmt(r.size)}</span>${r.multi ? '<span class="badge">Ordner</span>' : ''}</div>
+      <div style="margin-top:6px">${r.onDevice ? '<span class="ok">✓ auf dem Thor</span>' : `<button class="primary" data-romm-get="${r.id}">Auf den Thor</button>`}</div>
+    </div>`).join('')}</div>`;
+}
+function showRommCode(p) {
+  $('#rommCode').innerHTML = `<p>Code: <strong style="font-size:22px;letter-spacing:2px">${esc(p.userCode)}</strong></p>
+    <p><a class="btn primary" href="${esc(p.verifyUrl)}" target="_blank" rel="noopener">In RomM bestätigen</a> <span class="muted">Danach verbindet sich ThorBro von selbst.</span></p>`;
+}
+$('#rommConnect').onclick = async () => {
+  const { body } = await api('/api/romm/connect?' + q({ url: $('#rommUrl').value }), { method: 'POST' });
+  if (body.error) return ($('#rommCode').innerHTML = `<p class="err">${esc(body.error)}</p>`);
+  showRommCode(body);
+  for (let i = 0; i < body.expiresIn; i += 3) { await sleep(3000); const { body: st } = await api('/api/romm'); if (st.connected) return loadLibrary(); }
+};
+$('#rommDisconnect').onclick = async () => { await api('/api/romm/disconnect', { method: 'POST' }); loadLibrary(); };
+$('#rommPlatforms').onclick = (e) => { const b = e.target.closest('[data-romm-pid]'); if (!b) return; rommPid = +b.dataset.rommPid; store.set('rommPid', rommPid); renderRommPlatforms(); loadRommRoms(); };
+let rommSearchT; $('#rommSearch').oninput = () => { clearTimeout(rommSearchT); rommSearchT = setTimeout(loadRommRoms, 300); };
+$('#rommList').onclick = async (e) => {
+  const id = e.target.dataset.rommGet; if (!id) return;
+  e.target.disabled = true;
+  const { body: job } = await api('/api/romm/download?' + q({ id }), { method: 'POST' });
+  const res = await waitJob(job.id, (j) => { e.target.textContent = `${Math.round(j.progress * 100)} %`; });
+  if (res.error) { e.target.textContent = 'Fehler'; alert(res.error); } else { e.target.outerHTML = '<span class="ok">✓ auf dem Thor</span>'; romData = null; }
 };
 
 // ---------- save backups ----------

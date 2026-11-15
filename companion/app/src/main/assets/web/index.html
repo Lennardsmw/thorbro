@@ -12,6 +12,7 @@
   <nav>
     <button data-tab="upload" class="active">Upload</button>
     <button data-tab="roms">ROMs</button>
+    <button data-tab="library">Bibliothek</button>
     <button data-tab="saves">Spielstände</button>
     <button data-tab="cleanup">Aufräumen</button>
     <button data-tab="screen">Bildschirm</button>
@@ -61,6 +62,23 @@
     <div class="roms">
       <aside id="sysList" class="syslist"></aside>
       <div id="romList"></div>
+    </div>
+  </section>
+
+  <section id="library" class="tab" hidden>
+    <div id="rommSetup" class="panel" hidden>
+      <h3>RomM-Server verbinden</h3>
+      <div class="sub">ThorBro holt Spiele aus deiner RomM-Bibliothek direkt auf den Thor. Adresse eingeben, dann den angezeigten Code in RomM bestätigen.</div>
+      <div class="row"><input id="rommUrl" placeholder="http://192.168.178.10:8080" style="flex:1"><button id="rommConnect" class="primary">Verbinden</button></div>
+      <div id="rommCode"></div>
+    </div>
+    <div id="rommBrowse" hidden>
+      <div class="row">
+        <input id="rommSearch" placeholder="In der Bibliothek suchen">
+        <span id="rommInfo" class="muted grow"></span>
+        <button id="rommDisconnect">Trennen</button>
+      </div>
+      <div class="roms"><aside id="rommPlatforms" class="syslist"></aside><div id="rommList"></div></div>
     </div>
   </section>
 
