@@ -61,7 +61,7 @@ class ThorService : Service() {
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CHANNEL, "ThorBro server", NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(
-            this, 0, Intent(this, AppActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+            this, 0, Intent(this, wtf.lennard.thorbro.ui.ThorActivity::class.java), PendingIntent.FLAG_IMMUTABLE
         )
         val n = Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_sys_upload_done)

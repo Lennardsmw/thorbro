@@ -1,0 +1,220 @@
+package wtf.lennard.thorbro.ui
+
+import android.Manifest
+import android.annotation.SuppressLint
+import android.app.Activity
+import android.bluetooth.BluetoothClass
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.os.Build
+import android.provider.Settings
+import android.view.InputDevice
+import android.view.KeyEvent
+import android.view.MotionEvent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
+
+/** Live state of connected gamepads, fed by ThorActivity's key and motion events. */
+object Pads {
+    class Pad(val id: Int, val name: String, val battery: String)
+    val pads = mutableStateListOf<Pad>()
+    val pressed = mutableStateMapOf<Int, Boolean>()
+    var lx by mutableFloatStateOf(0f); var ly by mutableFloatStateOf(0f)
+    var rx by mutableFloatStateOf(0f); var ry by mutableFloatStateOf(0f)
+    var lt by mutableFloatStateOf(0f); var rt by mutableFloatStateOf(0f)
+    var lastFrom by mutableStateOf("")
+
+    private fun isPad(d: InputDevice?) = d != null && !d.isVirtual &&
+        (d.sources and InputDevice.SOURCE_GAMEPAD == InputDevice.SOURCE_GAMEPAD || d.sources and InputDevice.SOURCE_JOYSTICK == InputDevice.SOURCE_JOYSTICK)
+
+    fun refresh(ctx: Context) {
+        pads.clear()
+        val devs: List<InputDevice> = InputDevice.getDeviceIds().toList().mapNotNull { id: Int -> InputDevice.getDevice(id) }
+        devs.filter { isPad(it) }.distinctBy { it.descriptor }.forEach { d: InputDevice ->
+            val bat = if (Build.VERSION.SDK_INT >= 31) d.batteryState.let { b -> if (b.isPresent) "${(b.capacity * 100).toInt()} %" else "" } else ""
+            pads += Pad(d.id, d.name, bat)
+        }
+    }
+
+    fun onKey(e: KeyEvent) {
+        if (!isPad(e.device)) return
+        pressed[e.keyCode] = e.action == KeyEvent.ACTION_DOWN
+        lastFrom = e.device?.name ?: ""
+    }
+
+    fun onMotion(e: MotionEvent) {
+        lx = e.getAxisValue(MotionEvent.AXIS_X); ly = e.getAxisValue(MotionEvent.AXIS_Y)
+        rx = e.getAxisValue(MotionEvent.AXIS_Z); ry = e.getAxisValue(MotionEvent.AXIS_RZ)
+        lt = maxOf(e.getAxisValue(MotionEvent.AXIS_LTRIGGER), e.getAxisValue(MotionEvent.AXIS_BRAKE))
+        rt = maxOf(e.getAxisValue(MotionEvent.AXIS_RTRIGGER), e.getAxisValue(MotionEvent.AXIS_GAS))
+        // the d-pad of many pads comes as hat axes
+        pressed[KeyEvent.KEYCODE_DPAD_LEFT] = e.getAxisValue(MotionEvent.AXIS_HAT_X) < -0.5f
+        pressed[KeyEvent.KEYCODE_DPAD_RIGHT] = e.getAxisValue(MotionEvent.AXIS_HAT_X) > 0.5f
+        pressed[KeyEvent.KEYCODE_DPAD_UP] = e.getAxisValue(MotionEvent.AXIS_HAT_Y) < -0.5f
+        pressed[KeyEvent.KEYCODE_DPAD_DOWN] = e.getAxisValue(MotionEvent.AXIS_HAT_Y) > 0.5f
+        lastFrom = e.device?.name ?: ""
+    }
+}
+
+private val buttons = listOf(
+    KeyEvent.KEYCODE_BUTTON_A to "A", KeyEvent.KEYCODE_BUTTON_B to "B", KeyEvent.KEYCODE_BUTTON_X to "X", KeyEvent.KEYCODE_BUTTON_Y to "Y",
+    KeyEvent.KEYCODE_BUTTON_L1 to "L1", KeyEvent.KEYCODE_BUTTON_R1 to "R1", KeyEvent.KEYCODE_BUTTON_L2 to "L2", KeyEvent.KEYCODE_BUTTON_R2 to "R2",
+    KeyEvent.KEYCODE_BUTTON_THUMBL to "L3", KeyEvent.KEYCODE_BUTTON_THUMBR to "R3", KeyEvent.KEYCODE_BUTTON_START to "Start",
+    KeyEvent.KEYCODE_BUTTON_SELECT to "Select", KeyEvent.KEYCODE_BUTTON_MODE to "Home",
+    KeyEvent.KEYCODE_DPAD_UP to "↑", KeyEvent.KEYCODE_DPAD_DOWN to "↓", KeyEvent.KEYCODE_DPAD_LEFT to "←", KeyEvent.KEYCODE_DPAD_RIGHT to "→",
+)
+
+@SuppressLint("MissingPermission")
+@Composable
+fun ControllerScreen() {
+    val ctx = LocalContext.current
+    var tick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) { while (true) { Pads.refresh(ctx); delay(2000); tick++ } }
+
+    val bt = remember { ctx.getSystemService(BluetoothManager::class.java)?.adapter }
+    val needPerms = Build.VERSION.SDK_INT >= 31 &&
+        (ctx.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED ||
+            ctx.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED)
+    val found = remember { mutableStateListOf<BluetoothDevice>() }
+    var scanning by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf("") }
+
+    DisposableEffect(Unit) {
+        val r = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                when (i.action) {
+                    BluetoothDevice.ACTION_FOUND -> {
+                        @Suppress("DEPRECATION") val d = i.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+                        val major = d.bluetoothClass?.majorDeviceClass
+                        if ((major == BluetoothClass.Device.Major.PERIPHERAL || d.name?.contains(Regex("(?i)controller|pad|xbox|dualsense|wireless|8bitdo|joy")) == true)
+                            && found.none { it.address == d.address } && d.bondState != BluetoothDevice.BOND_BONDED) found += d
+                    }
+                    BluetoothDevice.ACTION_BOND_STATE_CHANGED -> { note = "Kopplung: " + when (i.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, 0)) {
+                        BluetoothDevice.BOND_BONDED -> "verbunden ✓"; BluetoothDevice.BOND_BONDING -> "läuft …"; else -> "abgebrochen" }; tick++ }
+                    android.bluetooth.BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> scanning = false
+                }
+            }
+        }
+        val f = IntentFilter().apply {
+            addAction(BluetoothDevice.ACTION_FOUND); addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+            addAction(android.bluetooth.BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
+        }
+        if (Build.VERSION.SDK_INT >= 33) ctx.registerReceiver(r, f, Context.RECEIVER_EXPORTED) else ctx.registerReceiver(r, f)
+        onDispose { runCatching { ctx.unregisterReceiver(r) }; runCatching { if (!needPerms) bt?.cancelDiscovery() } }
+    }
+
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item { Title("Controller") }
+        item {
+            FocusCard(Modifier.fillMaxWidth()) {
+                Label("Verbunden")
+                if (Pads.pads.isEmpty()) Line("Kein externer Controller verbunden (die Thor-Tasten zählen mit).", Muted)
+                Pads.pads.forEach { p -> Row(verticalAlignment = Alignment.CenterVertically) { StatusDot(true); Big(p.name); if (p.battery.isNotEmpty()) Line("  ·  Akku ${p.battery}", Muted) } }
+            }
+        }
+        item {
+            FocusCard(Modifier.fillMaxWidth()) {
+                Label("Tastentest – einfach drücken" + if (Pads.lastFrom.isNotEmpty()) " · ${Pads.lastFrom}" else "")
+                Spacer(Modifier.height(8.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    buttons.forEach { (code, label) ->
+                        val on = Pads.pressed[code] == true
+                        Box(Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) Accent else Bg).padding(horizontal = 12.dp, vertical = 8.dp)) {
+                            Text(label, fontSize = 15.sp)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Stick("Linker Stick", Pads.lx, Pads.ly); Stick("Rechter Stick", Pads.rx, Pads.ry)
+                    Column { Trigger("L2", Pads.lt); Spacer(Modifier.height(6.dp)); Trigger("R2", Pads.rt) }
+                }
+            }
+        }
+        item {
+            FocusCard(Modifier.fillMaxWidth()) {
+                Label("Neuen Controller koppeln")
+                Line("Controller in den Kopplungsmodus versetzen (z. B. Share+PS, Sync-Taste, Start+Y), dann suchen.", Muted)
+                Acts {
+                    if (needPerms) Act("Bluetooth erlauben", primary = true) {
+                        (ctx as? Activity)?.requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT), 7)
+                    } else Act(if (scanning) "Suche läuft …" else "Suchen", primary = true, enabled = bt != null && !scanning) {
+                        found.clear(); scanning = bt?.startDiscovery() == true; note = if (scanning) "" else "Bluetooth ist aus?"
+                    }
+                    Act("Bluetooth-Einstellungen") { ctx.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
+                    if (note.isNotEmpty()) Text(note, color = Muted)
+                }
+                found.forEach { d ->
+                    FocusCard(Modifier.fillMaxWidth().padding(top = 8.dp), onClick = { runCatching { bt?.cancelDiscovery(); d.createBond() }; note = "Kopplung: läuft …" }) {
+                        Row(verticalAlignment = Alignment.CenterVertically) { Big(d.name ?: d.address); Spacer(Modifier.weight(1f)); Line("A = koppeln", Accent) }
+                    }
+                }
+            }
+        }
+        item {
+            FocusCard(Modifier.fillMaxWidth()) {
+                Label("In den Emulatoren")
+                Line("RetroArch erkennt bekannte Controller automatisch. Eden, Azahar, Dolphin, PPSSPP, melonDS und NetherSX2 nehmen jeden " +
+                    "verbundenen Controller als Eingabe; die Tastenbelegung legst du einmal im Emulator fest.", Muted)
+            }
+        }
+    }
+}
+
+@Composable
+private fun Stick(label: String, x: Float, y: Float) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.size(80.dp).clip(CircleShape).background(Bg), contentAlignment = Alignment.Center) {
+            Box(Modifier.offset((x * 30).dp, (y * 30).dp).size(18.dp).clip(CircleShape).background(Accent))
+        }
+        Label(label)
+    }
+}
+
+@Composable
+private fun Trigger(label: String, v: Float) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.width(28.dp))
+        Box(Modifier.width(120.dp).height(10.dp).clip(RoundedCornerShape(5.dp)).background(Bg)) {
+            Box(Modifier.width((120 * v.coerceIn(0f, 1f)).dp).height(10.dp).background(Accent))
+        }
+    }
+}
