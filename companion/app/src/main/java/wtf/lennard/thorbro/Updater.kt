@@ -72,7 +72,10 @@ object Updater {
         val r = object : Runnable {
             override fun run() {
                 if (auto(ctx)) thread(name = "thorbro-update") { runCatching { update(ctx) } }
-                if (Saves.auto(ctx)) thread(name = "thorbro-saves") { runCatching { Saves.backup(ctx, null) } }
+                if (Saves.auto(ctx)) thread(name = "thorbro-saves") {
+                    runCatching { Saves.backup(ctx, null) }
+                    if (RommSync.auto(ctx) && Romm.status(ctx).optBoolean("connected")) runCatching { RommSync.syncSaves(ctx, null) }
+                }
                 handler.postDelayed(this, EVERY)
             }
         }

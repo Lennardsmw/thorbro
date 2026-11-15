@@ -37,6 +37,7 @@ class ThorService : Service() {
             thread(name = "thorbro-server") { s.start(wait = false) }
             announce()
             Updater.startSchedule(applicationContext)
+            SaveWatcher.start(applicationContext)
             running = true
         }
         return START_STICKY
@@ -45,6 +46,7 @@ class ThorService : Service() {
     override fun onDestroy() {
         running = false
         Updater.stopSchedule()
+        SaveWatcher.stop()
         nsdListener?.let { runCatching { getSystemService(NsdManager::class.java).unregisterService(it) } }
         nsdListener = null
         val s = server
@@ -59,7 +61,7 @@ class ThorService : Service() {
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CHANNEL, "ThorBro server", NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+            this, 0, Intent(this, AppActivity::class.java), PendingIntent.FLAG_IMMUTABLE
         )
         val n = Notification.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_sys_upload_done)

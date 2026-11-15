@@ -297,6 +297,23 @@ object Server {
                     json(j.json())
                 }
 
+                get("/api/romm/sync") {
+                    if (denied(ctx)) return@get
+                    json(withContext(Dispatchers.IO) { runCatching { RommSync.plan(ctx) }.getOrElse { JSONObject().put("error", it.message) } })
+                }
+                post("/api/romm/sync") {
+                    if (denied(ctx)) return@post
+                    val systems = (q("systems") ?: "").split(',').filter { it.isNotBlank() }.toSet()
+                    val withSaves = q("saves") != "0"
+                    val j = Jobs.start("RomM-Abgleich") { job -> RommSync.run(ctx, systems, withSaves, job) }
+                    json(j.json())
+                }
+                post("/api/romm/sync/config") {
+                    if (denied(ctx)) return@post
+                    q("auto")?.let { RommSync.setAuto(ctx, it == "1") }
+                    json(JSONObject().put("auto", RommSync.auto(ctx)))
+                }
+
                 // ---- background jobs ----
                 get("/api/jobs/{id}") {
                     if (denied(ctx)) return@get

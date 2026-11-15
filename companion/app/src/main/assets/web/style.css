@@ -124,3 +124,11 @@ table.meta td:first-child { white-space: nowrap; width: 1%; }
 #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); background: var(--text); color: var(--bg);
          padding: 8px 14px; border-radius: 8px; opacity: 0; transition: all .2s; pointer-events: none; z-index: 10; }
 #toast.show { opacity: 1; transform: translateX(-50%); }
+
+/* inside the app on the Thor: bigger targets, clear focus for the d-pad */
+.in-app body { font-size: 17px; }
+.in-app button, .in-app .btn, .in-app select, .in-app input { min-height: 40px; }
+.in-app nav { overflow-x: auto; }
+.in-app nav button { padding: 8px 14px; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.romcard:focus-within { border-color: var(--accent); }

@@ -17,7 +17,9 @@ import kotlin.concurrent.thread
  * Sign-in uses RomM's device flow: ThorBro shows a code, the user approves it in RomM's web UI.
  */
 object Romm {
-    private val scopes = listOf("me.read", "platforms.read", "roms.read", "assets.read", "assets.write", "firmware.read")
+    private val scopes = listOf("me.read", "platforms.read", "platforms.write", "roms.read", "roms.write", "assets.read", "assets.write", "firmware.read")
+
+    fun hasScope(ctx: Context, scope: String) = (Prefs.of(ctx).getString("rommScopes", "") ?: "").split(' ').contains(scope)
 
     fun url(ctx: Context) = (Prefs.of(ctx).getString("rommUrl", "") ?: "").trimEnd('/')
     private fun token(ctx: Context) = Prefs.of(ctx).getString("rommToken", "") ?: ""
@@ -27,7 +29,7 @@ object Romm {
     @Volatile private var pending: JSONObject? = null
 
     fun status(ctx: Context): JSONObject = JSONObject().put("url", url(ctx)).put("connected", token(ctx).isNotEmpty())
-        .put("pending", pending)
+        .put("pending", pending).put("canWrite", hasScope(ctx, "roms.write"))
 
     fun disconnect(ctx: Context) { Prefs.of(ctx).edit().remove("rommToken").apply(); pending = null }
 
@@ -55,9 +57,12 @@ object Romm {
             while (System.currentTimeMillis() < until && pending === p) {
                 Thread.sleep(interval)
                 val res = runCatching { request(ctx, "POST", "/api/auth/device/token", JSONObject().put("device_code", deviceCode).toString(), auth = false) }
-                val tok = res.getOrNull()?.let { runCatching { JSONObject(it).optString("access_token") }.getOrNull() }
+                val json = res.getOrNull()?.let { runCatching { JSONObject(it) }.getOrNull() }
+                val tok = json?.optString("access_token")
                 if (!tok.isNullOrEmpty()) {
-                    Prefs.of(ctx).edit().putString("rommToken", tok).apply()
+                    val granted = json.optJSONArray("scopes")?.let { a -> (0 until a.length()).joinToString(" ") { a.getString(it) } } ?: ""
+                    Prefs.of(ctx).edit().putString("rommToken", tok).putString("rommScopes", granted)
+                        .putString("rommDeviceId", json.optString("device_id")).apply()
                     pending = null
                     return@thread
                 }
@@ -155,9 +160,66 @@ object Romm {
         return JSONObject().put("path", if (multi) File(dir, name).path else target.path).put("system", system)
     }
 
+    // ---------- raw API for syncing ----------
+
+    fun rawPlatforms(ctx: Context): List<JSONObject> = JSONArray(request(ctx, "GET", "/api/platforms")).let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
+
+    fun rawRoms(ctx: Context, platformId: Int): List<JSONObject> {
+        val out = mutableListOf<JSONObject>()
+        var offset = 0
+        while (true) {
+            val page = JSONObject(request(ctx, "GET", "/api/roms?platform_ids=$platformId&limit=500&offset=$offset"))
+            val items = page.optJSONArray("items") ?: break
+            for (i in 0 until items.length()) out += items.getJSONObject(i)
+            offset += items.length()
+            if (items.length() == 0 || offset >= page.optInt("total", offset)) break
+        }
+        return out
+    }
+
+    fun createPlatform(ctx: Context, slug: String): Int =
+        JSONObject(request(ctx, "POST", "/api/platforms", JSONObject().put("fs_slug", slug).toString())).getInt("id")
+
+    fun uploadStart(ctx: Context, platformId: Int, name: String, size: Long, chunks: Int): String {
+        val c = open(ctx, "POST", "/api/roms/upload/start", headers = mapOf(
+            "x-upload-platform" to "$platformId", "x-upload-filename" to name,
+            "x-upload-total-size" to "$size", "x-upload-total-chunks" to "$chunks"))
+        val j = JSONObject(read(c))
+        return j.optString("upload_id").ifEmpty { j.optString("id") }.ifEmpty { error("RomM: keine upload_id") }
+    }
+
+    fun uploadChunk(ctx: Context, uploadId: String, index: Int, data: ByteArray, len: Int) {
+        val c = open(ctx, "PUT", "/api/roms/upload/$uploadId", headers = mapOf("x-chunk-index" to "$index"), raw = data, rawLen = len)
+        read(c)
+    }
+
+    fun uploadComplete(ctx: Context, uploadId: String) { read(open(ctx, "POST", "/api/roms/upload/$uploadId/complete")) }
+
+    fun uploadSave(ctx: Context, romId: Int, f: File, emulator: String, contentHash: String) {
+        val boundary = "thorbro" + System.currentTimeMillis()
+        val head = "--$boundary\r\nContent-Disposition: form-data; name=\"saveFile\"; filename=\"${f.name.replace("\"", "")}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+        val tail = "\r\n--$boundary--\r\n"
+        val q = "rom_id=$romId&emulator=${URLEncoder.encode(emulator, "UTF-8")}&overwrite=true&content_hash=$contentHash" +
+            (Prefs.of(ctx).getString("rommDeviceId", null)?.let { "&device_id=$it" } ?: "")
+        val c = open(ctx, "POST", "/api/saves?$q", headers = mapOf("Content-Type" to "multipart/form-data; boundary=$boundary"))
+        c.doOutput = true
+        c.setFixedLengthStreamingMode(head.toByteArray().size + f.length() + tail.toByteArray().size)
+        c.outputStream.use { o -> o.write(head.toByteArray()); f.inputStream().use { it.copyTo(o) }; o.write(tail.toByteArray()) }
+        read(c)
+    }
+
+    private fun read(c: HttpURLConnection): String {
+        val code = c.responseCode
+        val text = (if (code < 400) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() } ?: ""
+        if (code == 401 || code == 403) error("RomM: keine Berechtigung (neu koppeln?) ${text.take(120)}")
+        if (code >= 400) error("RomM HTTP $code: ${text.take(200)}")
+        return text
+    }
+
     // ---------- HTTP ----------
 
-    private fun open(ctx: Context, method: String, path: String, body: String? = null, auth: Boolean = true, rangeFrom: Long = 0): HttpURLConnection {
+    private fun open(ctx: Context, method: String, path: String, body: String? = null, auth: Boolean = true, rangeFrom: Long = 0,
+                     headers: Map<String, String> = emptyMap(), raw: ByteArray? = null, rawLen: Int = 0): HttpURLConnection {
         val base = url(ctx).ifEmpty { error("Keine RomM-Adresse eingetragen") }
         val c = URL(if (path.startsWith("http")) path else base + path).openConnection() as HttpURLConnection
         c.requestMethod = method
@@ -166,6 +228,13 @@ object Romm {
         c.setRequestProperty("Accept", "application/json")
         if (auth) token(ctx).takeIf { it.isNotEmpty() }?.let { c.setRequestProperty("Authorization", "Bearer $it") }
         if (rangeFrom > 0) c.setRequestProperty("Range", "bytes=$rangeFrom-")
+        headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
+        if (raw != null) {
+            c.doOutput = true
+            c.setRequestProperty("Content-Type", "application/octet-stream")
+            c.setFixedLengthStreamingMode(rawLen)
+            c.outputStream.use { it.write(raw, 0, rawLen) }
+        }
         if (body != null) {
             c.doOutput = true
             c.setRequestProperty("Content-Type", "application/json")

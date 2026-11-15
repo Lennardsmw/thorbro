@@ -6,6 +6,19 @@ const store = {
   set(k, v) { try { localStorage.setItem('thorbro.' + k, v); } catch {} },
 };
 let token = store.get('token', '');
+// opened inside the ThorBro app on the device: token comes with the URL
+const urlParams = new URLSearchParams(location.search);
+const IN_APP = urlParams.get('app') === '1';
+if (urlParams.get('token')) { token = urlParams.get('token'); store.set('token', token); }
+if (IN_APP) { document.documentElement.classList.add('in-app'); history.replaceState(null, '', '/?app=1'); }
+// gamepad B / back: close a dialog, then go to the previous tab
+const tabHistory = [];
+window.thorbroBack = () => {
+  const d = document.querySelector('dialog[open]');
+  if (d) { d.close(); return true; }
+  if (tabHistory.length > 1) { tabHistory.pop(); showTab(tabHistory.pop()); return true; }
+  return false;
+};
 
 // ---------- API ----------
 class AuthError extends Error {}
@@ -32,6 +45,7 @@ function showTab(name) {
   document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
   $('#login').hidden = true;
   store.set('tab', name);
+  if (tabHistory[tabHistory.length - 1] !== name) tabHistory.push(name);
   if (name === 'roms' && !romData) loadRoms(false);
   if (name === 'apps') loadApps();
   if (name === 'saves') loadSaves();
@@ -80,6 +94,7 @@ async function loadDevice() {
         <input id="updFeed" style="width:100%">
         <label class="btn" style="margin-top:6px">APK von diesem Gerät installieren<input id="selfApk" type="file" accept=".apk" hidden></label>
       </details></div>
+    ${IN_APP ? '<div class="card"><h3>App</h3><button onclick="ThorBroApp.openSettings()">Einstellungen und Berechtigungen</button></div>' : ''}
     <div class="card"><h3>RetroAchievements</h3>
       <div class="muted" id="raState"></div>
       <input id="raUser" placeholder="Benutzername" style="width:100%;margin-top:6px">
@@ -568,7 +583,7 @@ function romCard(r, sysId) {
     !sw.base ? '<span class="badge warnbadge">Basisspiel fehlt</span>' : '',
     sw.oldUpdates.length ? `<span class="badge warnbadge">${sw.oldUpdates.length} alte Updates</span>` : '',
   ].join('') : '';
-  return `<div class="romcard" data-rom="${esc(r.path)}" data-sys="${esc(sysId)}" title="${esc(r.file)}">
+  return `<div class="romcard" tabindex="0" data-rom="${esc(r.path)}" data-sys="${esc(sysId)}" title="${esc(r.file)}">
     ${canPlay && (!sw || sw.base) ? `<button class="playbtn primary" data-play="${esc(r.path)}" data-play-sys="${esc(sysId)}">▶ Spielen</button>` : ''}
     ${cover}
     <div class="rtitle">${m.favorite ? '<span class="fav">★</span> ' : ''}${esc(title)}</div>
@@ -758,8 +773,34 @@ async function loadLibrary() {
   rommPlatforms = body.items;
   if (!rommPlatforms.some((p) => p.id === rommPid)) rommPid = rommPlatforms[0]?.id || 0;
   $('#rommInfo').textContent = `${st.url} · ${rommPlatforms.reduce((a, p) => a + p.count, 0)} Spiele`;
-  renderRommPlatforms(); loadRommRoms();
+  renderRommPlatforms(); loadRommRoms(); loadSyncPlan();
 }
+async function loadSyncPlan() {
+  const { body: p } = await api('/api/romm/sync');
+  if (p.error) { $('#syncBody').textContent = p.error; return; }
+  const missing = p.systems.filter((s) => s.missing > 0);
+  $('#syncSummary').textContent = `· ${missing.reduce((a, s) => a + s.missing, 0)} Spiele fehlen in RomM · ${p.saves} Spielstände erkannt`;
+  $('#syncBody').innerHTML = `
+    <label style="display:block;margin-bottom:6px"><input id="syncAuto" type="checkbox" ${p.auto ? 'checked' : ''}> Spielstände automatisch hochladen, sobald ein Spiel speichert (nur im WLAN)</label>
+    <div class="muted">Status: ${esc(p.watcher?.state || '–')}${p.watcher?.at ? ' · ' + new Date(p.watcher.at).toLocaleTimeString() : ''} · ${p.wifi ? 'WLAN verbunden' : 'kein WLAN'} · ${p.savesPending} Spielstände noch nicht hochgeladen</div>
+    ${p.canWrite ? '' : '<p class="err">Für das Hochladen von Spielen braucht ThorBro Schreibrechte in RomM. <button id="rommRepair">Neu koppeln</button></p>'}
+    <h4 style="margin:12px 0 4px">Spiele, die RomM noch nicht hat</h4>
+    ${missing.length ? missing.map((s) => `<label style="display:block"><input type="checkbox" data-sync-sys="${s.system}"> ${esc((romData?.systems.find((x) => x.id === s.system) || {}).name || s.system)}: ${s.missing} Spiele, ${fmt(s.missingSize)}</label>`).join('') : '<span class="ok">✓ RomM hat alle Spiele vom Thor</span>'}
+    <div class="row"><button id="syncRun" class="primary">Jetzt abgleichen</button><span id="syncState" class="muted"></span></div>`;
+}
+document.addEventListener('change', (e) => { if (e.target.id === 'syncAuto') api('/api/romm/sync/config?' + q({ auto: e.target.checked ? 1 : 0 }), { method: 'POST' }); });
+document.addEventListener('click', async (e) => {
+  if (e.target.id === 'rommRepair') { $('#rommSetup').hidden = false; $('#rommConnect').click(); }
+  if (e.target.id !== 'syncRun') return;
+  const systems = [...document.querySelectorAll('[data-sync-sys]:checked')].map((x) => x.dataset.syncSys).join(',');
+  e.target.disabled = true;
+  const { body: job } = await api('/api/romm/sync?' + q({ systems, saves: 1 }), { method: 'POST' });
+  const res = await waitJob(job.id, (j) => { $('#syncState').textContent = `${Math.round(j.progress * 100)} % · ${j.message}`; });
+  e.target.disabled = false;
+  $('#syncState').textContent = res.error ? 'Fehler: ' + res.error
+    : `${res.result.romsUploaded} Spiele, ${res.result.savesUploaded} Spielstände hochgeladen${res.result.errors.length ? ' · ' + res.result.errors.length + ' Fehler: ' + res.result.errors.slice(0, 2).join('; ') : ''}`;
+  loadRommRoms();
+});
 function renderRommPlatforms() {
   $('#rommPlatforms').innerHTML = rommPlatforms.map((p) => `<button data-romm-pid="${p.id}" class="${p.id === rommPid ? 'active' : ''}">${sysIcon(p.system)}<span class="grow">${esc(p.name)}</span><span class="n">${p.count}</span></button>`).join('');
 }
@@ -969,3 +1010,8 @@ async function start() {
 }
 window.addEventListener('beforeunload', (e) => { if (running) e.preventDefault(); });
 start();
+
+// gamepad A / Enter on a focused card opens it
+document.addEventListener('keydown', (e) => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.classList?.contains('romcard')) { e.preventDefault(); e.target.click(); }
+});
