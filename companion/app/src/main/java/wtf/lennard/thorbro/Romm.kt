@@ -195,17 +195,18 @@ object Romm {
 
     fun uploadComplete(ctx: Context, uploadId: String) { read(open(ctx, "POST", "/api/roms/upload/$uploadId/complete")) }
 
-    fun uploadSave(ctx: Context, romId: Int, f: File, emulator: String, contentHash: String) {
+    /** returns RomM's save object (id, updated_at …) */
+    fun uploadSave(ctx: Context, romId: Int, f: File, emulator: String, contentHash: String): JSONObject {
         val boundary = "thorbro" + System.currentTimeMillis()
         val head = "--$boundary\r\nContent-Disposition: form-data; name=\"saveFile\"; filename=\"${f.name.replace("\"", "")}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
         val tail = "\r\n--$boundary--\r\n"
-        val q = "rom_id=$romId&emulator=${URLEncoder.encode(emulator, "UTF-8")}&overwrite=true&content_hash=$contentHash" +
-            (Prefs.of(ctx).getString("rommDeviceId", null)?.let { "&device_id=$it" } ?: "")
+        // no device_id: RomM would then also require the devices.write scope
+        val q = "rom_id=$romId&emulator=${URLEncoder.encode(emulator, "UTF-8")}&overwrite=true&content_hash=$contentHash"
         val c = open(ctx, "POST", "/api/saves?$q", headers = mapOf("Content-Type" to "multipart/form-data; boundary=$boundary"))
         c.doOutput = true
         c.setFixedLengthStreamingMode(head.toByteArray().size + f.length() + tail.toByteArray().size)
         c.outputStream.use { o -> o.write(head.toByteArray()); f.inputStream().use { it.copyTo(o) }; o.write(tail.toByteArray()) }
-        read(c)
+        return JSONObject(read(c))
     }
 
     fun listSaves(ctx: Context, romId: Int): List<JSONObject> =

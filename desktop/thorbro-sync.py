@@ -146,31 +146,37 @@ def sync():
         saves = json.loads(api(c, "GET", f"/api/saves?rom_id={rom}"))
         newest = max(saves, key=lambda s: s.get("updated_at") or "", default=None)
         local_hash = folder_hash(d)
-        if newest and newest.get("content_hash") == local_hash:
+        state = c.setdefault("state", {}).setdefault(it["name"], {})
+        remote_key = f"{newest['id']}@{newest['updated_at']}" if newest else None
+        local_changed = local_hash != state.get("local")
+        remote_changed = remote_key is not None and remote_key != state.get("remote")
+        if not local_changed and not remote_changed:
             print(it["name"] + ": aktuell"); continue
-        remote_t = 0
-        if newest:
-            t = newest["updated_at"]
-            dt = datetime.fromisoformat(t.replace("Z", "+00:00"))
+        download = remote_changed and not local_changed
+        if remote_changed and local_changed:  # both changed (or first run): the newer one wins
+            dt = datetime.fromisoformat(newest["updated_at"].replace("Z", "+00:00"))
             remote_t = (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).timestamp()
-        local_t = newest_mtime(d)
-        if newest and remote_t > local_t + 30:
+            download = remote_t > newest_mtime(d) + 30
+        if download:
             if running(it.get("process")):
                 print(it["name"] + ": neuerer Stand in RomM, aber das Spiel läuft – später"); continue
             os.makedirs(BACKUPS, exist_ok=True)
             with open(os.path.join(BACKUPS, time.strftime("%Y%m%d-%H%M%S") + "-" + it["name"] + ".zip"), "wb") as f:
                 f.write(zip_folder(d))
             unzip_stripped(api(c, "GET", f"/api/saves/{newest['id']}/content"), d)
+            state["local"] = folder_hash(d); state["remote"] = remote_key
             print(it["name"] + ": neuerer Stand aus RomM geholt (alter Stand gesichert)")
         else:
             boundary = "thorbro%d" % time.time()
             name = os.path.basename(d.rstrip("/")) + ".zip"
             body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"saveFile\"; filename=\"{name}\"\r\n"
                     "Content-Type: application/octet-stream\r\n\r\n").encode() + zip_folder(d) + f"\r\n--{boundary}--\r\n".encode()
-            q = urllib.parse.urlencode({"rom_id": rom, "emulator": it["platform"], "overwrite": "true", "content_hash": local_hash,
-                                        **({"device_id": c["device_id"]} if c.get("device_id") else {})})
-            api(c, "POST", "/api/saves?" + q, raw=body, headers={"Content-Type": "multipart/form-data; boundary=" + boundary})
+            # no device_id: RomM would then also require the devices.write scope
+            q = urllib.parse.urlencode({"rom_id": rom, "emulator": it["platform"], "overwrite": "true"})
+            res = json.loads(api(c, "POST", "/api/saves?" + q, raw=body, headers={"Content-Type": "multipart/form-data; boundary=" + boundary}))
+            state["local"] = local_hash; state["remote"] = f"{res['id']}@{res['updated_at']}"
             print(it["name"] + ": hochgeladen")
+        save(c)
 
 
 def install():
