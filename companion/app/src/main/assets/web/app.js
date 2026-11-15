@@ -82,8 +82,26 @@ async function loadDevice() {
       ${perm(p.allFiles, 'Zugriff auf alle Dateien')}${perm(p.overlay, 'Apps fernstarten')}${perm(p.install, 'APKs installieren')}
       ${p.allFiles && p.overlay && p.install ? '' : '<p class="muted">Fehlende Rechte in der ThorBro-App auf dem Thor erteilen.</p>'}</div>`;
   loadUpdateConfig();
+  loadStorage(false);
   fillVolumes();
 }
+
+// ---------- storage overview ----------
+async function loadStorage(refresh) {
+  const el = $('#storageView'); if (!el) return;
+  el.innerHTML = '<p class="muted">Berechne Speicherbelegung …</p>';
+  const { body } = await api('/api/storage' + (refresh ? '?refresh=1' : ''));
+  const bar = (part, total) => `<div class="bar"><div style="width:${Math.max(1, Math.round(part / total * 100))}%"></div></div>`;
+  el.innerHTML = body.volumes.map((v) => {
+    const used = v.total - v.free;
+    return `<div class="panel"><div class="row" style="margin:0"><h3 class="grow">${esc(v.label)}</h3><span class="muted">${fmt(v.free)} frei von ${fmt(v.total)}</span></div>
+      ${bar(used, v.total)}
+      ${v.systems.length ? `<table class="meta" style="margin-top:8px">${v.systems.map((s) => `<tr><td>${esc(s.name)}</td><td style="width:50%">${bar(s.size, used)}</td><td class="muted" style="text-align:right">${fmt(s.size)}</td></tr>`).join('')}</table>` : ''}
+      ${v.folders.length ? `<details style="margin-top:6px"><summary class="muted">Größte Ordner</summary><table class="meta">${v.folders.map((f) => `<tr><td>${esc(f.name)}</td><td class="muted" style="text-align:right">${fmt(f.size)}</td></tr>`).join('')}</table></details>` : ''}
+    </div>`;
+  }).join('') + `<button id="storageRefresh">Neu berechnen</button>`;
+}
+document.addEventListener('click', (e) => { if (e.target.id === 'storageRefresh') loadStorage(true); });
 
 // ---------- self-update ----------
 async function loadUpdateConfig() {
@@ -168,6 +186,9 @@ const SYSTEMS = {
 const EXT_TO_SYS = {};
 Object.entries(SYSTEMS).forEach(([s, exts]) => exts.forEach((e) => (EXT_TO_SYS[e] = s)));
 const ext = (n) => (n.includes('.') ? n.split('.').pop().toLowerCase() : '');
+const isArchiveName = (n) => ['zip', '7z'].includes(ext(n));
+// RetroArch cores read these zipped; everything else is unpacked by default
+const KEEP_ZIPPED = new Set(['nes', 'snes', 'gb', 'gbc', 'gba', 'megadrive', 'mastersystem', 'gamegear', 'pcengine', 'atari2600', 'lynx', 'ngp', 'wonderswan', 'arcade', 'n64']);
 const APK_DIR = '/storage/emulated/0/Download/ThorBro';
 
 $('#romRoot').value = store.get('romRoot', '') || '/storage/emulated/0/ROMs';
@@ -190,6 +211,7 @@ function enqueue(name, files, isFolder) {
     id: Math.random().toString(36).slice(2), name, files, isFolder, isApk,
     system: isApk ? 'apk' : guessSystem(files),
     total: files.reduce((a, f) => a + f.file.size, 0),
+    extract: !isFolder && isArchiveName(name) && !KEEP_ZIPPED.has(guessSystem(files)),
     sent: 0, state: 'wartet', error: '', paused: false,
   });
   renderQueue();
@@ -212,7 +234,8 @@ function renderQueue() {
     const btn = it.state === 'läuft' ? `<button data-pause="${it.id}">Pause</button>`
       : it.state === 'pausiert' || it.state === 'fehler' ? `<button data-resume="${it.id}">Weiter</button>` : '';
     const rm = it.state !== 'läuft' ? `<button data-rm="${it.id}">✕</button>` : '';
-    return `<li class="${cls}"><div class="qhead"><span class="qname">${it.isFolder ? '📁 ' : ''}${esc(it.name)}</span>${sys}${btn}${rm}</div>
+    const ex = isArchiveName(it.name) && !it.isFolder ? `<label class="muted"><input type="checkbox" data-extract="${it.id}" ${it.extract ? 'checked' : ''} ${it.state !== 'wartet' ? 'disabled' : ''}> entpacken</label>` : '';
+    return `<li class="${cls}"><div class="qhead"><span class="qname">${it.isFolder ? '📁 ' : ''}${esc(it.name)}</span>${sys}${ex}${btn}${rm}</div>
       <div class="qmeta">${it.files.length > 1 ? it.files.length + ' Dateien · ' : ''}${fmt(it.sent)} / ${fmt(it.total)} · ${esc(it.state)}${it.speed ? ' · ' + fmt(it.speed) + '/s' : ''}${it.eta ? ' · noch ' + it.eta : ''}
       → ${esc(targetDir(it))}${it.error ? '<br>' + esc(it.error) : ''}</div>
       <div class="bar"><div style="width:${pct}%"></div></div></li>`;
@@ -226,6 +249,7 @@ $('#queue').onclick = (e) => {
   if (t.dataset.rm) { queue.splice(queue.findIndex((x) => x.id === t.dataset.rm), 1); renderQueue(); }
 };
 $('#queue').onchange = (e) => {
+  if (e.target.dataset.extract) { queue.find((x) => x.id === e.target.dataset.extract).extract = e.target.checked; return; }
   if (e.target.dataset.sys) { queue.find((x) => x.id === e.target.dataset.sys).system = e.target.value; renderQueue(); }
 };
 $('#startAll').onclick = () => runQueue();
@@ -234,7 +258,55 @@ $('#clearDone').onclick = () => { for (let i = queue.length - 1; i >= 0; i--) if
 class Paused extends Error {}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+const PARALLEL = 3;
 async function uploadOne(item, file, dest, before) {
+  const probe = (await api('/api/upload?' + q({ path: dest, size: file.size }))).body;
+  // old servers or a sequential upload already in progress: keep the sequential path
+  if (!probe.parallel || (probe.offset > 0 && !probe.chunks.length) || file.size <= CHUNK) return uploadSeq(item, file, dest, before);
+  if (probe.exists && !$('#overwrite').checked) {
+    if (probe.existingSize === file.size) return 'skipped';
+    throw new Error(`${dest} gibt es schon (andere Größe). "Überschreiben" aktivieren.`);
+  }
+  const have = new Set(probe.chunks);
+  const todo = [];
+  for (let off = 0; off < file.size; off += CHUNK) if (!have.has(off)) todo.push(off);
+  const doneBytes = () => [...have].reduce((a, o) => a + Math.min(CHUNK, file.size - o), 0);
+  if (probe.free >= 0 && probe.free < file.size - doneBytes()) throw new Error(`Nicht genug Speicher (${fmt(probe.free)} frei)`);
+  const t0 = performance.now(), start = doneBytes();
+  const worker = async () => {
+    while (todo.length) {
+      if (item.paused) throw new Paused();
+      const off = todo.shift();
+      for (let tries = 0; ; tries++) {
+        try {
+          await api('/api/upload?' + q({ path: dest, offset: off, pos: 1 }), {
+            method: 'PUT', body: file.slice(off, off + CHUNK), headers: { 'Content-Type': 'application/octet-stream' },
+          });
+          break;
+        } catch (err) {
+          if (err instanceof AuthError || tries >= 5) throw err;
+          item.state = `Verbindung weg, neuer Versuch ${tries + 1}/6`; renderQueue();
+          await sleep(1000 * (tries + 1));
+        }
+      }
+      have.add(off);
+      item.state = 'läuft';
+      item.sent = before + doneBytes();
+      const secs = (performance.now() - t0) / 1000;
+      if (secs > 1) {
+        item.speed = (doneBytes() - start) / secs;
+        const left = (item.total - item.sent) / item.speed;
+        item.eta = left > 90 ? Math.round(left / 60) + ' min' : Math.round(left) + ' s';
+      }
+      renderQueue();
+    }
+  };
+  await Promise.all(Array.from({ length: PARALLEL }, worker));
+  await api('/api/upload/finish?' + q({ path: dest, size: file.size, overwrite: $('#overwrite').checked ? 1 : 0 }), { method: 'POST' });
+  return 'ok';
+}
+
+async function uploadSeq(item, file, dest, before) {
   let { body: st } = await api('/api/upload?' + q({ path: dest, size: file.size }));
   if (st.exists && !$('#overwrite').checked) {
     if (st.existingSize === file.size) return 'skipped';
@@ -285,6 +357,13 @@ async function runQueue() {
           before += f.file.size;
           item.sent = before;
         }
+        if (item.extract) {
+          item.state = 'entpacke auf dem Thor …'; renderQueue();
+          const { body: job } = await api('/api/extract?' + q({ path: `${dir}/${item.name}`, dest: dir, delete: 1 }), { method: 'POST' });
+          const res = await waitJob(job.id, (j) => { item.state = `entpacke ${Math.round(j.progress * 100)} %`; renderQueue(); });
+          if (res.error) throw new Error('Entpacken: ' + res.error);
+          romData = null;
+        }
         if (item.isApk) {
           item.state = 'installiere (auf dem Thor bestätigen)'; renderQueue();
           const { body } = await api('/api/install?' + q({ path: `${dir}/${item.name}` }), { method: 'POST' });
@@ -303,6 +382,15 @@ async function runQueue() {
       renderQueue();
     }
   } finally { running = false; }
+}
+
+async function waitJob(id, onTick) {
+  for (;;) {
+    await sleep(1000);
+    const { body } = await api('/api/jobs/' + id);
+    if (onTick) onTick(body);
+    if (body.done) return body;
+  }
 }
 
 async function waitInstall(session) {
@@ -527,6 +615,12 @@ function openRom(path, sysId) {
 $('#romFilter').oninput = renderRoms;
 $('#romRegion').onchange = renderRoms;
 $('#romsRescan').onclick = () => loadRoms(true);
+$('#romsExport').onclick = async () => {
+  if (!confirm('Cover und Infos im ES-DE-Format nach /storage/emulated/0/ES-DE schreiben?\nES-DE liest das direkt, iiSU über „ES-DE-Metadaten verknüpfen“. Vorhandene ES-DE-Einträge bleiben erhalten.')) return;
+  const { body: job } = await api('/api/export/esde', { method: 'POST' });
+  const res = await waitJob(job.id, (j) => toast(`Export ${Math.round(j.progress * 100)} % · ${j.message}`));
+  alert(res.error ? 'Fehler: ' + res.error : `Export fertig: ${res.result.games} Spiele, ${res.result.images} Bilder nach ${res.result.dest}`);
+};
 $('#sysList').onclick = (e) => {
   const b = e.target.closest('[data-sys-pick]');
   if (!b) return;
@@ -655,8 +749,8 @@ $('#cleanScan').onclick = async () => {
         ${d.files.map((f) => `<label><input type="checkbox" data-clean="${esc(f.path)}" ${f.keep ? 'disabled' : f.identical ? 'checked' : ''}>
           ${esc(f.file)} <span class="muted">${fmt(f.size)}${f.keep ? ' · wird behalten' : f.identical ? ' · identisch' : ' · andere Version'}</span></label>`).join('')}</div>`).join('')}`
       : '<span class="ok">✓ keine Duplikate</span>'}</div>
-    <div class="panel"><h3>Veraltete Switch-Updates</h3>
-      ${c.oldUpdates.length ? `<div class="sub">Es gibt eine neuere Version desselben Updates.</div>${c.oldUpdates.map((u) => `<div class="dupe"><label><input type="checkbox" data-clean="${esc(u.path)}" checked> ${esc(u.file)} <span class="muted">${fmt(u.size)}</span></label></div>`).join('')}`
+    <div class="panel"><h3>Veraltete oder doppelte Switch-Updates</h3>
+      ${c.oldUpdates.length ? `<div class="sub">Es gibt eine neuere Version desselben Updates.</div>${c.oldUpdates.map((u) => `<div class="dupe"><label><input type="checkbox" data-clean="${esc(u.path)}" checked> ${esc(u.file)} <span class="muted">${fmt(u.size)} · ${u.reason === 'doppelt' ? 'gleiche Version doppelt' : 'neuere Version vorhanden'}</span></label></div>`).join('')}`
       : '<span class="ok">✓ keine</span>'}</div>
     ${dupFiles.length + c.oldUpdates.length ? '<div class="row"><button id="cleanSelected" class="primary">Ausgewählte löschen</button><span id="cleanSel" class="muted"></span></div>' : ''}`;
   updateCleanSel();
@@ -729,7 +823,8 @@ async function loadFiles(path) {
     const full = currentDir + '/' + e.name;
     const name = e.dir ? `<a class="dir" data-dir="${esc(full)}">📁 ${esc(e.name)}</a>`
       : `<a href="/api/files/raw?${q({ path: full, token })}">${esc(e.name)}</a>`;
-    const install = !e.dir && ext(e.name) === 'apk' ? `<button data-install="${esc(full)}">Installieren</button> ` : '';
+    const install = !e.dir && ext(e.name) === 'apk' ? `<button data-install="${esc(full)}">Installieren</button> `
+      : !e.dir && isArchiveName(e.name) ? `<button data-unpack="${esc(full)}">Entpacken</button> ` : '';
     return `<tr><td>${name}</td><td class="size">${e.dir ? '' : fmt(e.size)}</td><td class="acts">${install}<button data-del="${esc(full)}">Löschen</button></td></tr>`;
   }).join('');
 }
@@ -739,6 +834,13 @@ document.addEventListener('click', async (e) => {
     if (t.dataset.dir) { e.preventDefault(); await loadFiles(t.dataset.dir); }
     if (t.dataset.del && confirm(`${t.dataset.del} löschen?`)) {
       await api('/api/files?' + q({ path: t.dataset.del }), { method: 'DELETE' }); await loadFiles(currentDir);
+    }
+    if (t.dataset.unpack) {
+      const { body: job } = await api('/api/extract?' + q({ path: t.dataset.unpack }), { method: 'POST' });
+      toast('Entpacke …');
+      const res = await waitJob(job.id, (j) => toast(`Entpacke ${Math.round(j.progress * 100)} %`));
+      toast(res.error ? 'Fehler: ' + res.error : `${res.result.files} Dateien entpackt`);
+      loadFiles(currentDir);
     }
     if (t.dataset.install) {
       const { body } = await api('/api/install?' + q({ path: t.dataset.install }), { method: 'POST' });

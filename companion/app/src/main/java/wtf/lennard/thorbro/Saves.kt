@@ -27,7 +27,8 @@ object Saves {
 
     fun locations(ctx: Context): List<Location> {
         val out = mutableListOf<Location>()
-        fun add(l: Location) { if (l.dir.isDirectory && l.dir.canRead() && out.none { it.dir.path == l.dir.path && it.filter == l.filter }) out += l }
+        // SD cards (FAT/exFAT) ignore case: "Saves" and "saves" are the same folder there
+        fun add(l: Location) { if (l.dir.isDirectory && l.dir.canRead() && out.none { it.dir.path.equals(l.dir.path, true) && it.filter == l.filter }) out += l }
         val vols = Cocoon.roots(ctx).map { it.parentFile!! }.toMutableSet().apply { add(Storage.primary) }
             .plus(ctx.getSystemService(android.os.storage.StorageManager::class.java).storageVolumes.mapNotNull { it.directory })
             .toSet()

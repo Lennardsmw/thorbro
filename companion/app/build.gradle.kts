@@ -12,8 +12,8 @@ android {
         applicationId = "wtf.lennard.thorbro"
         minSdk = 30
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.5.0"
+        versionCode = 6
+        versionName = "0.6.0"
     }
 
     buildTypes {
@@ -41,4 +41,6 @@ dependencies {
     implementation("io.ktor:ktor-server-cio:$ktor")
     implementation("io.ktor:ktor-server-cors:$ktor")
     implementation("org.slf4j:slf4j-nop:2.0.17")
+    implementation("org.apache.commons:commons-compress:1.28.0")
+    implementation("org.tukaani:xz:1.12")
 }

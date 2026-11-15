@@ -35,6 +35,7 @@ import java.io.FileOutputStream
  */
 object Server {
     private const val PART = ".thorbro-part"
+    private const val CHUNKS = ".thorbro-part.chunks"
 
     fun create(ctx: Context, port: Int): EmbeddedServer<*, *> =
         embeddedServer(CIO, port = port, host = "0.0.0.0") {
@@ -184,6 +185,31 @@ object Server {
                     json(withContext(Dispatchers.IO) { Cleanup.removeJunk(ctx) })
                 }
 
+                // ---- background jobs ----
+                get("/api/jobs/{id}") {
+                    if (denied(ctx)) return@get
+                    val j = call.parameters["id"]?.toIntOrNull()?.let { Jobs.get(it) } ?: return@get fail("unknown job", HttpStatusCode.NotFound)
+                    json(j.json())
+                }
+                post("/api/extract") {
+                    if (denied(ctx)) return@post
+                    val a = Storage.resolve(q("path")) ?: return@post fail("path not allowed")
+                    if (!a.isFile || !Archives.isArchive(a)) return@post fail("keine .zip/.7z-Datei")
+                    val dest = Storage.resolve(q("dest") ?: a.parent) ?: return@post fail("dest not allowed")
+                    val j = Jobs.start("Entpacken ${a.name}") { job -> Archives.extract(a, dest, q("delete") == "1", job) }
+                    json(j.json())
+                }
+                get("/api/storage") {
+                    if (denied(ctx)) return@get
+                    json(withContext(Dispatchers.IO) { StorageView.overview(ctx, q("refresh") == "1") })
+                }
+                post("/api/export/esde") {
+                    if (denied(ctx)) return@post
+                    val dest = Storage.resolve(q("dest") ?: EsDe.defaultDest) ?: return@post fail("dest not allowed")
+                    val j = Jobs.start("ES-DE-Export") { job -> EsDe.export(ctx, dest, job) }
+                    json(j.json())
+                }
+
                 // ---- files ----
                 get("/api/files") {
                     if (denied(ctx)) return@get
@@ -230,8 +256,11 @@ object Server {
                     if (denied(ctx)) return@get
                     val f = Storage.resolve(q("path")) ?: return@get fail("path not allowed")
                     val part = File(f.path + PART)
+                    val chunks = File(f.path + CHUNKS)
                     json(JSONObject()
-                        .put("offset", if (part.exists()) part.length() else 0L)
+                        .put("offset", if (part.exists() && !chunks.exists()) part.length() else if (chunks.exists()) 0L else 0L)
+                        .put("parallel", true)
+                        .put("chunks", org.json.JSONArray(if (chunks.exists()) chunks.readLines().filter { it.isNotBlank() }.map { it.substringBefore(' ').toLong() } else emptyList()))
                         .put("exists", f.exists())
                         .put("existingSize", if (f.isFile) f.length() else 0L)
                         .put("free", Storage.free(f)))
@@ -242,6 +271,25 @@ object Server {
                     val offset = q("offset")?.toLongOrNull() ?: 0L
                     val part = File(f.path + PART)
                     f.parentFile?.mkdirs()
+                    if (q("pos") == "1") {
+                        // parallel mode: chunks arrive in any order and are written at their position
+                        Transfers.begin(ctx)
+                        val n = try {
+                            withContext(Dispatchers.IO) {
+                                java.io.RandomAccessFile(part, "rw").use { raf ->
+                                    raf.seek(offset)
+                                    val buf = ByteArray(1 shl 20)
+                                    var total = 0L
+                                    call.receiveChannel().toInputStream().use { inp ->
+                                        while (true) { val r = inp.read(buf); if (r < 0) break; raf.write(buf, 0, r); total += r }
+                                    }
+                                    total
+                                }
+                            }
+                        } finally { Transfers.end() }
+                        synchronized(Server) { File(f.path + CHUNKS).appendText("$offset $n\n") }
+                        return@put json(JSONObject().put("ok", true).put("written", n))
+                    }
                     val current = if (part.exists()) part.length() else 0L
                     if (offset != current) {
                         return@put json(JSONObject().put("offset", current), HttpStatusCode.Conflict)
@@ -264,6 +312,14 @@ object Server {
                     val size = q("size")?.toLongOrNull() ?: return@post fail("size missing")
                     val part = File(f.path + PART)
                     if (!part.exists() && size == 0L) part.createNewFile()
+                    val chunks = File(f.path + CHUNKS)
+                    if (chunks.exists()) {
+                        val covered = chunks.readLines().filter { it.isNotBlank() }.map { it.split(' ') }
+                            .associate { it[0].toLong() to it[1].toLong() }.values.sum()
+                        if (covered != size) return@post json(JSONObject().put("error", "missing chunks").put("covered", covered), HttpStatusCode.Conflict)
+                        java.io.RandomAccessFile(part, "rw").use { it.setLength(size) }
+                        chunks.delete()
+                    }
                     if (part.length() != size) {
                         return@post json(JSONObject().put("error", "size mismatch").put("offset", part.length()), HttpStatusCode.Conflict)
                     }

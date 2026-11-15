@@ -61,7 +61,12 @@ object Cleanup {
                 // several updates for one game: all but the newest are outdated
                 roms.filter { it.optString("switchKind") == "update" }.groupBy { it.optString("baseId") }.values
                     .filter { it.size > 1 }
-                    .forEach { ups -> ups.sortedByDescending { it.optLong("version") }.drop(1).forEach { oldUpdates.put(it) } }
+                    .forEach { ups ->
+                        val sorted = ups.sortedWith(compareByDescending<JSONObject> { it.optLong("version") }.thenBy { if (it.getString("ext") == "nsp") 0 else 1 })
+                        sorted.drop(1).forEach { u ->
+                            oldUpdates.put(JSONObject(u.toString()).put("reason", if (u.optLong("version") == sorted[0].optLong("version")) "doppelt" else "veraltet"))
+                        }
+                    }
                 continue
             }
             roms.groupBy { Media.titleKey(it.getString("name")) + "|" + it.getString("ext") + "|" + Media.tags(it.getString("name")).filter { t -> t in regionish }.sorted() }
