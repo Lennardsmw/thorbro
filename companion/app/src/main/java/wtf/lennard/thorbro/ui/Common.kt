@@ -39,11 +39,39 @@ val Muted = Color(0xFF9097A5)
 val Ok = Color(0xFF4CC27F)
 val Bad = Color(0xFFFF6B57)
 
-@Composable
-fun ThorTheme(content: @Composable () -> Unit) = MaterialTheme(
-    colorScheme = darkColorScheme(primary = Accent, background = Bg, surface = Panel, onPrimary = Color.White),
-    content = content,
+@OptIn(androidx.compose.ui.text.ExperimentalTextApi::class)
+private fun nunito(w: Int) = androidx.compose.ui.text.font.Font(
+    wtf.lennard.thorbro.R.font.nunito, FontWeight(w),
+    variationSettings = androidx.compose.ui.text.font.FontVariation.Settings(androidx.compose.ui.text.font.FontVariation.weight(w)),
 )
+
+/** rounded console-style font (Nunito, OFL) */
+val Nunito = androidx.compose.ui.text.font.FontFamily(nunito(400), nunito(600), nunito(700), nunito(800))
+
+@Composable
+fun ThorTheme(content: @Composable () -> Unit) {
+    val base = androidx.compose.material3.Typography()
+    fun androidx.compose.ui.text.TextStyle.n() = copy(fontFamily = Nunito)
+    val type = androidx.compose.material3.Typography(
+        displayLarge = base.displayLarge.n(), displayMedium = base.displayMedium.n(), displaySmall = base.displaySmall.n(),
+        headlineLarge = base.headlineLarge.n(), headlineMedium = base.headlineMedium.n(), headlineSmall = base.headlineSmall.n(),
+        titleLarge = base.titleLarge.n(), titleMedium = base.titleMedium.n(), titleSmall = base.titleSmall.n(),
+        bodyLarge = base.bodyLarge.n(), bodyMedium = base.bodyMedium.n(), bodySmall = base.bodySmall.n(),
+        labelLarge = base.labelLarge.n().copy(fontWeight = FontWeight.Bold), labelMedium = base.labelMedium.n(), labelSmall = base.labelSmall.n(),
+    )
+    MaterialTheme(
+        colorScheme = darkColorScheme(primary = Accent, background = Bg, surface = Panel, onPrimary = Color.White,
+            onBackground = Color.White, onSurface = Color.White),
+        typography = type,
+    ) {
+        // text outside a Surface would otherwise be black on the dark background
+        androidx.compose.runtime.CompositionLocalProvider(
+            androidx.compose.material3.LocalContentColor provides Color.White,
+            androidx.compose.material3.LocalTextStyle provides type.bodyLarge.copy(color = Color.White),
+            content = content,
+        )
+    }
+}
 
 /** A panel that shows a clear frame when the gamepad focus is on it (or on something inside). */
 @Composable

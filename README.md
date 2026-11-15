@@ -57,3 +57,5 @@ Pfade sind auf den internen Speicher und SD-Karten beschränkt.
   (zuerst aus Cocoon, sonst aus libretro-thumbnails und libretro-database)
 - Apps starten und deinstallieren, Dateibrowser
 - Selbst-Update aus GitHub-Releases, optional automatisch
+
+Schrift in der App: [Nunito](https://github.com/googlefonts/nunito) (SIL Open Font License 1.1).
