@@ -160,12 +160,28 @@ private fun SyncScreen() {
                     Spacer(Modifier.padding(6.dp)); Line("Spielstände automatisch hochladen, sobald ein Spiel speichert (nur WLAN)")
                 }
                 Acts {
-                    Act("Spielstände jetzt hochladen", primary = true, enabled = busy.isEmpty() && st.optBoolean("connected")) {
-                        busy = "lädt hoch …"
+                    Act("Spielstände synchronisieren", primary = true, enabled = busy.isEmpty() && st.optBoolean("connected")) {
+                        busy = "synchronisiert …"
                         scope.launch {
                             val r = withContext(Dispatchers.IO) { runCatching { RommSync.syncSaves(ctx, null) }.getOrElse { JSONObject().put("error", it.message) } }
+                            val d = withContext(Dispatchers.IO) { runCatching { RommSync.pullSaves(ctx) }.getOrElse { JSONObject().put("error", it.message) } }
                             busy = ""; SaveWatcherNote.last = if (r.has("error")) "Fehler: ${r.optString("error")}"
-                                else "${r.optInt("uploaded")} hochgeladen, ${r.optInt("skippedNoGame")} ohne Spiel in RomM"
+                                else "${r.optInt("uploaded")} hochgeladen, ${d.optInt("downloaded")} heruntergeladen" +
+                                    (if (r.optInt("skippedNoGame") > 0) ", ${r.optInt("skippedNoGame")} warten auf ihr Spiel in RomM" else "")
+                        }
+                    }
+                    Act("Alle Spiele zu RomM hochladen", enabled = busy.isEmpty() && st.optBoolean("connected")) {
+                        busy = "prüft …"
+                        scope.launch {
+                            val systems = withContext(Dispatchers.IO) {
+                                runCatching { RommSync.plan(ctx).getJSONArray("systems").let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
+                                    .filter { it.getInt("missing") > 0 }.map { it.getString("system") }.toSet() }.getOrDefault(emptySet())
+                            }
+                            if (systems.isEmpty()) { busy = ""; SaveWatcherNote.last = "RomM hat schon alle Spiele"; return@launch }
+                            val job = wtf.lennard.thorbro.Jobs.start("RomM-Abgleich") { j -> RommSync.run(ctx, systems, true, j) }
+                            while (!job.done) { busy = "Spiele hochladen: ${(job.progress * 100).toInt()} % · ${job.message}"; delay(1000) }
+                            busy = ""; SaveWatcherNote.last = job.error?.let { "Fehler: $it" }
+                                ?: job.result?.let { "${it.optInt("romsUploaded")} Spiele, ${it.optInt("savesUploaded")} Spielstände hochgeladen" } ?: ""
                         }
                     }
                     Text(busy.ifEmpty { SaveWatcherNote.last }, color = Muted)

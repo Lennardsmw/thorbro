@@ -24,11 +24,12 @@ object Players {
     @Volatile var lastApply: String = ""
         private set
 
-    class Pad(val id: Int, val name: String, val descriptor: String, val builtIn: Boolean)
+    /** [number] is Android's controller (player) number, which Dolphin uses in "Android/<number>/<name>" */
+    class Pad(val id: Int, val name: String, val descriptor: String, val builtIn: Boolean, val number: Int)
 
     fun pads(): List<Pad> = InputDevice.getDeviceIds().toList().mapNotNull { id: Int -> InputDevice.getDevice(id) }
         .filter { d -> !d.isVirtual && (d.sources and InputDevice.SOURCE_GAMEPAD == InputDevice.SOURCE_GAMEPAD) }
-        .map { d -> Pad(d.id, d.name, d.descriptor, !d.isExternal) }
+        .map { d -> Pad(d.id, d.name, d.descriptor, !d.isExternal, d.controllerNumber) }
 
     private fun slots(ctx: Context): JSONObject = runCatching { JSONObject(Prefs.of(ctx).getString("players", "{}")!!) }.getOrDefault(JSONObject())
 
@@ -54,10 +55,10 @@ object Players {
         val arr = JSONArray()
         assigned(ctx).forEachIndexed { i, a ->
             val live = a?.let { x -> connected.firstOrNull { it.descriptor == x.optString("descriptor") } }
-            arr.put(JSONObject().put("slot", i + 1).put("name", a?.optString("name")).put("connected", live != null).put("androidId", live?.id))
+            arr.put(JSONObject().put("slot", i + 1).put("name", a?.optString("name")).put("connected", live != null).put("number", live?.number))
         }
         return JSONObject().put("players", arr).put("lastApply", lastApply)
-            .put("pads", JSONArray(connected.map { JSONObject().put("id", it.id).put("name", it.name).put("builtIn", it.builtIn) }))
+            .put("pads", JSONArray(connected.map { JSONObject().put("id", it.id).put("name", it.name).put("builtIn", it.builtIn).put("number", it.number) }))
     }
 
     // ---------- writing emulator settings ----------
@@ -98,7 +99,8 @@ object Players {
             if (pad == null) return@forEachIndexed
             val name = "$prefix${i + 1}"
             val lines = sections.getOrPut(name) { mutableListOf() }
-            val dev = "Device = Android/${pad.id}/${pad.name}"
+            if (pad.number <= 0) return@forEachIndexed // not a numbered gamepad: leave Dolphin's entry alone
+            val dev = "Device = Android/${pad.number}/${pad.name}"
             val idx = lines.indexOfFirst { it.startsWith("Device") }
             if (idx >= 0) { if (lines[idx] != dev) { lines[idx] = dev; changed = true } } else { lines.add(0, dev); changed = true }
             if (lines.none { it.startsWith("Buttons/") } && template.isNotEmpty()) { lines.addAll(template); changed = true }

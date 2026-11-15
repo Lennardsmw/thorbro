@@ -38,8 +38,17 @@ object SaveWatcher {
             var known = runCatching { stamps(ctx) }.getOrDefault(emptyMap())
             var pending = false
             last = JSONObject().put("state", "beobachtet ${known.size} Spielstände")
+            var rounds = 0
             while (running) {
                 Thread.sleep(CHECK_MS)
+                // every 5 minutes: fetch saves made on other devices (e.g. the Mac)
+                if (++rounds % 10 == 0 && RommSync.auto(ctx) && onWifi(ctx) && Romm.status(ctx).optBoolean("connected")) {
+                    val r = runCatching { RommSync.pullSaves(ctx) }.getOrNull()
+                    if (r != null && r.optInt("downloaded") > 0) {
+                        last = JSONObject().put("at", System.currentTimeMillis()).put("state", "${r.optInt("downloaded")} Spielstand/-stände von RomM geholt")
+                        known = runCatching { stamps(ctx) }.getOrDefault(known)
+                    }
+                }
                 val now = runCatching { stamps(ctx) }.getOrNull() ?: continue
                 val changed = now != known
                 known = now

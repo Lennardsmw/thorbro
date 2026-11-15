@@ -152,6 +152,56 @@ object RommSync {
         return JSONObject().put("uploaded", n).put("skippedNoGame", skipped).put("errors", errors)
     }
 
+    /**
+     * Fetches newer saves from RomM (e.g. played on the Mac) for folder saves (ports/recomps, Switch).
+     * Newest wins: when RomM has a different save that is newer than the local files, the local state is
+     * backed up first and the RomM one is unpacked into the save folder (and its ".work" twin if present).
+     */
+    @Synchronized
+    fun pullSaves(ctx: Context): JSONObject {
+        val (bySlug, remoteFiles) = remote(ctx)
+        val up = uploaded(ctx)
+        var n = 0; val errors = JSONArray()
+        for (s in localSaves(ctx).filter { it.isFolder }) {
+            val romId = bySlug[slugFor(s.system)]?.let { remoteFiles[it]?.get(s.rom.getString("file")) } ?: continue
+            try {
+                val newest = Romm.listSaves(ctx, romId).maxByOrNull { it.optString("updated_at") } ?: continue
+                val localHash = md5(s.file)
+                if (newest.optString("content_hash") == localHash) continue
+                val remoteTime = runCatching { java.time.OffsetDateTime.parse(newest.getString("updated_at")).toInstant().toEpochMilli() }
+                    .getOrElse { java.time.LocalDateTime.parse(newest.getString("updated_at").take(19)).toInstant(java.time.ZoneOffset.UTC).toEpochMilli() }
+                val localTime = s.file.walkTopDown().filter { it.isFile }.maxOfOrNull { it.lastModified() } ?: 0L
+                if (remoteTime <= localTime + 30_000) continue // local is newer: the upload side handles it
+                val zip = File(ctx.cacheDir, "romm-save-${newest.getInt("id")}.zip")
+                Romm.downloadSave(ctx, newest.getInt("id"), zip)
+                runCatching { Saves.backup(ctx, null, force = true, label = "vor-romm") }
+                val targets = listOf(s.file) + listOf(File(s.file.path + ".work")).filter { it.isDirectory }
+                targets.forEach { unzipStripped(zip, it) }
+                zip.delete()
+                up.put(s.file.path, "${s.file.length()}|${s.file.lastModified()}")
+                n++
+            } catch (e: Exception) { errors.put("${s.file.name}: ${e.message}") }
+        }
+        uploadedFile(ctx).writeText(up.toString())
+        return JSONObject().put("downloaded", n).put("errors", errors)
+    }
+
+    /** unpacks a save zip whose entries sit in one top folder ("<folder>/slot_00/...") into [dir] */
+    private fun unzipStripped(zip: File, dir: File) {
+        val base = dir.canonicalPath
+        java.util.zip.ZipInputStream(zip.inputStream().buffered()).use { z ->
+            while (true) {
+                val e = z.nextEntry ?: break
+                val rel = e.name.substringAfter('/', e.name)
+                if (rel.isEmpty() || e.isDirectory) continue
+                val t = File(dir, rel).canonicalFile
+                if (!t.path.startsWith("$base/")) continue
+                t.parentFile?.mkdirs()
+                t.outputStream().use { z.copyTo(it) }
+            }
+        }
+    }
+
     private fun upload(ctx: Context, platformId: Int, name: String, f: File, progress: (Long) -> Unit) {
         val chunks = ((f.length() + CHUNK - 1) / CHUNK).toInt().coerceAtLeast(1)
         val id = Romm.uploadStart(ctx, platformId, name, f.length(), chunks)

@@ -208,6 +208,15 @@ object Romm {
         read(c)
     }
 
+    fun listSaves(ctx: Context, romId: Int): List<JSONObject> =
+        JSONArray(request(ctx, "GET", "/api/saves?rom_id=$romId")).let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
+
+    fun downloadSave(ctx: Context, saveId: Int, target: File) {
+        val c = open(ctx, "GET", "/api/saves/$saveId/content")
+        if (c.responseCode != 200) error("RomM HTTP ${c.responseCode} beim Herunterladen")
+        c.inputStream.use { i -> target.outputStream().use { i.copyTo(it) } }
+    }
+
     private fun read(c: HttpURLConnection): String {
         val code = c.responseCode
         val text = (if (code < 400) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() } ?: ""
