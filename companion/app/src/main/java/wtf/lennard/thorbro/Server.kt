@@ -267,6 +267,13 @@ object Server {
                     val u = q("url") ?: return@post fail("url missing")
                     json(withContext(Dispatchers.IO) { runCatching { Romm.connect(ctx, u) }.getOrElse { JSONObject().put("error", it.message) } })
                 }
+                // change the server address but keep the sign-in (e.g. NetBird instead of the public domain)
+                post("/api/romm/url") {
+                    if (denied(ctx)) return@post
+                    val u = q("url")?.trim()?.trimEnd('/') ?: return@post fail("url missing")
+                    Prefs.of(ctx).edit().putString("rommUrl", u).apply()
+                    json(Romm.status(ctx))
+                }
                 post("/api/romm/disconnect") {
                     if (denied(ctx)) return@post
                     Romm.disconnect(ctx); json(Romm.status(ctx))
