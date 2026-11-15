@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ThorBro</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <strong class="logo">ThorBro</strong>
+  <nav>
+    <button data-tab="upload" class="active">Upload</button>
+    <button data-tab="roms">ROMs</button>
+    <button data-tab="apps">Apps</button>
+    <button data-tab="files">Dateien</button>
+    <button data-tab="device">Gerät</button>
+  </nav>
+  <span id="conn" class="muted"></span>
+</header>
+
+<main>
+  <section id="login" hidden>
+    <h2>Mit dem Thor koppeln</h2>
+    <p class="muted">Den Code zeigt die ThorBro-App auf dem Thor an.</p>
+    <form id="loginForm">
+      <input id="codeInput" autocomplete="off" placeholder="Kopplungscode" maxlength="8">
+      <button>Verbinden</button>
+    </form>
+    <p id="loginErr" class="err"></p>
+  </section>
+
+  <section id="upload" class="tab">
+    <div id="drop" class="drop">
+      <p><strong>Spiele, ROM-Ordner oder APKs hier ablegen</strong></p>
+      <p class="muted">ROMs landen im passenden System-Ordner, APKs werden danach installiert.</p>
+      <label class="btn">Dateien wählen<input id="pick" type="file" multiple hidden></label>
+      <label class="btn">Ordner wählen<input id="pickDir" type="file" webkitdirectory hidden></label>
+    </div>
+    <div class="row">
+      <label>ROM-Ordner <input id="romRoot"></label>
+      <label><input id="overwrite" type="checkbox"> Vorhandene Dateien überschreiben</label>
+      <span class="grow"></span>
+      <button id="startAll" class="primary">Start</button>
+      <button id="clearDone">Fertige entfernen</button>
+    </div>
+    <ul id="queue" class="queue"></ul>
+  </section>
+
+  <section id="roms" class="tab" hidden>
+    <div class="row">
+      <input id="romFilter" placeholder="Spiel suchen (alle Konsolen)">
+      <select id="romRegion"><option value="">Alle Regionen</option></select>
+      <span id="romStats" class="muted grow"></span>
+      <button id="romsRescan">Neu scannen</button>
+    </div>
+    <div class="roms">
+      <aside id="sysList" class="syslist"></aside>
+      <div id="romList"></div>
+    </div>
+  </section>
+
+  <section id="apps" class="tab" hidden>
+    <div class="row">
+      <input id="appFilter" placeholder="Suchen">
+      <label><input id="showSystem" type="checkbox"> System-Apps zeigen</label>
+      <span class="grow"></span>
+      <button id="appsReload">Neu laden</button>
+    </div>
+    <div id="appGrid" class="grid"></div>
+  </section>
+
+  <section id="files" class="tab" hidden>
+    <div class="row">
+      <select id="volumes"></select>
+      <span id="crumbs" class="crumbs grow"></span>
+      <button id="mkdir">Neuer Ordner</button>
+      <button id="filesReload">Neu laden</button>
+    </div>
+    <table class="files"><tbody id="fileRows"></tbody></table>
+  </section>
+
+  <section id="device" class="tab" hidden>
+    <div id="deviceInfo" class="cards"></div>
+    <p><button id="logout">Abmelden</button></p>
+  </section>
+</main>
+<dialog id="romDetail"></dialog>
+<script src="app.js"></script>
+</body>
+</html>
