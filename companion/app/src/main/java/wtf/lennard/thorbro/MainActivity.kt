@@ -27,6 +27,7 @@ class MainActivity : Activity() {
     private lateinit var permOverlay: Button
     private lateinit var permInstall: Button
     private lateinit var updateButton: Button
+    private lateinit var grantButton: Button
     private val ui = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -49,6 +50,7 @@ class MainActivity : Activity() {
         toggle = button("") { if (ThorService.running) ThorService.stop(this) else ThorService.start(this); later() }
         button("Neuen Code erzeugen") { Prefs.newToken(this); refresh() }
         updateButton = button("Nach Updates suchen") { checkUpdate() }
+        grantButton = button("") { pickRomFolder() }
 
         text(18f, true).text = "Berechtigungen"
         permAllFiles = button("") {
@@ -70,6 +72,36 @@ class MainActivity : Activity() {
 
         if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         if (!ThorService.running) ThorService.start(this)
+        if (intent?.getBooleanExtra(EXTRA_PICK_FOLDER, false) == true) pickRomFolder()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_PICK_FOLDER, false)) pickRomFolder()
+    }
+
+    /** Emulators get ROMs through this folder grant (like Cocoon / ES-DE do). */
+    private fun pickRomFolder() {
+        val i = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+        val roms = Roms.scan(this, false).optJSONArray("romRoots")?.optString(0)
+        val m = roms?.let { Regex("^/storage/([0-9A-Fa-f]{4}-[0-9A-Fa-f]{4})/(.*)$").find(it) }
+        if (m != null) i.putExtra(android.provider.DocumentsContract.EXTRA_INITIAL_URI,
+            android.provider.DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", m.groupValues[1] + ":" + m.groupValues[2]))
+        startActivityForResult(i, REQ_TREE)
+    }
+
+    @Deprecated("Activity result API needs androidx; plain Activity is enough here")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_TREE && resultCode == RESULT_OK) data?.data?.let {
+            contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            refresh()
+        }
+    }
+
+    companion object {
+        const val EXTRA_PICK_FOLDER = "pickRomFolder"
+        private const val REQ_TREE = 42
     }
 
     override fun onResume() {
@@ -108,5 +140,8 @@ class MainActivity : Activity() {
         permAllFiles.text = mark(p.getBoolean("allFiles"), "Zugriff auf alle Dateien (Spiele hochladen)")
         permOverlay.text = mark(p.getBoolean("overlay"), "Über anderen Apps anzeigen (Apps fernstarten)")
         permInstall.text = mark(p.getBoolean("install"), "Unbekannte Apps installieren (APKs)")
+        val grants = Emulators.trees(this).map { android.provider.DocumentsContract.getTreeDocumentId(it) }
+        grantButton.text = mark(grants.isNotEmpty(), "ROM-Ordner freigeben (Spiele per Klick starten)" +
+            if (grants.isNotEmpty()) "\n" + grants.joinToString(", ") else "")
     }
 }

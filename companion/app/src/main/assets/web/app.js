@@ -34,6 +34,7 @@ function showTab(name) {
   store.set('tab', name);
   if (name === 'roms' && !romData) loadRoms(false);
   if (name === 'apps') loadApps();
+  if (name === 'saves') loadSaves();
   if (name === 'files') loadFiles(currentDir);
   if (name === 'device') loadDevice();
 }
@@ -374,8 +375,11 @@ const mediaUrl = (sys, path, kind) => `/api/roms/media?${q({ system: sys, path, 
 const coverOf = (sysId, r, m) => (m.media || []).includes('icon') ? mediaUrl(sysId, r.path, 'icon') : m.cover ? coverUrl(sysId, m.cover) : '';
 const fmtTime = (s) => (s >= 3600 ? Math.floor(s / 3600) + ' h ' : '') + Math.round((s % 3600) / 60) + ' min';
 
+let emus = null;
+async function loadEmus() { try { emus = (await api('/api/emulators')).body; } catch { emus = null; } }
 async function loadRoms(refresh) {
   $('#romStats').textContent = 'Suche ROMs …';
+  loadEmus().then(renderRoms);
   try { romData = (await api('/api/roms' + (refresh ? '?refresh=1' : ''))).body; }
   catch (err) { $('#romStats').textContent = 'Fehler: ' + err.message; return; }
   if (refresh) Object.keys(metaCache).forEach((k) => delete metaCache[k]);
@@ -418,11 +422,20 @@ function romCard(r, sysId) {
   const cover = src
     ? `<img class="cover" loading="lazy" alt="${esc(title)}" src="${src}" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'cover nocover',textContent:this.alt}))">`
     : `<div class="cover nocover">${sysIcon(sysId, 'bigicon')}<span>${esc(title)}</span></div>`;
+  const canPlay = emus && emus.systems[sysId];
+  const sw = r.group ? r.group : null;
+  const swBadges = sw ? [
+    sw.update ? `<span class="badge">Update ${esc(sw.update.versionLabel)}</span>` : '',
+    sw.dlc.length ? `<span class="badge">+${sw.dlc.length} DLC</span>` : '',
+    !sw.base ? '<span class="badge warnbadge">Basisspiel fehlt</span>' : '',
+    sw.oldUpdates.length ? `<span class="badge warnbadge">${sw.oldUpdates.length} alte Updates</span>` : '',
+  ].join('') : '';
   return `<div class="romcard" data-rom="${esc(r.path)}" data-sys="${esc(sysId)}" title="${esc(r.file)}">
+    ${canPlay && (!sw || sw.base) ? `<button class="playbtn primary" data-play="${esc(r.path)}" data-play-sys="${esc(sysId)}">▶ Spielen</button>` : ''}
     ${cover}
     <div class="rtitle">${m.favorite ? '<span class="fav">★</span> ' : ''}${esc(title)}</div>
     <div class="rmeta">${esc(line) || '&nbsp;'}</div>
-    <div class="rbadges">${m.region ? `<span class="badge">${esc(m.region)}</span>` : ''}<span class="badge">${esc(r.ext)}</span><span class="muted">${fmt(r.size)}</span></div>
+    <div class="rbadges">${m.region ? `<span class="badge">${esc(m.region)}</span>` : ''}${swBadges || `<span class="badge">${esc(r.ext)}</span>`}<span class="muted">${fmt(sw ? sw.size : r.size)}</span></div>
   </div>`;
 }
 
@@ -453,8 +466,13 @@ function renderRoms() {
     if (!s) html = '<p class="muted">Keine ROMs gefunden. Lege sie z. B. unter ROMs/&lt;konsole&gt; ab.</p>';
     else {
       loadMeta(s.id);
-      const list = s.roms.filter((r) => match(r, s.id));
-      html = `<div class="romhead">${sysIcon(s.id, 'headicon')}<h2>${esc(s.name)}</h2><span class="muted">${s.count} Spiele · ${fmt(s.size)}</span></div>` +
+      let list = s.roms.filter((r) => match(r, s.id));
+      if (s.id === 'switch') list = groupSwitch(list);
+      const ev = emus && emus.systems[s.id];
+      const emuSel = ev ? `<label class="muted">Emulator <select data-emu-sys="${s.id}">${ev.options.map((o) => `<option value="${o.id}" ${o.id === ev.current ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select></label>` : '';
+      const grantHint = ev && emus.folderGrants.length === 0 && !(ev.current === 'retroarch')
+        ? `<p class="muted">Zum Starten braucht ThorBro einmal die Freigabe deines ROM-Ordners. <button data-grant>Freigabe auf dem Thor öffnen</button></p>` : '';
+      html = `<div class="romhead">${sysIcon(s.id, 'headicon')}<h2>${esc(s.name)}</h2><span class="muted">${s.id === 'switch' ? list.length + ' Spiele · ' + s.count + ' Dateien' : s.count + ' Spiele'} · ${fmt(s.size)}</span><span class="grow"></span>${emuSel}</div>` + grantHint +
         (s.id === '_unassigned' ? '<p class="muted">Diese Dateien liegen nicht in einem Konsolen-Ordner und die Endung passt zu mehreren Konsolen. Öffne eine, um sie einer Konsole zuzuordnen.</p>' : '') +
         `<div class="covergrid">${list.map((r) => romCard(r, s.id)).join('')}</div>`;
     }
@@ -464,7 +482,8 @@ function renderRoms() {
 
 function openRom(path, sysId) {
   const sys = romData.systems.find((s) => s.id === sysId);
-  const r = sys.roms.find((x) => x.path === path);
+  let r = sys.roms.find((x) => x.path === path);
+  if (sysId === 'switch') r = groupSwitch(sys.roms).find((x) => x.path === path) || r;
   const m = (metaCache[sysId] || {})[path] || {};
   const folder = r.dir ? r.path : r.path.slice(0, r.path.lastIndexOf('/'));
   const row = (k, v) => (v ? `<tr><td class="muted">${k}</td><td>${esc(v)}</td></tr>` : '');
@@ -489,7 +508,10 @@ function openRom(path, sysId) {
         </table>
         ${m.desc ? `<p class="desc">${esc(m.desc)}</p>` : ''}
         ${shots.length ? `<div class="shots">${shots.map((k) => `<img alt="" loading="lazy" src="${mediaUrl(sysId, r.path, k)}">`).join('')}</div>` : ''}
+        ${r.group ? `<h3 style="margin:12px 0 4px;font-size:15px">Dateien dieses Spiels</h3><table class="meta">${r.group.all.map((x) =>
+          `<tr><td class="muted">${x.switchKind === 'base' ? 'Spiel' : x.switchKind === 'update' ? 'Update ' + esc(x.versionLabel) : 'DLC'}${r.group.oldUpdates.includes(x) ? ' <span class="badge warnbadge">veraltet</span>' : ''}</td><td>${esc(x.file)} <span class="muted">${fmt(x.size)}</span></td><td><button data-romdel="${esc(x.path)}">Löschen</button></td></tr>`).join('')}</table>` : ''}
         <div class="row">
+          ${emus && emus.systems[sysId] && (!r.group || r.group.base) ? `<button class="primary" data-play="${esc(r.path)}" data-play-sys="${esc(sysId)}">▶ Auf dem Thor spielen</button>` : ''}
           <button data-dir-roms="${esc(folder)}">Im Datei-Tab öffnen</button>
           ${r.dir ? '' : `<a class="btn" href="/api/files/raw?${q({ path: r.path, token })}">Herunterladen</a>`}
           <button data-romdel="${esc(r.path)}">Löschen</button>
@@ -512,13 +534,54 @@ $('#sysList').onclick = (e) => {
   $('#romFilter').value = '';
   renderRoms();
 };
+async function play(path, sys) {
+  try {
+    const r = await api('/api/roms/launch?' + q({ path, system: sys }), { method: 'POST' });
+    if (r.body.error) {
+      if (r.body.code === 'need_folder_grant' && confirm(r.body.error + '\n\nOrdnerauswahl jetzt auf dem Thor öffnen?')) await api('/api/emulators/grant', { method: 'POST' });
+      else if (r.body.code !== 'need_folder_grant') alert(r.body.error);
+    } else toast(`Startet in ${r.body.emulator} …`);
+  } catch (err) { alert(err.message); }
+}
+function toast(t) {
+  let el = $('#toast');
+  if (!el) { el = Object.assign(document.createElement('div'), { id: 'toast' }); document.body.append(el); }
+  el.textContent = t; el.className = 'show';
+  clearTimeout(el._t); el._t = setTimeout(() => (el.className = ''), 2500);
+}
+// Switch: one entry per game (base + newest update + DLC)
+function groupSwitch(list) {
+  const groups = {};
+  for (const r of list) {
+    const key = r.baseId || r.path;
+    (groups[key] ||= []).push(r);
+  }
+  return Object.values(groups).map((items) => {
+    const base = items.find((x) => x.switchKind === 'base');
+    const ups = items.filter((x) => x.switchKind === 'update').sort((a, b) => (b.version || 0) - (a.version || 0));
+    const dlc = items.filter((x) => x.switchKind === 'dlc');
+    const head = base || ups[0] || items[0];
+    return { ...head, group: { base, update: ups[0], oldUpdates: ups.slice(1), dlc, all: items, size: items.reduce((a, x) => a + x.size, 0) } };
+  }).sort((a, b) => a.name.localeCompare(b.name));
+}
+document.addEventListener('change', async (e) => {
+  if (!e.target.dataset.emuSys) return;
+  emus = (await api('/api/emulators/choose?' + q({ system: e.target.dataset.emuSys, emulator: e.target.value }), { method: 'POST' })).body;
+  toast('Emulator gespeichert');
+});
+document.addEventListener('click', async (e) => {
+  if (e.target.dataset.grant !== undefined) { await api('/api/emulators/grant', { method: 'POST' }); toast('Ordnerauswahl auf dem Thor geöffnet – ROMs-Ordner wählen und „Zugriff erlauben“'); }
+});
 $('#romList').onclick = (e) => {
+  const p = e.target.closest('[data-play]');
+  if (p) { e.stopPropagation(); return play(p.dataset.play, p.dataset.playSys); }
   const c = e.target.closest('[data-rom]');
   if (c) openRom(c.dataset.rom, c.dataset.sys);
 };
 $('#romDetail').onclick = async (e) => {
   const t = e.target, dlg = $('#romDetail');
   if (t === dlg || t.dataset.close !== undefined) return dlg.close();
+  if (t.dataset.play) return play(t.dataset.play, t.dataset.playSys);
   try {
     if (t.dataset.dirRoms) { dlg.close(); showTab('files'); await loadFiles(t.dataset.dirRoms); }
     if (t.dataset.romdel && confirm(`${t.dataset.romdel} löschen?`)) {
@@ -534,6 +597,87 @@ $('#romDetail').onclick = async (e) => {
       dlg.close(); await loadRoms(true);
     }
   } catch (err) { alert(err.message); }
+};
+
+// ---------- save backups ----------
+async function loadSaves() {
+  $('#savesInfo').textContent = 'Lade …';
+  const { body } = await api('/api/saves');
+  $('#savesAuto').checked = body.auto;
+  $('#savesInfo').textContent = `Sicherungen liegen in ${body.root}. Pro Speicherort bleiben die letzten 30.`;
+  $('#savesList').innerHTML = body.locations.map((l) => `
+    <div class="panel">
+      <div class="row" style="margin:0"><div class="grow"><h3>${esc(l.name)}</h3>
+        <div class="sub">${esc(l.emulator)} · ${l.files} Dateien · ${fmt(l.size)}${l.lastChange ? ' · zuletzt geändert ' + new Date(l.lastChange).toLocaleString() : ''}<br>${esc(l.path)}</div></div>
+        <button data-save-now="${esc(l.id)}">Jetzt sichern</button></div>
+      ${l.snapshots.length ? `<details class="snaps"><summary>${l.snapshots.length} Sicherungen, neueste ${new Date(l.snapshots[0].time).toLocaleString()}</summary><table>
+        ${l.snapshots.map((s) => `<tr><td>${esc(s.name.replace('.zip', ''))}</td><td class="muted">${fmt(s.size)}</td>
+          <td><a class="btn" href="/api/files/raw?${q({ path: s.path, token })}">Laden</a></td>
+          <td><button data-restore="${esc(s.path)}">Wiederherstellen</button></td></tr>`).join('')}</table></details>` : '<div class="sub" style="margin-top:6px">Noch keine Sicherung.</div>'}
+    </div>`).join('') || '<p class="muted">Keine Spielstände gefunden.</p>';
+}
+$('#savesReload').onclick = loadSaves;
+$('#savesAuto').onchange = (e) => api('/api/saves/config?' + q({ auto: e.target.checked ? 1 : 0 }), { method: 'POST' });
+$('#savesAll').onclick = async () => {
+  $('#savesInfo').textContent = 'Sichere …';
+  const { body } = await api('/api/saves/backup', { method: 'POST' });
+  const made = body.results.filter((r) => r.snapshot).length;
+  toast(made ? `${made} neue Sicherung(en)` : 'Nichts geändert seit der letzten Sicherung');
+  loadSaves();
+};
+$('#savesList').onclick = async (e) => {
+  const t = e.target;
+  try {
+    if (t.dataset.saveNow) { await api('/api/saves/backup?' + q({ id: t.dataset.saveNow, force: 1 }), { method: 'POST' }); toast('Gesichert'); loadSaves(); }
+    if (t.dataset.restore && confirm('Diese Sicherung zurückspielen?\nDer aktuelle Stand wird vorher automatisch gesichert. Den Emulator vorher schließen.')) {
+      const { body } = await api('/api/saves/restore?' + q({ path: t.dataset.restore }), { method: 'POST' });
+      alert(body.error || `${body.restored} Dateien wiederhergestellt nach ${body.into}`); loadSaves();
+    }
+  } catch (err) { alert(err.message); }
+};
+
+// ---------- cleanup ----------
+$('#cleanScan').onclick = async () => {
+  $('#cleanInfo').textContent = 'Prüfe den Speicher … (kann ein paar Sekunden dauern)';
+  $('#cleanResult').innerHTML = '';
+  let c;
+  try { c = (await api('/api/cleanup')).body; } catch (err) { $('#cleanInfo').textContent = err.message; return; }
+  $('#cleanInfo').textContent = '';
+  const dupFiles = c.duplicates.flatMap((d) => d.files.filter((f) => !f.keep));
+  $('#cleanResult').innerHTML = `
+    <div class="panel"><div class="row" style="margin:0"><div class="grow"><h3>macOS-Reste</h3>
+      <div class="sub">${c.macos.count} Dateien (._* und .DS_Store), ${fmt(c.macos.size)}. Entstehen beim Kopieren vom Mac und sind auf dem Thor nutzlos.
+      ${c.parts.count ? `<br>Dazu ${c.parts.count} abgebrochene Uploads (${fmt(c.parts.size)}), älter als 1 Tag.` : ''}</div></div>
+      ${c.macos.count + c.parts.count ? '<button id="cleanJunk" class="primary">Löschen</button>' : '<span class="ok">✓ sauber</span>'}</div></div>
+    <div class="panel"><h3>Doppelte Spiele</h3>
+      ${c.duplicates.length ? `<div class="sub">Vorausgewählt sind nur Kopien mit identischem Inhalt. Das jeweils behaltene Exemplar ist nicht wählbar.</div>
+      ${c.duplicates.map((d) => `<div class="dupe" style="margin-top:8px"><strong>${esc(d.title)}</strong> <span class="muted">${esc(d.system)}</span>
+        ${d.files.map((f) => `<label><input type="checkbox" data-clean="${esc(f.path)}" ${f.keep ? 'disabled' : f.identical ? 'checked' : ''}>
+          ${esc(f.file)} <span class="muted">${fmt(f.size)}${f.keep ? ' · wird behalten' : f.identical ? ' · identisch' : ' · andere Version'}</span></label>`).join('')}</div>`).join('')}`
+      : '<span class="ok">✓ keine Duplikate</span>'}</div>
+    <div class="panel"><h3>Veraltete Switch-Updates</h3>
+      ${c.oldUpdates.length ? `<div class="sub">Es gibt eine neuere Version desselben Updates.</div>${c.oldUpdates.map((u) => `<div class="dupe"><label><input type="checkbox" data-clean="${esc(u.path)}" checked> ${esc(u.file)} <span class="muted">${fmt(u.size)}</span></label></div>`).join('')}`
+      : '<span class="ok">✓ keine</span>'}</div>
+    ${dupFiles.length + c.oldUpdates.length ? '<div class="row"><button id="cleanSelected" class="primary">Ausgewählte löschen</button><span id="cleanSel" class="muted"></span></div>' : ''}`;
+  updateCleanSel();
+};
+function updateCleanSel() {
+  const sel = [...document.querySelectorAll('[data-clean]:checked')];
+  const el = $('#cleanSel'); if (el) el.textContent = `${sel.length} Dateien ausgewählt`;
+}
+$('#cleanResult').onchange = updateCleanSel;
+$('#cleanResult').onclick = async (e) => {
+  const t = e.target;
+  if (t.id === 'cleanJunk') {
+    const { body } = await api('/api/cleanup/junk', { method: 'POST' });
+    toast(`${body.deleted} Dateien gelöscht, ${fmt(body.freed)} frei`); $('#cleanScan').click();
+  }
+  if (t.id === 'cleanSelected') {
+    const sel = [...document.querySelectorAll('[data-clean]:checked')].map((x) => x.dataset.clean);
+    if (!sel.length || !confirm(`${sel.length} Dateien endgültig löschen?`)) return;
+    for (const p of sel) { try { await api('/api/files?' + q({ path: p }), { method: 'DELETE' }); } catch (err) { alert(p + ': ' + err.message); } }
+    toast(`${sel.length} Dateien gelöscht`); romData = null; $('#cleanScan').click();
+  }
 };
 
 // ---------- apps ----------

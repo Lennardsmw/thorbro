@@ -151,7 +151,13 @@ object Roms {
 
     private fun add(out: MutableMap<String, MutableList<JSONObject>>, id: String, f: File, volume: File, isDir: Boolean = false) {
         val display = if (isDir) f.name else f.name.substringBeforeLast('.')
-        out.getOrPut(id) { mutableListOf() }.add(JSONObject()
+        val o = JSONObject()
+        if (id == "switch") Cleanup.switchId(f.name)?.let { s ->
+            o.put("titleId", s.titleId).put("switchKind", s.kind).put("baseId", s.baseId).put("version", s.version)
+            val up = Regex("\\[Up (v[^\\]]+)]").find(f.name)?.groupValues?.get(1)
+            o.put("versionLabel", up ?: if (s.version > 0) "v${s.version / 65536}" else "v0")
+        }
+        out.getOrPut(id) { mutableListOf() }.add(o
             .put("name", display)
             .put("file", f.name)
             .put("path", f.path)

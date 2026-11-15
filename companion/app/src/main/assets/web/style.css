@@ -92,6 +92,17 @@ dialog#romDetail .hero { height: 170px; margin: -16px -16px 14px; background: ce
 .shots { display: flex; gap: 8px; overflow-x: auto; margin: 8px 0; }
 .shots img { height: 120px; border-radius: 6px; }
 .fav { color: #f2b01e; }
+.playbtn { position: absolute; right: 14px; top: 14px; padding: 4px 10px; font-size: 13px; opacity: 0; transition: opacity .15s; }
+.romcard { position: relative; }
+.romcard:hover .playbtn, .romcard:focus-within .playbtn { opacity: 1; }
+@media (hover: none) { .playbtn { opacity: 1; } }
+.warnbadge { color: var(--err); border-color: var(--err); }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+.panel h3 { margin: 0 0 4px; font-size: 15px; }
+.panel .sub { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.snaps { margin-top: 8px; font-size: 13px; }
+.snaps td { padding: 3px 8px 3px 0; }
+.dupe label { display: flex; gap: 8px; align-items: baseline; font-size: 14px; overflow-wrap: anywhere; }
 dialog#romDetail::backdrop { background: rgba(0, 0, 0, .55); }
 .detail { display: grid; grid-template-columns: 220px 1fr; gap: 16px; }
 .dcover { width: 100%; border-radius: 8px; background: var(--bg); aspect-ratio: 3 / 4; object-fit: contain; }
@@ -107,3 +118,6 @@ table.meta td:first-child { white-space: nowrap; width: 1%; }
   .syslist button { white-space: nowrap; }
 }
 @media (max-width: 600px) { table.files td.size { display: none; } }
+#toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); background: var(--text); color: var(--bg);
+         padding: 8px 14px; border-radius: 8px; opacity: 0; transition: all .2s; pointer-events: none; z-index: 10; }
+#toast.show { opacity: 1; transform: translateX(-50%); }

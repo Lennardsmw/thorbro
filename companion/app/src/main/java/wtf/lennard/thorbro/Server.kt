@@ -129,6 +129,61 @@ object Server {
                     call.respondFile(f)
                 }
 
+                // ---- play ----
+                get("/api/emulators") {
+                    if (denied(ctx)) return@get
+                    json(Emulators.overview(ctx))
+                }
+                post("/api/emulators/choose") {
+                    if (denied(ctx)) return@post
+                    Emulators.choose(ctx, q("system") ?: return@post fail("system missing"), q("emulator") ?: return@post fail("emulator missing"))
+                    json(Emulators.overview(ctx))
+                }
+                post("/api/emulators/grant") {
+                    if (denied(ctx)) return@post
+                    ctx.startActivity(android.content.Intent(ctx, MainActivity::class.java)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                        .putExtra(MainActivity.EXTRA_PICK_FOLDER, true))
+                    json(JSONObject().put("ok", true).put("note", "Ordnerauswahl auf dem Thor geöffnet"))
+                }
+                post("/api/roms/launch") {
+                    if (denied(ctx)) return@post
+                    val rom = Storage.resolve(q("path")) ?: return@post fail("path not allowed")
+                    val res = Emulators.launch(ctx, q("system") ?: return@post fail("system missing"), rom, q("emulator"))
+                    json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
+                }
+
+                // ---- save backups ----
+                get("/api/saves") {
+                    if (denied(ctx)) return@get
+                    json(withContext(Dispatchers.IO) { Saves.overview(ctx) })
+                }
+                post("/api/saves/backup") {
+                    if (denied(ctx)) return@post
+                    json(JSONObject().put("results", withContext(Dispatchers.IO) { Saves.backup(ctx, q("id"), q("force") == "1") }))
+                }
+                post("/api/saves/restore") {
+                    if (denied(ctx)) return@post
+                    val zip = Storage.resolve(q("path")) ?: return@post fail("path not allowed")
+                    val res = withContext(Dispatchers.IO) { Saves.restore(ctx, zip) }
+                    json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
+                }
+                post("/api/saves/config") {
+                    if (denied(ctx)) return@post
+                    q("auto")?.let { Saves.setAuto(ctx, it == "1") }
+                    json(JSONObject().put("auto", Saves.auto(ctx)))
+                }
+
+                // ---- cleanup ----
+                get("/api/cleanup") {
+                    if (denied(ctx)) return@get
+                    json(withContext(Dispatchers.IO) { Cleanup.scan(ctx) })
+                }
+                post("/api/cleanup/junk") {
+                    if (denied(ctx)) return@post
+                    json(withContext(Dispatchers.IO) { Cleanup.removeJunk(ctx) })
+                }
+
                 // ---- files ----
                 get("/api/files") {
                     if (denied(ctx)) return@get

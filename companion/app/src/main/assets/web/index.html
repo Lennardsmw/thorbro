@@ -12,6 +12,8 @@
   <nav>
     <button data-tab="upload" class="active">Upload</button>
     <button data-tab="roms">ROMs</button>
+    <button data-tab="saves">Spielstände</button>
+    <button data-tab="cleanup">Aufräumen</button>
     <button data-tab="apps">Apps</button>
     <button data-tab="files">Dateien</button>
     <button data-tab="device">Gerät</button>
@@ -58,6 +60,25 @@
       <aside id="sysList" class="syslist"></aside>
       <div id="romList"></div>
     </div>
+  </section>
+
+  <section id="saves" class="tab" hidden>
+    <div class="row">
+      <button id="savesAll" class="primary">Alles jetzt sichern</button>
+      <label><input id="savesAuto" type="checkbox"> Automatisch sichern (alle 6 h, nur bei Änderungen)</label>
+      <span class="grow"></span>
+      <button id="savesReload">Neu laden</button>
+    </div>
+    <p id="savesInfo" class="muted"></p>
+    <div id="savesList"></div>
+  </section>
+
+  <section id="cleanup" class="tab" hidden>
+    <div class="row">
+      <button id="cleanScan" class="primary">Speicher prüfen</button>
+      <span id="cleanInfo" class="muted grow"></span>
+    </div>
+    <div id="cleanResult"></div>
   </section>
 
   <section id="apps" class="tab" hidden>
