@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -36,15 +36,18 @@ jobs:
         with:
           targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
       - run: npm ci || npm install
+      # build only; the release is published from the built artifacts (no write token needed here)
       - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: desktop/app
-          tagName: ${{ github.ref_name }}
-          releaseName: "ThorBro Desktop ${{ github.ref_name }}"
-          releaseBody: "ThorBro für Mac, Windows und Linux: Thor finden, ThorBro öffnen, Spielstände mit RomM abgleichen."
-          releaseDraft: false
-          # never "latest": the handheld app looks for its updates in the latest release
-          prerelease: true
           args: ${{ matrix.args }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: thorbro-desktop-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
+            desktop/app/src-tauri/target/**/release/bundle/dmg/*.dmg
+            desktop/app/src-tauri/target/**/release/bundle/msi/*.msi
+            desktop/app/src-tauri/target/**/release/bundle/nsis/*.exe
+            desktop/app/src-tauri/target/**/release/bundle/deb/*.deb
+            desktop/app/src-tauri/target/**/release/bundle/appimage/*.AppImage
