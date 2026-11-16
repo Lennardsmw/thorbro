@@ -29,6 +29,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BatteryFull
+import androidx.compose.material.icons.filled.Gamepad
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SportsEsports
@@ -120,6 +121,7 @@ enum class Screen(val label: String, val icon: ImageVector) {
     SYNC("Sync", Icons.Filled.Sync),
     SAVES("Spielstände", Icons.Filled.Save),
     CONTROLLER("Controller", Icons.Filled.SportsEsports),
+    GAMEPAD("Thor als Gamepad", Icons.Filled.Gamepad),
     SETTINGS("Einstellungen", Icons.Filled.Settings),
 }
 

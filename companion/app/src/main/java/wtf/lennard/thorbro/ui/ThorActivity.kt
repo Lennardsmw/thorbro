@@ -106,6 +106,11 @@ class ThorActivity : ComponentActivity() {
 @Composable
 private fun Root(screen: Screen?, open: (Screen?) -> Unit) {
     var detail by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<HomeGame?>(null) }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    if (screen == Screen.GAMEPAD) {
+        androidx.compose.runtime.LaunchedEffect(Unit) { ctx.startActivity(android.content.Intent(ctx, GamepadActivity::class.java)); open(null) }
+        return
+    }
     if (screen == null) {
         HomeScreen(open = { open(it) }, showDetail = { detail = it })
     } else {
@@ -118,6 +123,7 @@ private fun Root(screen: Screen?, open: (Screen?) -> Unit) {
                     Screen.SAVES -> SavesScreen()
                     Screen.CONTROLLER -> ControllerScreen()
                     Screen.SETTINGS -> SettingsScreen()
+                    Screen.GAMEPAD -> {}
                 }
             }
             ButtonHints("A" to "Auswählen", "B" to "Zurück")
