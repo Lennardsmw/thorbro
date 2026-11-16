@@ -15,9 +15,10 @@ object Library {
 
     /** RomM's library: platform ids by slug, and per platform fs_name -> rom json */
     class Remote(val bySlug: Map<String, Int>, val roms: Map<Int, List<JSONObject>>) {
+        /** by file name; RomM keeps some single-file games as a folder named like the file without extension */
         fun find(system: String, file: String): JSONObject? {
             val pid = bySlug[RommSync.slugFor(system)] ?: return null
-            return roms[pid]?.firstOrNull { val n = it.optString("fs_name"); n == file || n == "$file.zip" || (n == file.substringBeforeLast('.') && it.optBoolean("has_multiple_files")) }
+            return roms[pid]?.firstOrNull { val n = it.optString("fs_name"); n == file || n == "$file.zip" || n == file.substringBeforeLast('.') }
         }
     }
 
