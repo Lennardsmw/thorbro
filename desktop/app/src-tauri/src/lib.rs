@@ -64,11 +64,15 @@ fn status() -> Value {
 /// looks for ThorBro on the local network (it announces itself as _thorbro._tcp)
 #[tauri::command]
 async fn discover() -> Vec<Value> {
-    tauri::async_runtime::spawn_blocking(|| {
+    tauri::async_runtime::spawn_blocking(discover_blocking).await.unwrap_or_default()
+}
+
+fn discover_mdns() -> Vec<Value> {
+    {
         let mut out: Vec<Value> = vec![];
         let Ok(d) = mdns_sd::ServiceDaemon::new() else { return out };
         let Ok(rx) = d.browse("_thorbro._tcp.local.") else { return out };
-        let until = std::time::Instant::now() + Duration::from_secs(4);
+        let until = std::time::Instant::now() + Duration::from_secs(2);
         while let Some(left) = until.checked_duration_since(std::time::Instant::now()) {
             match rx.recv_timeout(left) {
                 Ok(mdns_sd::ServiceEvent::ServiceResolved(info)) => {
@@ -84,7 +88,61 @@ async fn discover() -> Vec<Value> {
         }
         let _ = d.shutdown();
         out
-    }).await.unwrap_or_default()
+    }
+}
+
+/// mDNS first; if that finds nothing (blocked multicast, other network setups) ask every address
+/// of the local /24 networks for ThorBro on port 7330
+fn discover_blocking() -> Vec<Value> {
+    let found = discover_mdns();
+    if !found.is_empty() { return found; }
+    scan_subnets()
+}
+
+fn scan_subnets() -> Vec<Value> {
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
+    let mut bases: Vec<[u8; 3]> = vec![];
+    if let Ok(ifs) = local_ip_address::list_afinet_netifas() {
+        for (_, ip) in ifs {
+            if let IpAddr::V4(v4) = ip {
+                let o = v4.octets();
+                let private = o[0] == 10 || (o[0] == 172 && (16..32).contains(&o[1])) || (o[0] == 192 && o[1] == 168);
+                if private && !bases.contains(&[o[0], o[1], o[2]]) { bases.push([o[0], o[1], o[2]]); }
+            }
+        }
+    }
+    let hits = std::sync::Arc::new(Mutex::new(vec![]));
+    let mut threads = vec![];
+    for b in bases {
+        for chunk in (1u8..=254).collect::<Vec<_>>().chunks(4) {
+            let chunk = chunk.to_vec(); let hits = hits.clone();
+            threads.push(std::thread::spawn(move || {
+                for h in chunk {
+                    let ip = Ipv4Addr::new(b[0], b[1], b[2], h);
+                    let addr = SocketAddr::new(IpAddr::V4(ip), 7330);
+                    if TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_err() { continue; }
+                    let ping = sync::client().get(format!("http://{ip}:7330/api/ping")).timeout(Duration::from_secs(2)).send()
+                        .and_then(|r| r.json::<Value>());
+                    if let Ok(p) = ping {
+                        if p["name"] == "ThorBro" {
+                            hits.lock().unwrap().push(json!({"name": format!("ThorBro {}", p["model"].as_str().unwrap_or("")), "address": format!("{ip}:7330")}));
+                        }
+                    }
+                }
+            }));
+        }
+    }
+    for t in threads { let _ = t.join(); }
+    let v = hits.lock().unwrap().clone(); v
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn discovery() {
+        println!("mdns: {:?}", super::discover_mdns());
+        println!("scan: {:?}", super::scan_subnets());
+    }
 }
 
 /// checks the pairing code shown on the handheld and remembers this Thor
