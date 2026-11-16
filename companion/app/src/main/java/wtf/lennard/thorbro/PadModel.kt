@@ -14,6 +14,7 @@ enum class PadModel(val label: String) {
     JOYCON_L("Joy-Con (L)"),
     JOYCON_R("Joy-Con (R)"),
     EIGHTBITDO("8BitDo"),
+    STEAM("Steam Controller"),
     GENERIC("Controller");
 
     companion object {
@@ -30,6 +31,7 @@ enum class PadModel(val label: String) {
                 0x045E -> XBOX
                 0x057E -> when (product) { 0x2006 -> JOYCON_L; 0x2007 -> JOYCON_R; 0x2009 -> SWITCH_PRO; else -> SWITCH_PRO }
                 0x2DC8 -> EIGHTBITDO
+                0x28DE -> STEAM   // Valve
                 else -> byName(name)
             }
         }
@@ -45,6 +47,7 @@ enum class PadModel(val label: String) {
             name.contains("Joy-Con (R)", true) -> JOYCON_R
             name.contains("Pro Controller", true) -> SWITCH_PRO
             name.contains("8BitDo", true) -> EIGHTBITDO
+            name.contains("Steam", true) -> STEAM
             name.contains("Odin", true) || name.contains("Thor", true) -> THOR
             else -> GENERIC
         }
