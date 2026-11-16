@@ -28,7 +28,7 @@ object RommSync {
     }
 
     /** RomM platforms by fs_slug, and the file names RomM has per platform */
-    private fun remote(ctx: Context): Pair<Map<String, Int>, Map<Int, Map<String, Int>>> {
+    internal fun remote(ctx: Context): Pair<Map<String, Int>, Map<Int, Map<String, Int>>> {
         val plats = Romm.rawPlatforms(ctx)
         val bySlug = plats.associate { it.optString("fs_slug") to it.getInt("id") }
         val files = bySlug.values.associateWith { pid -> Romm.rawRoms(ctx, pid).associate { it.optString("fs_name") to it.getInt("id") } }
@@ -70,7 +70,7 @@ object RommSync {
         return out.distinctBy { it.file.path.lowercase() }
     }
 
-    private fun md5(f: File): String = MessageDigest.getInstance("MD5").let { md ->
+    internal fun md5(f: File): String = MessageDigest.getInstance("MD5").let { md ->
         if (f.isDirectory) f.walkTopDown().filter { it.isFile }.sortedBy { it.path }.forEach { x -> md.update(x.relativeTo(f).path.toByteArray()); x.inputStream().use { i -> val b = ByteArray(65536); while (true) { val n = i.read(b); if (n < 0) break; md.update(b, 0, n) } } }
         else f.inputStream().use { i -> val b = ByteArray(65536); while (true) { val n = i.read(b); if (n < 0) break; md.update(b, 0, n) } }
         md.digest().joinToString("") { "%02x".format(it) }
@@ -78,7 +78,7 @@ object RommSync {
 
     /** per save: hash of the local files and the RomM save ("id@updated_at") at the last sync */
     private fun stateFile(ctx: Context) = File(ctx.filesDir, "romm-save-state.json")
-    private fun state(ctx: Context): JSONObject = runCatching { JSONObject(stateFile(ctx).readText()) }.getOrDefault(JSONObject())
+    internal fun state(ctx: Context): JSONObject = runCatching { JSONObject(stateFile(ctx).readText()) }.getOrDefault(JSONObject())
     private fun remoteKey(s: JSONObject) = "${s.getInt("id")}@${s.optString("updated_at")}"
     private fun remoteTime(s: JSONObject): Long = runCatching { java.time.OffsetDateTime.parse(s.getString("updated_at")).toInstant().toEpochMilli() }
         .getOrElse { java.time.LocalDateTime.parse(s.getString("updated_at").take(19)).toInstant(java.time.ZoneOffset.UTC).toEpochMilli() }
@@ -136,7 +136,10 @@ object RommSync {
         }
         val total = todo.sumOf { it.second.getLong("size") }.coerceAtLeast(1)
         var done = 0L
-        for ((sys, rom) in todo) {
+        job.total = todo.size
+        for ((n, pair) in todo.withIndex()) {
+            val (sys, rom) = pair
+            job.index = n + 1
             val slug = slugFor(sys)
             val pid = bySlug[slug] ?: Romm.createPlatform(ctx, slug).also { bySlug = bySlug + (slug to it) }
             val f = File(rom.getString("path"))
@@ -146,7 +149,7 @@ object RommSync {
                     val zip = File(ctx.cacheDir, "romm-upload.zip")
                     zipFolder(f, zip); upload(ctx, pid, f.name + ".zip", zip) { n -> job.progress = (done + n).toDouble() / total }; zip.delete()
                 } else upload(ctx, pid, f.name, f) { n -> job.progress = (done + n).toDouble() / total }
-                romsUp++
+                romsUp++; History.add(ctx, "rom_up", rom.optString("name").ifEmpty { f.name }, sys)
             } catch (e: Exception) { errors.put("${f.name}: ${e.message}"); Logs.e("romm", "Upload ${f.name}", e) }
             done += rom.getLong("size")
         }
@@ -186,6 +189,7 @@ object RommSync {
                 val res = Romm.uploadSave(ctx, romId, payload, emulator = s.system, contentHash = hash)
                 if (s.isFolder) payload.delete()
                 st.put(s.file.path, JSONObject().put("local", hash).put("remote", remoteKey(res))); n++
+                History.add(ctx, "save_up", s.rom.optString("name"), s.system)
             } catch (e: Exception) { errors.put("${s.file.name}: ${e.message}") }
         }
         stateFile(ctx).writeText(st.toString())
@@ -218,12 +222,13 @@ object RommSync {
                 }
                 val zip = File(ctx.cacheDir, "romm-save-${newest.getInt("id")}.zip")
                 Romm.downloadSave(ctx, newest.getInt("id"), zip)
-                runCatching { Saves.backup(ctx, null, force = true, label = "vor-romm") }
+                runCatching { Saves.backup(ctx, null, label = "vor-romm") } // only changed locations; unchanged ones already have a matching snapshot
                 val targets = listOf(s.file) + listOf(File(s.file.path + ".work")).filter { it.isDirectory }
                 targets.forEach { unzipStripped(zip, it) }
                 zip.delete()
                 val st2 = state(ctx)
                 st2.put(s.file.path, JSONObject().put("local", md5(s.file)).put("remote", remoteKey(newest)))
+                History.add(ctx, "save_down", s.rom.optString("name"), s.system)
                 stateFile(ctx).writeText(st2.toString())
                 n++
             } catch (e: Exception) { errors.put("${s.file.name}: ${e.message}") }
@@ -248,7 +253,7 @@ object RommSync {
         }
     }
 
-    private fun upload(ctx: Context, platformId: Int, name: String, f: File, progress: (Long) -> Unit) {
+    internal fun upload(ctx: Context, platformId: Int, name: String, f: File, progress: (Long) -> Unit) {
         val chunks = ((f.length() + CHUNK - 1) / CHUNK).toInt().coerceAtLeast(1)
         val id = Romm.uploadStart(ctx, platformId, name, f.length(), chunks)
         RandomAccessFile(f, "r").use { r ->
@@ -263,7 +268,7 @@ object RommSync {
         Romm.uploadComplete(ctx, id)
     }
 
-    private fun zipFolder(dir: File, zip: File) = ZipOutputStream(zip.outputStream().buffered()).use { z ->
+    internal fun zipFolder(dir: File, zip: File) = ZipOutputStream(zip.outputStream().buffered()).use { z ->
         dir.walkTopDown().filter { it.isFile }.forEach { f ->
             z.putNextEntry(ZipEntry(dir.name + "/" + f.relativeTo(dir).path)); f.inputStream().use { it.copyTo(z) }; z.closeEntry()
         }

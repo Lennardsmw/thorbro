@@ -13,9 +13,12 @@
     <button data-tab="upload" class="active">Upload</button>
     <button data-tab="roms">ROMs</button>
     <button data-tab="library">Bibliothek</button>
-    <button data-tab="saves">Spielstände</button>
+    <button data-tab="store">Store</button>
+    <button data-tab="saves">Sync</button>
     <button data-tab="cleanup">Aufräumen</button>
     <button data-tab="screen">Bildschirm</button>
+    <button data-tab="stream">Streaming</button>
+    <button data-tab="drivers">Treiber</button>
     <button data-tab="apps">Apps</button>
     <button data-tab="files">Dateien</button>
     <button data-tab="device">Gerät</button>
@@ -85,7 +88,18 @@
     </div>
   </section>
 
+  <section id="store" class="tab" hidden>
+    <div class="row">
+      <input id="storeFilter" placeholder="Im Store suchen">
+      <span id="storeInfo" class="muted grow"></span>
+      <button id="storeReload">Neu laden</button>
+    </div>
+    <div id="storeList"></div>
+  </section>
+
   <section id="saves" class="tab" hidden>
+    <div class="panel"><h3>Verlauf</h3><div class="sub">Was zuletzt zwischen Thor und RomM passiert ist</div><div id="historyList"></div></div>
+    <h3 style="margin:16px 0 6px">Spielstand zurücksetzen</h3>
     <div class="row">
       <button id="savesAll" class="primary">Alles jetzt sichern</button>
       <label><input id="savesAuto" type="checkbox"> Automatisch sichern (alle 6 h, nur bei Änderungen)</label>
@@ -108,10 +122,43 @@
     <div class="row">
       <button id="screenStart" class="primary">Bildschirm anzeigen</button>
       <button id="screenStop">Beenden</button>
+      <button id="screenFull">Vollbild</button>
       <a id="screenShot" class="btn" download="thor-screenshot.jpg">Screenshot speichern</a>
       <span id="screenInfo" class="muted grow"></span>
     </div>
     <div class="screenwrap"><img id="screenImg" alt=""></div>
+  </section>
+
+  <section id="stream" class="tab" hidden>
+    <div class="panel">
+      <h3>PC/Mac → Thor (Moonlight)</h3>
+      <div class="sub">Auf dem Computer läuft <a href="https://app.lizardbyte.dev/Sunshine/" target="_blank" rel="noopener">Sunshine</a>, auf dem Thor Moonlight.</div>
+      <div class="row"><span id="mlStatus" class="muted grow">Lade …</span><button id="mlInstall" class="primary" hidden></button><button id="mlLaunch" hidden>Moonlight starten</button></div>
+    </div>
+    <div class="panel">
+      <h3>Sunshine-Rechner im Netzwerk</h3>
+      <div class="sub">Koppeln: In Moonlight den Rechner antippen, Moonlight zeigt eine PIN. Dann hier „PIN eingeben“ öffnen und die PIN in Sunshine bestätigen.</div>
+      <div class="row"><button id="mlScan">Suchen</button><span id="mlScanInfo" class="muted grow"></span></div>
+      <div id="mlHosts" class="cards"></div>
+    </div>
+    <div class="panel">
+      <h3>Thor am PC zeigen</h3>
+      <div class="sub">Zeigt den Thor-Bildschirm hier im Browser, ohne Installation. Auf dem Thor einmal „Jetzt starten“ bestätigen.</div>
+      <div class="row"><button id="mlScreen" class="primary">Bildschirm übertragen</button></div>
+    </div>
+  </section>
+
+  <section id="drivers" class="tab" hidden>
+    <div class="row">
+      <span id="drvInfo" class="muted grow">Lade …</span>
+      <button id="drvReload">Neu laden</button>
+    </div>
+    <div class="panel">
+      <h3>Geladene Treiber</h3>
+      <div id="drvLocal"></div>
+      <div class="sub" id="drvHow"></div>
+    </div>
+    <div id="drvSources"></div>
   </section>
 
   <section id="apps" class="tab" hidden>

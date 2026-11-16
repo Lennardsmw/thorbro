@@ -46,7 +46,21 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import wtf.lennard.thorbro.Cocoon
+import wtf.lennard.thorbro.Background
 import wtf.lennard.thorbro.Emulators
+import wtf.lennard.thorbro.Jobs
+import wtf.lennard.thorbro.Library
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.runtime.mutableIntStateOf
 import wtf.lennard.thorbro.Media
 import wtf.lennard.thorbro.Roms
 import java.io.File
@@ -68,7 +82,10 @@ private fun entries(s: Sys): List<JSONObject> {
 @Composable
 fun GamesScreen() {
     val ctx = LocalContext.current
-    val systems by produceState<List<Sys>?>(null) {
+    var reload by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) { var seen = Background.changes; while (true) { kotlinx.coroutines.delay(1000); if (Background.changes != seen) { seen = Background.changes; Roms.invalidate(); reload++ } } }
+    val lib by produceState<JSONObject?>(null, reload) { value = withContext(Dispatchers.IO) { runCatching { Library.status(ctx) }.getOrNull() } }
+    val systems by produceState<List<Sys>?>(null, reload) {
         value = withContext(Dispatchers.IO) {
             val a = Roms.scan(ctx, false).getJSONArray("systems")
             (0 until a.length()).map { a.getJSONObject(it) }.filter { it.getString("id") != "_unassigned" }.map { s ->
@@ -89,15 +106,22 @@ fun GamesScreen() {
         Column(Modifier.weight(1f)) {
             Title(cur.name)
             val items = remember(cur.id) { entries(cur) }
-            LazyVerticalGrid(GridCells.Adaptive(150.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            val (gst, gfl) = snapGrid()
+            CenteredFocus { LazyVerticalGrid(GridCells.Adaptive(150.dp), state = gst, flingBehavior = gfl, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(items, key = { it.getString("path") }) { r ->
                     val m = meta?.optJSONObject(r.getString("path")) ?: JSONObject()
-                    GameCard(cur.id, r, m) { open = r }
+                    GameCard(cur.id, r, m, lib?.optJSONObject("games")?.optJSONObject(r.getString("path"))) { open = r }
                 }
-            }
+            } }
         }
     }
-    open?.let { r -> GameDetail(cur.id, r, meta?.optJSONObject(r.getString("path")) ?: JSONObject()) { open = null } }
+    open?.let { r ->
+        // Switch: base, updates and DLC go together
+        val group = if (cur.id == "switch" && r.optString("baseId").isNotEmpty()) cur.roms.filter { it.optString("baseId") == r.optString("baseId") } else listOf(r)
+        GameDetail(cur.id, r, meta?.optJSONObject(r.getString("path")) ?: JSONObject(),
+            lib = lib?.optJSONObject("games")?.optJSONObject(r.getString("path")), group = group,
+            onChanged = { Roms.invalidate(); reload++ }) { open = null }
+    }
 }
 
 @Composable
@@ -116,65 +140,178 @@ private fun cover(sys: String, r: JSONObject, m: JSONObject): File? {
 private fun title(r: JSONObject, m: JSONObject) = m.optString("title").ifEmpty { r.getString("name").substringBefore(" (").substringBefore(" [") }
 
 @Composable
-private fun GameCard(sys: String, r: JSONObject, m: JSONObject, onOpen: () -> Unit) {
+private fun GameCard(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject?, onOpen: () -> Unit) {
     FocusCard(Modifier.fillMaxWidth(), onClick = onOpen) {
         val img = cover(sys, r, m)
         Box(Modifier.fillMaxWidth().aspectRatio(3f / 4f).clip(RoundedCornerShape(8.dp)).background(Bg), contentAlignment = Alignment.Center) {
-            if (img != null) Img(img, 360, Modifier.fillMaxSize())
-            else Text(title(r, m), color = Muted, fontSize = 13.sp, modifier = Modifier.padding(8.dp))
+            // every cover fills the same 3:4 frame (cropped), app icons of ports sit centered instead
+            if (img != null && sys == "ports") Img(img, 360, Modifier.fillMaxSize(0.6f))
+            else if (img != null) Img(img, 360, Modifier.fillMaxSize(), ContentScale.Crop)
+            else Text(title(r, m), color = Muted, fontSize = 13.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(8.dp))
+            if (lib != null) Row(Modifier.align(Alignment.TopEnd).padding(6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Badge(Icons.Filled.Cloud, lib.optBoolean("inRomm"))
+                if (lib.optString("save") != "none") Badge(Icons.Filled.Save, lib.optString("save") == "synced")
+            }
         }
         Spacer(Modifier.height(6.dp))
-        Text(title(r, m), fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        val sub = listOf(m.optString("year"), r.optString("extra")).filter { it.isNotEmpty() }.joinToString(" · ")
-        if (sub.isNotEmpty()) Text(sub, color = Muted, fontSize = 12.sp, maxLines = 1)
+        // fixed text block: always two title lines and one info line, so all cards are the same height
+        Text(title(r, m), fontSize = 14.sp, lineHeight = 18.sp, minLines = 2, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        val sub = listOf(fmtBytes(r.optLong("size")), m.optString("year"), r.optString("extra")).filter { it.isNotEmpty() }.joinToString(" · ")
+        Text(sub.ifEmpty { " " }, color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
 @Composable
-fun GameDetail(sys: String, r: JSONObject, m: JSONObject, onClose: () -> Unit) {
+fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = null, group: List<JSONObject> = listOf(r),
+               onChanged: () -> Unit = {}, onClose: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var msg by remember { mutableStateOf("") }
     val canPlay = remember(sys) { Emulators.forSystem(ctx, sys) }
-    Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false)) {
-        Box(Modifier.fillMaxWidth(0.85f).clip(RoundedCornerShape(16.dp)).background(Panel).padding(20.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                val img = cover(sys, r, m)
-                Box(Modifier.width(200.dp).aspectRatio(3f / 4f).clip(RoundedCornerShape(10.dp)).background(Bg)) {
-                    Img(img, 600, Modifier.fillMaxSize())
+    var confirm by remember { mutableStateOf(false) }
+    var job by remember { mutableStateOf<Jobs.Job?>(null) }
+    val size = group.sumOf { it.optLong("size") }
+    val first = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(Unit) { kotlinx.coroutines.delay(200); runCatching { first.requestFocus() } }
+    job?.let { j ->
+        LaunchedEffect(j) {
+            while (!j.done) { msg = "${j.message} · ${(j.progress * 100).toInt()} %"; kotlinx.coroutines.delay(400) }
+            if (j.error != null) { msg = j.error!!; job = null } else { onChanged(); onClose() }
+        }
+    }
+    val cover = cover(sys, r, m)
+    val hero by produceState<File?>(null, r.getString("path")) {
+        value = withContext(Dispatchers.IO) { if (sys == "ports") null else runCatching { Cocoon.media(ctx, sys, r.getString("path"), "hero") }.getOrNull() }
+    }
+    val sysIcon by produceState<File?>(null, sys) { value = withContext(Dispatchers.IO) { runCatching { Media.icon(ctx, sys) }.getOrNull() } }
+    val fav = r.getString("path") in Favorites.paths
+    val facts = listOf(m.optString("year"), m.optString("developer"), m.optString("genre"), r.optString("extra")).filter { it.isNotEmpty() }
+
+    @Composable
+    fun Chips() = Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Chip(fmtBytes(size))
+        if (lib != null) Chip(if (lib.optBoolean("inRomm")) "☁ in RomM" else "☁ nicht in RomM", lib.optBoolean("inRomm"))
+        when (lib?.optString("save")) {
+            "synced" -> Chip("💾 Spielstand in RomM", true); "pending" -> Chip("💾 Spielstand geändert"); "local" -> Chip("💾 nur auf dem Thor")
+        }
+    }
+
+    @Composable
+    fun Buttons(stacked: Boolean) {
+        val play: (() -> Unit)? = if (canPlay != null && !r.optBoolean("noBase")) ({
+            scope.launch {
+                val res = withContext(Dispatchers.IO) { Emulators.launch(ctx, sys, File(r.getString("path"))) }
+                msg = res.optString("error"); if (!res.has("error")) onClose()
+            }
+        }) else null
+        val list = buildList<Triple<String, androidx.compose.ui.graphics.vector.ImageVector, () -> Unit>> {
+            play?.let { add(Triple("Spielen", Icons.Filled.PlayArrow, it)) }
+            add(Triple(if (fav) "Favorit ✓" else "Favorit", if (fav) Icons.Filled.Star else Icons.Filled.StarBorder, { Favorites.toggle(ctx, r.getString("path")) }))
+            val queued = Background.isQueued(r.getString("path"))
+            if (sys != "ports" && lib != null && !queued) add(Triple(if (lib.optBoolean("inRomm")) "Auslagern" else "Hochladen + auslagern", Icons.Filled.CloudUpload, { confirm = true }))
+            if (queued) add(Triple("Wird ausgelagert …", Icons.Filled.CloudUpload, {}))
+            add(Triple("Zurück", Icons.Filled.ArrowBack, onClose))
+        }
+        if (stacked) Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            list.chunked(2).forEachIndexed { row, pair -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                pair.forEachIndexed { i, (l, ic, a) ->
+                    BigButton(l, ic, primary = row == 0 && i == 0 && play != null, modifier = Modifier.weight(1f).firstFocus(first, row == 0 && i == 0), onClick = a)
                 }
-                Column(Modifier.weight(1f)) {
-                    Title(title(r, m))
-                    listOf(m.optString("year"), m.optString("developer"), m.optString("genre")).filter { it.isNotEmpty() }.joinToString(" · ")
-                        .takeIf { it.isNotEmpty() }?.let { Line(it, Muted) }
-                    if (r.optString("extra").isNotEmpty()) Line(r.optString("extra"), Muted)
-                    Spacer(Modifier.height(10.dp))
-                    m.optString("desc").takeIf { it.isNotEmpty() }?.let { Text(it, fontSize = 14.sp, maxLines = 6, overflow = TextOverflow.Ellipsis) }
-                    Acts {
-                        if (canPlay != null && !r.optBoolean("noBase")) Act("▶ Spielen (${canPlay.name})", primary = true) {
-                            scope.launch {
-                                val res = withContext(Dispatchers.IO) { Emulators.launch(ctx, sys, File(r.getString("path"))) }
-                                msg = res.optString("error")
-                                if (!res.has("error")) onClose()
-                            }
-                        }
-                        val fav = r.getString("path") in Favorites.paths
-                        Act(if (fav) "★ Favorit entfernen" else "☆ Zu Favoriten") { Favorites.toggle(ctx, r.getString("path")) }
-                        Act("Zurück", onClick = onClose)
+            } }
+        } else Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            list.forEachIndexed { i, (l, ic, a) ->
+                BigButton(l, ic, primary = i == 0 && play != null, modifier = (if (i == 0 && play != null) Modifier.width(220.dp) else Modifier).firstFocus(first, i == 0), onClick = a)
+            }
+        }
+    }
+
+    DialogOpen()
+    Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        ImmersiveDialog()
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().background(Bg)) {
+            // backdrop: Cocoon hero art, else the cover blurred
+            val back = hero ?: cover
+            if (back != null) Img(back, 1280, Modifier.fillMaxSize().then(if (hero == null) Modifier.blur(40.dp) else Modifier), ContentScale.Crop)
+            Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.horizontalGradient(
+                0f to Color(0xF2050608), 0.55f to Color(0xCC050608), 1f to Color(0x66050608))))
+            Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(0.5f to Color.Transparent, 1f to Color(0xE6050608))))
+            val boxW = maxWidth
+            val wide = maxWidth / maxHeight > 1.3f   // top screen 16:9; the bottom screen is almost square
+            if (wide) {
+                Row(Modifier.fillMaxSize().padding(horizontal = 56.dp, vertical = 40.dp), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(40.dp)) {
+                    Box(Modifier.fillMaxHeight(0.82f).aspectRatio(3f / 4f).clip(RoundedCornerShape(18.dp)).background(Panel)) {
+                        Img(cover, 900, Modifier.fillMaxSize(), ContentScale.Crop)
                     }
-                    if (msg.isNotEmpty()) Line(msg, Bad)
+                    Column(Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (sysIcon != null) { Img(sysIcon, 96, Modifier.size(28.dp)); Spacer(Modifier.width(10.dp)) }
+                            Text(facts.joinToString("  ·  "), color = Muted, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Text(title(r, m), fontSize = 44.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, lineHeight = 48.sp,
+                            maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(vertical = 10.dp))
+                        Chips()
+                        m.optString("desc").takeIf { it.isNotEmpty() }?.let {
+                            Text(it, fontSize = 16.sp, color = Color(0xD9FFFFFF), lineHeight = 22.sp, maxLines = 4, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(top = 16.dp))
+                        }
+                        Spacer(Modifier.height(28.dp))
+                        Buttons(stacked = false)
+                        if (msg.isNotEmpty()) Text(msg, color = if (job != null) Muted else Bad, modifier = Modifier.padding(top = 12.dp))
+                    }
+                }
+            } else {
+                Column(Modifier.fillMaxSize().padding(24.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                        Box(Modifier.width(boxW * 0.32f).aspectRatio(3f / 4f).clip(RoundedCornerShape(14.dp)).background(Panel)) {
+                            Img(cover, 600, Modifier.fillMaxSize(), ContentScale.Crop)
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (sysIcon != null) { Img(sysIcon, 96, Modifier.size(22.dp)); Spacer(Modifier.width(8.dp)) }
+                                Text(facts.take(2).joinToString(" · "), color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            Text(title(r, m), fontSize = 28.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, lineHeight = 32.sp,
+                                maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(vertical = 8.dp))
+                            Chips()
+                        }
+                    }
+                    m.optString("desc").takeIf { it.isNotEmpty() }?.let {
+                        Text(it, fontSize = 14.sp, color = Color(0xD9FFFFFF), maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 14.dp))
+                    }
+                    Spacer(Modifier.weight(1f))
+                    if (msg.isNotEmpty()) Text(msg, color = if (job != null) Muted else Bad, modifier = Modifier.padding(bottom = 10.dp))
+                    Buttons(stacked = true)
                 }
             }
         }
     }
+    if (confirm) OffloadConfirm(title(r, m), size, lib?.optBoolean("inRomm") == true, onYes = {
+        confirm = false
+        Background.offload(ctx, group.map { it.getString("path") }, title(r, m), size)
+        onClose()
+    }) { confirm = false }
 }
+
+@Composable
+private fun Chip(text: String, on: Boolean = false) =
+    Text(text, fontSize = 13.sp, color = if (on) Color.Black else Color.White, maxLines = 1,
+        modifier = Modifier.clip(RoundedCornerShape(50)).background(if (on) Color(0xE6FFFFFF) else Color(0x33FFFFFF)).padding(horizontal = 12.dp, vertical = 5.dp))
+
+@Composable
+private fun OffloadConfirm(name: String, size: Long, inRomm: Boolean, onYes: () -> Unit, onClose: () -> Unit) =
+    ConsoleMenu("$name auslagern?",
+        (if (inRomm) "" else "Wird zuerst zu RomM hochgeladen. ") + "Danach wird es vom Thor gelöscht (${fmtBytes(size)} frei). " +
+            "Spielstände bleiben auf dem Thor und kommen nach RomM. Zurück holen geht im Store.",
+        options = listOf("Auslagern" to onYes), onClose = onClose)
 
 @Composable
 private fun ConsoleGrid(list: List<Sys>, pick: (String) -> Unit) {
     val ctx = LocalContext.current
     val first = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(Unit) { kotlinx.coroutines.delay(200); runCatching { first.requestFocus() } }
-    LazyVerticalGrid(GridCells.Adaptive(190.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    val (cst, cfl) = snapGrid()
+    CenteredFocus { LazyVerticalGrid(GridCells.Adaptive(190.dp), state = cst, flingBehavior = cfl, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         items(list.size) { i ->
             val s = list[i]
             FocusCard(if (i == 0) Modifier.fillMaxWidth().focusRequester(first) else Modifier.fillMaxWidth(), onClick = { pick(s.id) }) {
@@ -185,8 +322,8 @@ private fun ConsoleGrid(list: List<Sys>, pick: (String) -> Unit) {
                     if (icon != null) Img(icon, 200, Modifier.size(90.dp)) else Text(s.name.take(2), fontSize = 40.sp, color = Muted)
                 }
                 Text(s.name, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("${entries(s).size} Spiele", color = Muted, fontSize = 13.sp)
+                Text("${entries(s).size} Spiele · ${fmtBytes(s.roms.sumOf { it.optLong("size") })}", color = Muted, fontSize = 13.sp)
             }
         }
-    }
+    } }
 }

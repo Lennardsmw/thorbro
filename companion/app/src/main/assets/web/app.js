@@ -51,6 +51,9 @@ function showTab(name) {
   if (name === 'saves') loadSaves();
   if (name === 'library') loadLibrary();
   if (name === 'screen') screenStatus();
+  if (name === 'stream') loadStream();
+  if (name === 'store') loadStore(false);
+  if (name === 'drivers') loadDrivers(false);
   if (name === 'files') loadFiles(currentDir);
   if (name === 'device') loadDevice();
 }
@@ -130,9 +133,20 @@ async function screenStatus() {
   $('#screenShot').href = `/api/screen/frame.jpg?${authQ()}`;
   if (body.running && !$('#screenImg').src.includes('stream')) $('#screenImg').src = `/api/screen/stream?${authQ()}&t=${Date.now()}`;
   if (!body.running) $('#screenImg').removeAttribute('src');
+  // while it streams there is only "Beenden"
+  $('#screenStart').hidden = body.running; $('#screenStop').hidden = !body.running;
+  if (body.running) $('#screenStart').disabled = false;
   return body.running;
 }
+$('#screenFull').onclick = () => {
+  const el = $('.screenwrap');
+  (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+};
+$('#screenImg').ondblclick = () => $('#screenFull').click();
 $('#screenStart').onclick = async () => {
+  if ($('#screenStart').disabled) return;
+  $('#screenStart').disabled = true;
+  setTimeout(() => ($('#screenStart').disabled = false), 30000);
   await api('/api/screen/start', { method: 'POST' });
   $('#screenInfo').textContent = 'Auf dem Thor „Jetzt starten“ tippen …';
   for (let i = 0; i < 60; i++) { await sleep(1000); if (await screenStatus()) return; }
@@ -517,6 +531,11 @@ const coverOf = (sysId, r, m) => (m.media || []).includes('icon') ? mediaUrl(sys
 const fmtTime = (s) => (s >= 3600 ? Math.floor(s / 3600) + ' h ' : '') + Math.round((s % 3600) / 60) + ' min';
 
 let emus = null;
+let lib = null;
+async function loadLib(refresh) {
+  try { lib = (await api('/api/library/status' + (refresh ? '?refresh=1' : ''))).body; } catch { lib = null; }
+  renderRoms();
+}
 async function loadEmus() {
   try { emus = (await api('/api/emulators')).body; } catch { emus = null; }
   try { raStatus = (await api('/api/ra')).body; } catch { raStatus = null; }
@@ -524,6 +543,7 @@ async function loadEmus() {
 async function loadRoms(refresh) {
   $('#romStats').textContent = 'Suche ROMs …';
   loadEmus().then(renderRoms);
+  loadLib(refresh);
   try { romData = (await api('/api/roms' + (refresh ? '?refresh=1' : ''))).body; }
   catch (err) { $('#romStats').textContent = 'Fehler: ' + err.message; return; }
   if (refresh) Object.keys(metaCache).forEach((k) => delete metaCache[k]);
@@ -589,6 +609,7 @@ function romCard(r, sysId) {
     <div class="rtitle">${m.favorite ? '<span class="fav">★</span> ' : ''}${esc(title)}</div>
     ${(() => { const ra = (raCache[sysId] || {})[r.path]; return ra && ra.gameId ? `<div class="rmeta ra">🏆 ${ra.awarded ?? 0}/${ra.achievements} Erfolge</div>` : ''; })()}
     <div class="rmeta">${esc(line) || '&nbsp;'}</div>
+    ${(() => { const g = lib?.games?.[r.path]; if (!g) return ''; return `<div class="rommicons"><span class="ri ${g.inRomm ? 'on' : ''}" title="${g.inRomm ? 'Spiel in RomM' : 'Spiel nicht in RomM'}">☁</span>${g.save !== 'none' ? `<span class="ri ${g.save === 'synced' ? 'on' : ''}" title="Spielstand ${g.save === 'synced' ? 'in RomM' : 'noch nicht in RomM'}">💾</span>` : ''}</div>`; })()}
     <div class="rbadges">${m.region ? `<span class="badge">${esc(m.region)}</span>` : ''}${swBadges || `<span class="badge">${esc(r.ext)}</span>`}<span class="muted">${fmt(sw ? sw.size : r.size)}</span></div>
   </div>`;
 }
@@ -672,6 +693,7 @@ function openRom(path, sysId) {
           <button data-dir-roms="${esc(folder)}">Im Datei-Tab öffnen</button>
           ${r.dir ? '' : `<a class="btn" href="/api/files/raw?${q({ path: r.path, token })}">Herunterladen</a>`}
           <button data-romdel="${esc(r.path)}">Löschen</button>
+          ${lib?.connected && sysId !== 'ports' && sysId !== '_unassigned' ? `<button data-offload="${esc(JSON.stringify(r.group ? r.group.all.map((x) => x.path) : [r.path]))}" data-offload-size="${r.group ? r.group.size : r.size}" data-offload-in="${lib.games?.[r.path]?.inRomm ? 1 : 0}" data-offload-name="${esc(m.title || r.name.replace(/\s*[([].*$/, ''))}">${lib.games?.[r.path]?.inRomm ? 'In RomM auslagern' : 'Hochladen + auslagern'}</button>` : ''}
           <span class="grow"></span>
           <button data-close>Schließen</button>
         </div>
@@ -680,6 +702,77 @@ function openRom(path, sysId) {
     </div>`;
   $('#romDetail').showModal();
 }
+
+$('#romDetail').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-offload]');
+  if (!b) return;
+  const paths = JSON.parse(b.dataset.offload);
+  const size = +b.dataset.offloadSize;
+  if (!confirm((b.dataset.offloadIn === '1' ? '' : 'Das Spiel wird zuerst zu RomM hochgeladen.\n') +
+    `Danach wird es vom Thor gelöscht (${fmt(size)} frei). Spielstände bleiben auf dem Thor und kommen nach RomM.\nZurückholen geht im Store.`)) return;
+  try {
+    await api('/api/library/offload?' + paths.map((p) => 'path=' + encodeURIComponent(p)).join('&') + '&' + q({ name: b.dataset.offloadName || '' }), { method: 'POST' });
+    toast('Wird ausgelagert – Fortschritt oben rechts');
+    $('#romDetail').close();
+    pollActivity();
+  } catch (err) { alert(err.message); }
+});
+
+// ---------- store: games only in RomM ----------
+let storeData = null;
+async function loadStore(refresh) {
+  $('#storeInfo').textContent = 'Lade RomM-Bibliothek …';
+  try { storeData = (await api('/api/store' + (refresh ? '?refresh=1' : ''))).body; }
+  catch (err) { $('#storeInfo').textContent = 'Fehler: ' + err.message; return; }
+  renderStore();
+}
+function renderStore() {
+  const d = storeData;
+  if (d.error) { $('#storeInfo').textContent = 'RomM nicht erreichbar: ' + d.error; return; }
+  if (!d.connected) { $('#storeInfo').textContent = 'RomM ist nicht verbunden (Tab Bibliothek).'; $('#storeList').innerHTML = ''; return; }
+  const f = $('#storeFilter').value.trim().toLowerCase();
+  const n = d.systems.reduce((a, s) => a + s.games.length, 0);
+  $('#storeInfo').textContent = `${n} Spiele nur in RomM`;
+  $('#storeList').innerHTML = d.systems.map((s) => {
+    const games = s.games.filter((g) => !f || g.name.toLowerCase().includes(f));
+    if (!games.length) return '';
+    return `<div class="romhead">${sysIcon(s.system, 'headicon')}<h2>${esc(s.name)}</h2><span class="muted">${games.length}</span></div>
+      <div class="covergrid">${games.map((g) => `<div class="romcard" data-store="${g.id}">
+        ${g.hasCover ? `<img class="cover" loading="lazy" alt="" src="/api/romm/cover/${g.id}?token=${encodeURIComponent(token)}">` : `<div class="cover nocover">${sysIcon(s.system, 'bigicon')}<span>${esc(g.name)}</span></div>`}
+        <div class="rtitle">${esc(g.name)}</div>
+        <div class="rmeta" id="st-${g.id}">${fmt(g.size)}</div>
+        <div class="bar"><i id="sb-${g.id}" style="width:0"></i></div>
+      </div>`).join('')}</div>`;
+  }).join('');
+  pollStore();
+}
+let storePoll = null;
+async function pollStore() {
+  clearTimeout(storePoll);
+  let busy = false;
+  try {
+    const { body } = await api('/api/store/downloads');
+    for (const [id, j] of Object.entries(body)) {
+      const t = $('#st-' + id), bar = $('#sb-' + id);
+      if (!t) continue;
+      if (j.error) t.textContent = 'Fehler: ' + j.error;
+      else if (j.done) { t.textContent = '✓ auf dem Thor'; bar.style.width = '100%'; }
+      else { busy = true; t.textContent = `${Math.round(j.progress * 100)} %`; bar.style.width = (j.progress * 100) + '%'; }
+    }
+  } catch {}
+  if (busy && !$('#store').hidden) storePoll = setTimeout(pollStore, 1000);
+}
+$('#storeList').addEventListener('click', async (e) => {
+  const c = e.target.closest('[data-store]');
+  if (!c) return;
+  const id = c.dataset.store;
+  const t = $('#st-' + id);
+  if (t.textContent.includes('%') || t.textContent.startsWith('✓')) return;
+  try { await api('/api/store/download?' + q({ id }), { method: 'POST' }); t.textContent = '0 %'; pollStore(); }
+  catch (err) { alert(err.message); }
+});
+$('#storeFilter').oninput = renderStore;
+$('#storeReload').onclick = () => loadStore(true);
 
 $('#romFilter').oninput = renderRoms;
 $('#romRegion').onchange = renderRoms;
@@ -840,7 +933,16 @@ $('#rommList').onclick = async (e) => {
 };
 
 // ---------- save backups ----------
+const histLabel = { save_up: '⬆ Spielstand hochgeladen', save_down: '⬇ Spielstand von RomM', rom_up: '⬆ Spiel zu RomM', offload: '📦 Ausgelagert', download: '⬇ Aus RomM geladen', restore: '↺ Spielstand zurückgesetzt' };
+async function loadHistory() {
+  try {
+    const list = (await api('/api/history?limit=30')).body;
+    $('#historyList').innerHTML = list.length ? `<table class="files"><tbody>${list.map((e) => `<tr><td>${esc((e.name || '–').replace(/\s*\(.*$/, ''))}<div class="muted">${histLabel[e.kind] || esc(e.kind)}${e.system ? ' · ' + esc(e.system) : ''}</div></td><td class="muted">${new Date(e.t).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}</td></tr>`).join('')}</tbody></table>`
+      : '<p class="muted">Noch nichts passiert.</p>';
+  } catch (err) { $('#historyList').textContent = 'Fehler: ' + err.message; }
+}
 async function loadSaves() {
+  loadHistory();
   $('#savesInfo').textContent = 'Lade …';
   const { body } = await api('/api/saves');
   $('#savesAuto').checked = body.auto;
@@ -1003,8 +1105,124 @@ $('#mkdir').onclick = async () => {
 $('#filesReload').onclick = () => loadFiles(currentDir);
 
 // ---------- start ----------
+// ---------- streaming (Moonlight / scrcpy) ----------
+async function loadStream() {
+  let s;
+  try { s = (await api('/api/stream')).body; } catch (err) { $('#mlStatus').textContent = 'Fehler: ' + err.message; return; }
+  const btn = $('#mlInstall');
+  if (!s.installed) {
+    $('#mlStatus').textContent = 'Moonlight ist nicht installiert.';
+    btn.textContent = 'Moonlight installieren' + (s.latest ? ` (${s.latest})` : ''); btn.hidden = false;
+  } else if (s.updateAvailable) {
+    $('#mlStatus').textContent = `Moonlight ${s.version} installiert, ${s.latest} verfügbar.`;
+    btn.textContent = 'Aktualisieren'; btn.hidden = false;
+  } else {
+    $('#mlStatus').innerHTML = `<span class="ok">Moonlight ${esc(s.version || '')} installiert</span>`;
+    btn.hidden = true;
+  }
+  $('#mlLaunch').hidden = !s.installed;
+}
+$('#mlInstall').onclick = async () => {
+  const btn = $('#mlInstall'); btn.disabled = true;
+  try {
+    const { body } = await api('/api/stream/install', { method: 'POST' });
+    const j = await waitJob(body.id, (j) => ($('#mlStatus').textContent = `${j.message || 'Lade'} … ${Math.round(j.progress * 100)} %`));
+    if (j.error) throw new Error(j.error);
+    $('#mlStatus').textContent = 'Installation auf dem Thor bestätigen …';
+    const st = await waitInstall(j.result.session);
+    toast(st === 'success' ? 'Moonlight installiert' : st);
+  } catch (err) { alert(err.message); }
+  btn.disabled = false; loadStream();
+};
+$('#mlScreen').onclick = () => { showTab('screen'); $('#screenStart').click(); };
+$('#mlLaunch').onclick = async () => {
+  try { await api('/api/apps/com.limelight/launch', { method: 'POST' }); toast('Moonlight startet …'); } catch (err) { alert(err.message); }
+};
+$('#mlScan').onclick = async () => {
+  $('#mlScanInfo').textContent = 'Suche Sunshine-Rechner …'; $('#mlHosts').innerHTML = '';
+  try {
+    const { hosts } = (await api('/api/stream/hosts')).body;
+    $('#mlScanInfo').textContent = hosts.length ? `${hosts.length} gefunden` : 'Keiner gefunden. Läuft Sunshine und ist der Rechner im selben WLAN?';
+    $('#mlHosts').innerHTML = hosts.map((h) => `<div class="card"><h3>${esc(h.name)}</h3><div>${esc(h.address)}</div>
+      <p><a class="btn" href="${esc(h.web)}" target="_blank" rel="noopener">PIN eingeben</a></p></div>`).join('');
+  } catch (err) { $('#mlScanInfo').textContent = 'Fehler: ' + err.message; }
+};
+
+// ---------- GPU drivers ----------
+let drv = null;
+async function loadDrivers(refresh) {
+  $('#drvInfo').textContent = 'Lade Treiberlisten …';
+  try { drv = (await api('/api/drivers' + (refresh ? '?refresh=1' : ''))).body; }
+  catch (err) { $('#drvInfo').textContent = 'Fehler: ' + err.message; return; }
+  renderDrivers();
+}
+function renderDrivers() {
+  const gpu = drv.gpu ? `${drv.soc} · ${drv.gpu}` : drv.soc;
+  $('#drvInfo').textContent = `Chip: ${gpu}. Turnip-Treiber für Adreno 6xx/7xx passen; „a8xx“-Builds nur für Adreno 8xx.`;
+  const have = new Set(drv.downloaded.map((d) => d.name));
+  $('#drvLocal').innerHTML = drv.downloaded.length ? `<table class="files"><tbody>${drv.downloaded.map((d) => `<tr>
+      <td>${esc(d.driver?.name || d.name)}<div class="muted">${esc(d.name)}${d.driver?.version ? ' · ' + esc(d.driver.version) : ''}${d.driver ? '' : ' · <span class="err">keine meta.json</span>'}</div></td>
+      <td>${fmt(d.size)}</td><td><button data-del="${esc(d.name)}">Löschen</button></td></tr>`).join('')}</tbody></table>`
+    : '<p class="muted">Noch keine. Unten einen Treiber laden.</p>';
+  const emus = drv.emulators.filter((e) => e.installed);
+  $('#drvHow').innerHTML = `Die Dateien liegen in <code>${esc(drv.dir)}</code>. Importieren im Emulator:` +
+    (emus.length ? '<ul>' + emus.map((e) => `<li><strong>${esc(e.name)}</strong>: ${esc(e.where)} <button data-open="${esc(e.pkg)}">Öffnen</button></li>`).join('') + '</ul>'
+      : ' kein passender Emulator installiert (Eden, Azahar, Dolphin).');
+  $('#drvSources').innerHTML = drv.sources.map((s) => `<details class="panel" ${s.id === 'k11' ? 'open' : ''}>
+    <summary><strong>${esc(s.name)}</strong> <span class="muted">${esc(s.note)}</span></summary>
+    ${s.error ? `<p class="err">${esc(s.error)}</p>` : ''}
+    <table class="files"><tbody>${s.releases.map((r) => r.assets.map((a) => `<tr>
+      <td>${esc(a.name)}<div class="muted">${esc(r.name)} · ${esc(r.date)}</div></td><td>${fmt(a.size)}</td>
+      <td>${have.has(a.name) ? '<span class="ok">geladen</span>' : `<button data-get="${esc(a.url)}">Laden</button>`}</td></tr>`).join('')).join('')}</tbody></table>
+    </details>`).join('');
+}
+$('#drivers').addEventListener('click', async (e) => {
+  const t = e.target;
+  try {
+    if (t.dataset.get) {
+      t.disabled = true;
+      const { body } = await api('/api/drivers/download?' + q({ url: t.dataset.get }), { method: 'POST' });
+      const j = await waitJob(body.id, (j) => (t.textContent = Math.round(j.progress * 100) + ' %'));
+      if (j.error) throw new Error(j.error);
+      toast(j.result.warning || 'Treiber geladen');
+      loadDrivers(false);
+    } else if (t.dataset.del) {
+      if (!confirm(t.dataset.del + ' löschen?')) return;
+      await api('/api/drivers?' + q({ name: t.dataset.del }), { method: 'DELETE' });
+      loadDrivers(false);
+    } else if (t.dataset.open) {
+      await api(`/api/apps/${t.dataset.open}/launch`, { method: 'POST' });
+      toast('Emulator startet …');
+    }
+  } catch (err) { alert(err.message); t.disabled = false; }
+});
+$('#drvReload').onclick = () => loadDrivers(true);
+
+// ---------- background activity, top right (offload queue, downloads, RomM upload) ----------
+let actTimer = null, actWasBusy = false;
+async function pollActivity() {
+  clearTimeout(actTimer);
+  let list = [];
+  try { list = (await api('/api/activity')).body; } catch {}
+  let box = $('#activity');
+  if (!box) { box = Object.assign(document.createElement('div'), { id: 'activity' }); document.body.append(box); }
+  box.innerHTML = list.map((a) => {
+    const n = a.total > 1 || (a.total === 1 && !a.done) ? `<b>${a.index}/${a.total}</b>` : '';
+    const err = a.error && a.error !== 'null' ? a.error : '';
+    return `<div class="act ${a.done ? (err ? 'bad' : 'ok') : ''}"><div class="acthead"><span>${a.done ? (err ? '⚠' : '✓') : a.kind === 'download' ? '⬇' : '⬆'} ${esc(a.title)}</span>${n}</div>
+      <div class="actname">${esc(a.name || '')}</div>
+      ${a.done ? (err ? `<div class="err">${esc(err)}</div>` : '') : `${a.step && a.step !== a.name ? `<div class="muted">${esc(a.step)}</div>` : ''}<div class="bar"><i style="width:${Math.round(a.progress * 100)}%"></i></div><div class="muted">${Math.round(a.progress * 100)} %</div>`}</div>`;
+  }).join('');
+  const busy = list.some((a) => !a.done);
+  // something finished: refresh what changed
+  if (actWasBusy && !busy) { if (romData) loadRoms(true); if (storeData && !$('#store').hidden) loadStore(true); }
+  actWasBusy = busy;
+  actTimer = setTimeout(pollActivity, list.length ? 1000 : 5000);
+}
+
 async function start() {
   if (!token) return showLogin();
+  pollActivity();
   try { await loadDevice(); showTab(store.get('tab', 'upload')); if (!romData) loadRoms(false); }
   catch (err) { if (!(err instanceof AuthError)) $('#conn').textContent = 'Thor nicht erreichbar'; }
 }

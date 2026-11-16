@@ -28,7 +28,26 @@ object Romm {
 
     @Volatile private var pending: JSONObject? = null
 
+    // ---------- home network shortcut ----------
+    /** RomM's address inside the home network (e.g. http://192.168.178.159:6664); used whenever it answers, so
+     *  uploads and downloads do not go out to the internet and back */
+    fun lanUrl(ctx: Context) = (Prefs.of(ctx).getString("rommLanUrl", "") ?: "").trimEnd('/')
+    fun setLanUrl(ctx: Context, u: String) { Prefs.of(ctx).edit().putString("rommLanUrl", u.trim().trimEnd('/')).apply(); lanCheck = 0L to false }
+    @Volatile private var lanCheck = 0L to false
+
+    private fun fastBase(ctx: Context): String? {
+        val lan = lanUrl(ctx).ifEmpty { return null }
+        val (at, ok) = lanCheck
+        if (System.currentTimeMillis() - at < 60_000) return if (ok) lan else null
+        val reach = runCatching {
+            (URL("$lan/api/heartbeat").openConnection() as HttpURLConnection).run { connectTimeout = 1500; readTimeout = 1500; responseCode == 200 }
+        }.getOrDefault(false)
+        lanCheck = System.currentTimeMillis() to reach
+        return if (reach) lan else null
+    }
+
     fun status(ctx: Context): JSONObject = JSONObject().put("url", url(ctx)).put("connected", token(ctx).isNotEmpty())
+        .put("lanUrl", lanUrl(ctx)).put("viaLan", lanCheck.second && lanUrl(ctx).isNotEmpty())
         .put("pending", pending).put("canWrite", hasScope(ctx, "roms.write"))
 
     fun disconnect(ctx: Context) { Prefs.of(ctx).edit().remove("rommToken").apply(); pending = null }
@@ -117,7 +136,9 @@ object Romm {
     fun cover(ctx: Context, romId: Int): ByteArray? {
         val r = JSONObject(request(ctx, "GET", "/api/roms/$romId/simple"))
         val path = r.optString("path_cover_small").ifEmpty { r.optString("path_cover_large") }.ifEmpty { return null }
-        val c = open(ctx, "GET", if (path.startsWith("http")) path else "/assets/romm/resources/$path".replace("//", "/"))
+        // newer RomM returns the full "/assets/romm/resources/..." path with a "?ts=<date time>" containing a space
+        val rel = when { path.startsWith("http") -> path; path.startsWith("/assets/") -> path; else -> "/assets/romm/resources/$path".replace("//", "/") }
+        val c = open(ctx, "GET", rel.replace(" ", "%20"))
         return if (c.responseCode == 200) c.inputStream.use { it.readBytes() } else null
     }
 
@@ -230,7 +251,7 @@ object Romm {
 
     private fun open(ctx: Context, method: String, path: String, body: String? = null, auth: Boolean = true, rangeFrom: Long = 0,
                      headers: Map<String, String> = emptyMap(), raw: ByteArray? = null, rawLen: Int = 0): HttpURLConnection {
-        val base = url(ctx).ifEmpty { error("Keine RomM-Adresse eingetragen") }
+        val base = (if (auth) fastBase(ctx) else null) ?: url(ctx).ifEmpty { error("Keine RomM-Adresse eingetragen") }
         val c = URL(if (path.startsWith("http")) path else base + path).openConnection() as HttpURLConnection
         c.requestMethod = method
         c.connectTimeout = 10_000; c.readTimeout = 120_000

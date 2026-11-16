@@ -19,6 +19,8 @@ import java.util.zip.ZipOutputStream
  */
 object Saves {
     private const val KEEP = 30
+    /** a location bigger than this is game data, not saves; it is skipped instead of filling the card */
+    private const val MAX_BYTES = 512L shl 20
 
     /** where a location's files are; [filter] limits to matching file names (e.g. .sav next to ROMs) */
     class Location(val id: String, val name: String, val emulator: String, val dir: File, val filter: Regex? = null, val maxDepth: Int = 12)
@@ -101,19 +103,29 @@ object Saves {
         for (l in locations(ctx).filter { id == null || it.id == id }) {
             val fs = files(l)
             if (fs.isEmpty()) continue
+            val bytes = fs.sumOf { it.length() }
+            if (bytes > MAX_BYTES) {
+                Logs.i("saves", "${l.id}: ${bytes shr 20} MB, zu groß für eine Spielstand-Sicherung, übersprungen")
+                out.put(JSONObject().put("id", l.id).put("skipped", "zu groß (${bytes shr 20} MB)")); continue
+            }
             val fp = fingerprint(fs, l.dir)
             val dir = File(backupRoot(), l.id).apply { mkdirs() }
             val last = File(dir, "last.fingerprint")
             if (!force && last.exists() && last.readText() == fp) { out.put(JSONObject().put("id", l.id).put("skipped", "unverändert")); continue }
             val name = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(Date()) + (if (label.isNotEmpty()) "-$label" else "") + ".zip"
             val zip = File(dir, name)
-            ZipOutputStream(zip.outputStream().buffered()).use { z ->
-                z.setComment(l.dir.path)
-                for (f in fs) {
-                    z.putNextEntry(ZipEntry(f.relativeTo(l.dir).path).apply { time = f.lastModified() })
-                    f.inputStream().use { it.copyTo(z) }
-                    z.closeEntry()
+            try {
+                ZipOutputStream(zip.outputStream().buffered()).use { z ->
+                    z.setComment(l.dir.path)
+                    for (f in fs) {
+                        z.putNextEntry(ZipEntry(f.relativeTo(l.dir).path).apply { time = f.lastModified() })
+                        f.inputStream().use { it.copyTo(z) }
+                        z.closeEntry()
+                    }
                 }
+            } catch (e: Exception) { // e.g. card full: no half-written snapshot left behind
+                zip.delete()
+                out.put(JSONObject().put("id", l.id).put("error", e.message)); continue
             }
             last.writeText(fp)
             snapshots(l.id).drop(KEEP).forEach { it.delete() }
@@ -144,6 +156,7 @@ object Saves {
             }
         }
         File(backupRoot(), "${l.id}/last.fingerprint").delete()
+        History.add(ctx, "restore", l.name, detail = zip.name.take(15))
         return JSONObject().put("ok", true).put("restored", n).put("into", l.dir.path)
     }
 

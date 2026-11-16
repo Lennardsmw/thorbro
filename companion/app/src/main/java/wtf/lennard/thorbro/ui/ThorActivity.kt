@@ -1,5 +1,13 @@
 package wtf.lennard.thorbro.ui
 
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Autorenew
+import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Web
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ErrorOutline
 import android.Manifest
 import android.content.Intent
 import android.net.Uri
@@ -77,8 +85,15 @@ class ThorActivity : ComponentActivity() {
         wtf.lennard.thorbro.CrashLog.install(this)
         wtf.lennard.thorbro.FrameStats.attach(this)
         rememberDisplay()
-        setContent { ThorTheme { Root(screen.value) { screen.value = it } } }
+        immersive(window)
+        setContent { ThorTheme { Box(Modifier.fillMaxSize()) {
+            Root(screen.value) { screen.value = it }
+            BackgroundOverlay(Modifier.align(Alignment.TopEnd))
+        } } }
     }
+
+    // full screen like a console: bars come back only with a swipe from the edge
+    override fun onWindowFocusChanged(hasFocus: Boolean) { super.onWindowFocusChanged(hasFocus); if (hasFocus) immersive(window) }
 
     // L1 / R1 switch sections; every key and stick move also feeds the controller tester
     private fun rememberDisplay() { runCatching { wtf.lennard.thorbro.Emulators.display = display?.displayId ?: 0 } }
@@ -91,7 +106,9 @@ class ThorActivity : ComponentActivity() {
         // the live tester and player assignment only matter on the controller page
         if (screen.value == Screen.CONTROLLER) Pads.onKey(event)
         if (event.action == KeyEvent.ACTION_DOWN) when (event.keyCode) {
-            KeyEvent.KEYCODE_BUTTON_B, KeyEvent.KEYCODE_BACK -> if (screen.value != null && !detailOpen) {
+            KeyEvent.KEYCODE_BUTTON_B, KeyEvent.KEYCODE_BACK -> if (openDialogs <= 0) {
+                // on the start screen B does nothing (a console does not quit with B); only the system back gesture leaves
+                if (screen.value == null) return event.keyCode == KeyEvent.KEYCODE_BUTTON_B
                 when {
                     screen.value == Screen.GAMES && GamesNav.system.value != null -> GamesNav.system.value = null
                     screen.value == Screen.CONTROLLER && Pads.lrMode -> Pads.lrMode = false
@@ -116,8 +133,8 @@ class ThorActivity : ComponentActivity() {
     }
 
     companion object {
-        /** a dialog handles B itself */
-        @Volatile var detailOpen = false
+        /** number of open dialogs; a dialog handles B itself */
+        @Volatile var openDialogs = 0
     }
 }
 
@@ -131,10 +148,6 @@ private fun Root(screen: Screen?, open: (Screen?) -> Unit) {
     if (wtf.lennard.thorbro.FrameStats.page != page) { wtf.lennard.thorbro.Logs.i("ui", "Seite: $page"); wtf.lennard.thorbro.FrameStats.page = page }
     var detail by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<HomeGame?>(null) }
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    if (screen == Screen.GAMEPAD) {
-        androidx.compose.runtime.LaunchedEffect(Unit) { ctx.startActivity(android.content.Intent(ctx, GamepadActivity::class.java)); open(null) }
-        return
-    }
     if (screen == null) {
         HomeScreen(open = { open(it) }, showDetail = { detail = it })
     } else {
@@ -144,18 +157,18 @@ private fun Root(screen: Screen?, open: (Screen?) -> Unit) {
                 when (screen) {
                     Screen.GAMES -> GamesScreen()
                     Screen.SYNC -> SyncScreen()
-                    Screen.SAVES -> SavesScreen()
                     Screen.CONTROLLER -> ControllerScreen()
                     Screen.SETTINGS -> SettingsScreen()
-                    Screen.GAMEPAD -> {}
+                    Screen.STORE -> StoreScreen()
+                    Screen.STREAM -> StreamScreen()
+                    Screen.DRIVERS -> DriversScreen()
                 }
             }
             ButtonHints("A" to "Auswählen", "B" to "Zurück")
         }
     }
     detail?.let { g ->
-        ThorActivity.detailOpen = true
-        GameDetail(g.system, g.rom, g.meta) { detail = null; ThorActivity.detailOpen = false }
+        GameDetail(g.system, g.rom, g.meta) { detail = null }
     }
 }
 
@@ -167,86 +180,13 @@ fun ipv4(): Pair<String?, String?> {
     return lan to mesh
 }
 
-@Composable
-private fun SyncScreen() {
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var tick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) { while (true) { delay(5000); tick++ } }
-    var auto by remember { mutableStateOf(RommSync.auto(ctx)) }
-    var busy by remember { mutableStateOf("") }
-    var saves by remember { mutableStateOf<JSONObject?>(null) }
-    LaunchedEffect(tick / 6) { saves = withContext(Dispatchers.IO) { runCatching { Saves.overview(ctx) }.getOrNull() } }
-    val st = remember(tick) { Romm.status(ctx) }
-    // an upload started earlier keeps running in the background: show it again
-    val running = RommSync.current?.takeIf { !it.done }
-    if (running != null) busy = "Spiele hochladen: ${(running.progress * 100).toInt()} % · ${running.message}"
-    else if (running == null && busy.startsWith("Spiele hochladen")) busy = ""
-
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item {
-            FocusCard(Modifier.fillMaxWidth()) {
-                Label("RomM")
-                Row(verticalAlignment = Alignment.CenterVertically) { StatusDot(st.optBoolean("connected")); Big(if (st.optBoolean("connected")) st.optString("url") else "nicht verbunden") }
-                Line(SaveWatcher.last.optString("state", "–"), Muted)
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
-                    Switch(auto, { auto = it; RommSync.setAuto(ctx, it) })
-                    Spacer(Modifier.padding(6.dp)); Line("Spielstände automatisch hochladen, sobald ein Spiel speichert (nur WLAN)")
-                }
-                Acts {
-                    Act("Spielstände synchronisieren", primary = true, enabled = busy.isEmpty() && st.optBoolean("connected")) {
-                        busy = "synchronisiert …"
-                        scope.launch {
-                            val d = withContext(Dispatchers.IO) { runCatching { RommSync.pullSaves(ctx) }.getOrElse { JSONObject().put("error", it.message) } }
-                            val r = withContext(Dispatchers.IO) { runCatching { RommSync.syncSaves(ctx, null) }.getOrElse { JSONObject().put("error", it.message) } }
-                            busy = ""; SaveWatcherNote.last = if (r.has("error")) "Fehler: ${r.optString("error")}"
-                                else "${r.optInt("uploaded")} hochgeladen, ${d.optInt("downloaded")} heruntergeladen" +
-                                    (if (r.optInt("skippedNoGame") > 0) ", ${r.optInt("skippedNoGame")} warten auf ihr Spiel in RomM" else "")
-                        }
-                    }
-                    Act("Alle Spiele zu RomM hochladen", enabled = busy.isEmpty() && st.optBoolean("connected")) {
-                        busy = "prüft …"
-                        scope.launch {
-                            val systems = withContext(Dispatchers.IO) {
-                                runCatching { RommSync.plan(ctx).getJSONArray("systems").let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
-                                    .filter { it.getInt("missing") > 0 }.map { it.getString("system") }.toSet() }.getOrDefault(emptySet())
-                            }
-                            if (systems.isEmpty()) { busy = ""; SaveWatcherNote.last = "RomM hat schon alle Spiele"; return@launch }
-                            val job = RommSync.start(ctx, systems, true)
-                            while (!job.done) { busy = "Spiele hochladen: ${(job.progress * 100).toInt()} % · ${job.message}"; delay(1000) }
-                            busy = ""; SaveWatcherNote.last = job.error?.let { "Fehler: $it" }
-                                ?: job.result?.let { "${it.optInt("romsUploaded")} Spiele, ${it.optInt("savesUploaded")} Spielstände hochgeladen" } ?: ""
-                        }
-                    }
-                    Text(busy.ifEmpty { SaveWatcherNote.last }, color = Muted)
-                }
-            }
-        }
-        item {
-            FocusCard(Modifier.fillMaxWidth()) {
-                Label("Sicherungen auf dem Thor")
-                val locs = saves?.optJSONArray("locations")
-                val n = (0 until (locs?.length() ?: 0)).map { locs!!.getJSONObject(it) }
-                val newest = n.mapNotNull { it.optJSONArray("snapshots")?.optJSONObject(0)?.optLong("time") }.maxOrNull()
-                Big("${n.size} Speicherorte · ${n.sumOf { it.optJSONArray("snapshots")?.length() ?: 0 }} Sicherungen")
-                Line(newest?.let { "Neueste: " + java.text.DateFormat.getDateTimeInstance().format(java.util.Date(it)) } ?: "Noch keine Sicherung", Muted)
-                Acts {
-                    Act("Jetzt sichern", enabled = busy.isEmpty()) {
-                        busy = "sichert …"
-                        scope.launch { withContext(Dispatchers.IO) { runCatching { Saves.backup(ctx, null) } }; busy = ""; tick++ }
-                    }
-                }
-            }
-        }
-    }
-}
-
 object SaveWatcherNote { var last = "" }
 
 @Composable
 private fun SettingsScreen() {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    val first = remember { androidx.compose.ui.focus.FocusRequester() }
     var tick by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) { while (true) { delay(3000); tick++ } }
     val p = remember(tick) { Device.permissions(ctx) }
@@ -254,98 +194,42 @@ private fun SettingsScreen() {
     var autoUpdate by remember { mutableStateOf(Updater.auto(ctx)) }
     var autostart by remember { mutableStateOf(Prefs.autostart(ctx)) }
     var updMsg by remember { mutableStateOf("") }
-
+    var menu by remember { mutableStateOf(false) }
     fun open(action: String) = ctx.startActivity(Intent(action, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-
     val (lan, mesh) = remember(tick) { ipv4() }
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item {
-            FocusCard(Modifier.fillMaxWidth()) {
-                Row(verticalAlignment = Alignment.CenterVertically) { StatusDot(ThorService.running); Big(if (ThorService.running) "ThorBro läuft" else "Server gestoppt") }
-                Label("Im Browser öffnen")
-                lan?.let { Line("http://$it:${ThorService.PORT}") }
-                mesh?.let { Line("http://$it:${ThorService.PORT}   (NetBird, von überall)") }
-                Label("Kopplungscode")
-                Text(Prefs.token(ctx), fontSize = 28.sp, fontFamily = FontFamily.Monospace, color = Accent)
-            }
-        }
-        item { PermRow("Zugriff auf alle Dateien", "Spiele hochladen, Spielstände sichern", p.getBoolean("allFiles")) { open(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION) } }
-        item { PermRow("Über anderen Apps anzeigen", "Spiele und Apps aus der Ferne starten", p.getBoolean("overlay")) { open(Settings.ACTION_MANAGE_OVERLAY_PERMISSION) } }
-        item { PermRow("Apps installieren", "APKs und ThorBro-Updates", p.getBoolean("install")) { open(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES) } }
-        item {
-            PermRow("ROM-Ordner freigegeben", "Spiele in Emulatoren starten", grants > 0) {
-                ctx.startActivity(Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_PICK_FOLDER, true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            }
-        }
-        item {
-            FocusCard(Modifier.fillMaxWidth()) {
-                Row(verticalAlignment = Alignment.CenterVertically) { Switch(autoUpdate, { autoUpdate = it; Updater.configure(ctx, null, it) }); Spacer(Modifier.padding(6.dp)); Line("Automatisch aktualisieren") }
-                Row(verticalAlignment = Alignment.CenterVertically) { Switch(autostart, { autostart = it; Prefs.setAutostart(ctx, it) }); Spacer(Modifier.padding(6.dp)); Line("Beim Hochfahren starten") }
-                Acts {
-                    Act("Nach Updates suchen") {
-                        updMsg = "suche …"
-                        scope.launch {
-                            val r = withContext(Dispatchers.IO) { Updater.update(ctx) }
-                            updMsg = when { r.has("error") -> r.getString("error"); r.has("session") -> "installiere ${r.getString("latest")} …"; else -> "aktuell (${r.getString("current")})" }
-                        }
-                    }
-                    Text(updMsg, color = Muted)
-                }
-            }
-        }
-        item {
-            FocusCard(Modifier.fillMaxWidth()) {
-                Label("Weiteres")
-                Acts {
-                    Act("Neuer Kopplungscode") { Prefs.newToken(ctx); tick++ }
-                    Act("Volle Web-Oberfläche") { ctx.startActivity(Intent(ctx, AppActivity::class.java)) }
-                }
-            }
-        }
-    }
-}
+    val version = remember { Updater.current(ctx) }
 
-@Composable
-private fun PermRow(title: String, sub: String, ok: Boolean, fix: () -> Unit) {
-    FocusCard(Modifier.fillMaxWidth(), onClick = if (ok) null else fix) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            StatusDot(ok)
-            Column(Modifier.weight(1f)) { Big(title); Label(sub) }
-            if (!ok) Act("Erlauben", primary = true, onClick = fix)
-        }
-    }
-}
+    TileGrid(first) {
+        header("ThorBro $version", (if (ThorService.running) "läuft" else "Server gestoppt") + (lan?.let { " · http://$it:${ThorService.PORT}" } ?: "") + " · Code ${Prefs.token(ctx)}")
+        item { ConsoleTile("Im Browser öffnen", "Adresse + Code", androidx.compose.material.icons.Icons.Filled.Language, accent = true,
+            modifier = Modifier.firstFocus(first, true)) { menu = true } }
+        item { ConsoleTile(if (updMsg.isEmpty()) "Nach Updates suchen" else updMsg, "jetzt $version", androidx.compose.material.icons.Icons.Filled.SystemUpdate) {
+            updMsg = "Sucht …"
+            scope.launch {
+                val r = withContext(Dispatchers.IO) { Updater.update(ctx) }
+                updMsg = when { r.has("error") -> "Quelle nicht erreichbar"; r.has("session") -> "Installiert ${r.getString("latest")} …"; else -> "Aktuell" }
+            }
+        } }
+        item { ConsoleTile(if (autoUpdate) "Auto-Update an" else "Auto-Update aus", "alle 6 Stunden", androidx.compose.material.icons.Icons.Filled.Autorenew, accent = autoUpdate) {
+            autoUpdate = !autoUpdate; Updater.configure(ctx, null, autoUpdate) } }
+        item { ConsoleTile(if (autostart) "Autostart an" else "Autostart aus", "beim Hochfahren", androidx.compose.material.icons.Icons.Filled.PowerSettingsNew, accent = autostart) {
+            autostart = !autostart; Prefs.setAutostart(ctx, autostart) } }
+        item { ConsoleTile("Neuer Code", "alte Kopplungen ungültig", androidx.compose.material.icons.Icons.Filled.Key) { Prefs.newToken(ctx); tick++ } }
+        item { ConsoleTile("Web-Oberfläche", "alles auf dem Thor", androidx.compose.material.icons.Icons.Filled.Web) { ctx.startActivity(Intent(ctx, AppActivity::class.java)) } }
 
-@Composable
-private fun SavesScreen() {
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var data by remember { mutableStateOf<JSONObject?>(null) }
-    var busy by remember { mutableStateOf("") }
-    var tick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(tick) { data = withContext(Dispatchers.IO) { runCatching { Saves.overview(ctx) }.getOrNull() } }
-    val locs = data?.optJSONArray("locations")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } } ?: emptyList()
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item {
-            Acts {
-                Act("Alles jetzt sichern", primary = true, enabled = busy.isEmpty()) {
-                    busy = "sichert …"
-                    scope.launch { withContext(Dispatchers.IO) { runCatching { Saves.backup(ctx, null) } }; busy = ""; tick++ }
-                }
-                Text(busy.ifEmpty { "Gesichert wird automatisch, sobald ein Spiel speichert." }, color = Muted)
-            }
+        header("Berechtigungen", if (p.getBoolean("allFiles") && p.getBoolean("overlay") && p.getBoolean("install") && grants > 0) "alles erteilt" else "fehlende antippen")
+        fun perm(title: String, ok: Boolean, fix: () -> Unit) = item {
+            ConsoleTile(title, if (ok) "erteilt" else "antippen zum Erlauben",
+                if (ok) androidx.compose.material.icons.Icons.Filled.CheckCircle else androidx.compose.material.icons.Icons.Filled.ErrorOutline, accent = !ok) { if (!ok) fix() }
         }
-        if (data == null) item { Line("Lade …", Muted) }
-        locs.forEach { l ->
-            item {
-                FocusCard(Modifier.fillMaxWidth(), onClick = {}) {
-                    Big(l.optString("name"))
-                    val snaps = l.optJSONArray("snapshots")
-                    val newest = snaps?.optJSONObject(0)?.optLong("time")
-                    Line("${l.optString("emulator")} · ${l.optInt("files")} Dateien · ${snaps?.length() ?: 0} Sicherungen" +
-                        (newest?.let { " · zuletzt " + java.text.DateFormat.getDateTimeInstance().format(java.util.Date(it)) } ?: ""), Muted)
-                }
-            }
+        perm("Alle Dateien", p.getBoolean("allFiles")) { open(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION) }
+        perm("Über anderen Apps", p.getBoolean("overlay")) { open(Settings.ACTION_MANAGE_OVERLAY_PERMISSION) }
+        perm("Apps installieren", p.getBoolean("install")) { open(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES) }
+        perm("ROM-Ordner", grants > 0) {
+            ctx.startActivity(Intent(ctx, MainActivity::class.java).putExtra(MainActivity.EXTRA_PICK_FOLDER, true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
     }
+    if (menu) ConsoleMenu("Im Browser öffnen",
+        listOfNotNull(lan?.let { "http://$it:${ThorService.PORT}" }, mesh?.let { "http://$it:${ThorService.PORT}  (NetBird)" }).joinToString("\n") + "\nCode: ${Prefs.token(ctx)}",
+        mono = true, options = emptyList()) { menu = false }
 }

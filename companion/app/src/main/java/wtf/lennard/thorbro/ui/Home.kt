@@ -29,7 +29,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BatteryFull
+import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.Gamepad
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SportsEsports
@@ -119,9 +122,10 @@ object HomeData {
 enum class Screen(val label: String, val icon: ImageVector) {
     GAMES("Alle Spiele", Icons.Filled.ViewModule),
     SYNC("Sync", Icons.Filled.Sync),
-    SAVES("Spielstände", Icons.Filled.Save),
     CONTROLLER("Controller", Icons.Filled.SportsEsports),
-    GAMEPAD("Thor als Gamepad", Icons.Filled.Gamepad),
+    STORE("Store", Icons.Filled.Storefront),
+    STREAM("Streaming", Icons.Filled.Cast),
+    DRIVERS("Treiber", Icons.Filled.Memory),
     SETTINGS("Einstellungen", Icons.Filled.Settings),
 }
 

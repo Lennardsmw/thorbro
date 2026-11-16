@@ -78,6 +78,9 @@ class MainActivity : Activity() {
 
     /** Android shows its own "start recording / casting?" dialog */
     private fun askCapture() {
+        // a second tap while Android's dialog is open or the stream already runs would start a second projection and freeze the Thor
+        if (Screen.running || Screen.starting) return
+        Screen.starting = true
         val mpm = getSystemService(android.media.projection.MediaProjectionManager::class.java)
         startActivityForResult(mpm.createScreenCaptureIntent(), REQ_CAPTURE)
     }
@@ -101,6 +104,7 @@ class MainActivity : Activity() {
     @Deprecated("Activity result API needs androidx; plain Activity is enough here")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_CAPTURE && (resultCode != RESULT_OK || data == null)) Screen.starting = false
         if (requestCode == REQ_CAPTURE && resultCode == RESULT_OK && data != null) {
             startForegroundService(Intent(this, ThorService::class.java).setAction(ThorService.ACTION_CAPTURE)
                 .putExtra("code", resultCode).putExtra("data", data))

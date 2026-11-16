@@ -24,6 +24,12 @@ object Screen {
         private set
     @Volatile var running = false
         private set
+    /** Android's "start casting?" dialog is open / the projection is being set up */
+    @Volatile private var startingAt = 0L
+    /** true for at most 30 s, so a lost dialog result cannot block the button for good */
+    var starting: Boolean
+        get() = startingAt > 0 && System.currentTimeMillis() - startingAt < 30_000
+        set(v) { startingAt = if (v) System.currentTimeMillis() else 0L }
     @Volatile var width = 0
     @Volatile var height = 0
 
@@ -35,6 +41,11 @@ object Screen {
     /** called by the service once the user allowed capturing */
     @Synchronized
     fun start(ctx: Context, resultCode: Int, data: Intent) {
+        if (running) { starting = false; return }
+        try { startInner(ctx, resultCode, data) } finally { starting = false }
+    }
+
+    private fun startInner(ctx: Context, resultCode: Int, data: Intent) {
         stop()
         val mpm = ctx.getSystemService(MediaProjectionManager::class.java)
         val p = mpm.getMediaProjection(resultCode, data) ?: return

@@ -197,6 +197,7 @@ object Server {
                 }
                 post("/api/screen/start") {
                     if (denied(ctx)) return@post
+                    if (Screen.running || Screen.starting) return@post json(JSONObject().put("ok", true).put("note", if (Screen.running) "läuft schon" else "wartet auf Bestätigung am Thor"))
                     ctx.startActivity(android.content.Intent(ctx, MainActivity::class.java)
                         .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
                         .putExtra(MainActivity.EXTRA_CAPTURE, true))
@@ -272,6 +273,11 @@ object Server {
                     if (denied(ctx)) return@post
                     val u = q("url")?.trim()?.trimEnd('/') ?: return@post fail("url missing")
                     Prefs.of(ctx).edit().putString("rommUrl", u).apply()
+                    json(Romm.status(ctx))
+                }
+                post("/api/romm/lan") {
+                    if (denied(ctx)) return@post
+                    Romm.setLanUrl(ctx, q("url") ?: "")
                     json(Romm.status(ctx))
                 }
                 post("/api/romm/disconnect") {
@@ -386,6 +392,75 @@ object Server {
                         out.put(table, m)
                     }
                     json(out)
+                }
+
+                // ---- library vs. RomM: status, offload, store ----
+                get("/api/library/status") {
+                    if (denied(ctx)) return@get
+                    json(withContext(Dispatchers.IO) { runCatching { Library.status(ctx, q("refresh") == "1") }.getOrElse { JSONObject().put("error", it.message) } })
+                }
+                post("/api/library/offload") {
+                    if (denied(ctx)) return@post
+                    val paths = call.request.queryParameters.getAll("path").orEmpty().mapNotNull { Storage.resolve(it)?.path }
+                    if (paths.isEmpty()) return@post fail("path missing")
+                    // queued: several games go one after another; GET /api/activity shows n/m
+                    val name = q("name") ?: java.io.File(paths.first()).name
+                    val size = paths.sumOf { p -> java.io.File(p).let { f -> if (f.isDirectory) f.walkTopDown().filter { it.isFile }.sumOf { it.length() } else f.length() } }
+                    Background.offload(ctx, paths, name, size)
+                    json(Background.list())
+                }
+                get("/api/history") {
+                    if (denied(ctx)) return@get
+                    json(History.list(ctx, q("limit")?.toIntOrNull() ?: 50))
+                }
+                get("/api/activity") {
+                    if (denied(ctx)) return@get
+                    json(Background.list())
+                }
+                get("/api/store") {
+                    if (denied(ctx)) return@get
+                    json(withContext(Dispatchers.IO) { runCatching { Library.store(ctx, q("refresh") == "1") }.getOrElse { JSONObject().put("error", it.message) } })
+                }
+                post("/api/store/download") {
+                    if (denied(ctx)) return@post
+                    val id = q("id")?.toIntOrNull() ?: return@post fail("id missing")
+                    json(Library.download(ctx, id).json())
+                }
+                get("/api/store/downloads") {
+                    if (denied(ctx)) return@get
+                    val o = JSONObject(); Library.downloads.forEach { (id, j) -> o.put(id.toString(), j.json()) }
+                    json(o)
+                }
+
+                // ---- GPU drivers ----
+                get("/api/drivers") {
+                    if (denied(ctx)) return@get
+                    json(withContext(Dispatchers.IO) { Drivers.overview(ctx, q("refresh") == "1") })
+                }
+                post("/api/drivers/download") {
+                    if (denied(ctx)) return@post
+                    val url = q("url") ?: return@post fail("url missing")
+                    val j = Jobs.start("Treiber laden") { job -> Drivers.download(url, job) }
+                    json(j.json())
+                }
+                delete("/api/drivers") {
+                    if (denied(ctx)) return@delete
+                    if (Drivers.delete(q("name") ?: "")) json(JSONObject().put("ok", true)) else fail("not found", HttpStatusCode.NotFound)
+                }
+
+                // ---- streaming (Moonlight) ----
+                get("/api/stream") {
+                    if (denied(ctx)) return@get
+                    json(withContext(Dispatchers.IO) { Streaming.status(ctx) })
+                }
+                post("/api/stream/install") {
+                    if (denied(ctx)) return@post
+                    val j = Jobs.start("Moonlight installieren") { job -> Streaming.install(ctx, job) }
+                    json(j.json())
+                }
+                get("/api/stream/hosts") {
+                    if (denied(ctx)) return@get
+                    json(JSONObject().put("hosts", withContext(Dispatchers.IO) { Streaming.hosts(ctx) }))
                 }
 
                 // ---- background jobs ----

@@ -18,7 +18,8 @@ object Ports {
         Port("soh", "Ship of Harkinian", "com.dishii.soh", listOf("/storage/emulated/0/SOH/Save", "$DATA/com.dishii.soh/files/Save")),
         Port("2s2h", "2 Ship 2 Harkinian", "com.dishii.twoship", listOf("/storage/emulated/0/2S2H/Save")),
         Port("dusklight", "Dusklight", "dev.twilitrealm.dusk", listOf("$DATA/dev.twilitrealm.dusk/files/saves")),
-        Port("skate3", "Skate 3", "chat.buku.skate3", listOf("$DATA/chat.buku.skate3/files")),
+        // saves live in app-private storage; files/ holds only the game data (6 GB), so nothing to back up
+        Port("skate3", "Skate 3", "chat.buku.skate3", emptyList()),
     )
 
     fun installed(ctx: Context) = known.filter { runCatching { ctx.packageManager.getPackageInfo(it.pkg, 0) }.isSuccess }

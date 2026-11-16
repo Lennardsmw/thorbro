@@ -1,5 +1,14 @@
 package wtf.lennard.thorbro.ui
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.BluetoothSearching
+import androidx.compose.material.icons.filled.Gamepad
+import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.foundation.layout.aspectRatio
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
@@ -167,7 +176,7 @@ fun ControllerPanels(panel: String) {
         onDispose { runCatching { ctx.unregisterReceiver(r) }; runCatching { if (!needPerms) bt?.cancelDiscovery() } }
     }
 
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    LazyColumn(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         if (panel == "none") item {
             FocusCard(Modifier.fillMaxWidth()) {
                 Label("Verbunden")
@@ -434,8 +443,8 @@ fun ControllerScreen() {
     if (panel != null) { ControllerPanels(panel); return }
 
     val pads = remember(tick) { livePads(ctx) }
-    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-        Column(Modifier.weight(2f)) {
+    Row(Modifier.fillMaxSize()) {
+        Column(Modifier.weight(1f)) {
             if (Pads.lrMode) {
                 Text("Jeder Spieler drückt L + R gleichzeitig auf seinem Controller.", fontSize = 18.sp, color = Accent)
                 Spacer(Modifier.height(10.dp))
@@ -456,26 +465,31 @@ fun ControllerScreen() {
                 }
                 Acts { Act("Fertig", primary = true) { Pads.lrMode = false } }
             } else {
-                if (pads.isEmpty()) Line("Kein Controller verbunden.", Muted)
-                androidx.compose.foundation.lazy.grid.LazyVerticalGrid(androidx.compose.foundation.lazy.grid.GridCells.Fixed(4),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(pads.size) { i -> PadCard(pads[i]) }
+                val first = remember { androidx.compose.ui.focus.FocusRequester() }
+                TileGrid(first, min = 170) {
+                    header("Verbunden", if (pads.isEmpty()) "kein Controller – die Thor-Tasten zählen mit" else "${pads.size} Controller")
+                    pads.forEachIndexed { i, p ->
+                        item {
+                            ConsoleTile(if (p.model == wtf.lennard.thorbro.PadModel.GENERIC) p.name else p.model.label,
+                                listOfNotNull(if (p.slot > 0) "Spieler ${p.slot}" else null, if (!p.battery.isNaN()) "${(p.battery * 100).toInt()} %" else null,
+                                    if (p.model == wtf.lennard.thorbro.PadModel.THOR) "eingebaut" else null).joinToString(" · "),
+                                modifier = Modifier.firstFocus(first, i == 0),
+                                badges = { PadArt(p.model, Modifier.align(Alignment.Center).padding(start = 14.dp, end = 14.dp, bottom = 40.dp).fillMaxWidth().aspectRatio(1.5f)) }) {}
+                        }
+                    }
+                    header("Einrichten")
+                    item { ConsoleTile("Reihenfolge ändern", "L + R drücken", Icons.Filled.SwapHoriz, modifier = Modifier.firstFocus(first, pads.isEmpty())) {
+                        wtf.lennard.thorbro.Logs.i("controller", "Reihenfolge ändern gestartet")
+                        wtf.lennard.thorbro.Players.clearAll(ctx); Pads.lrMode = true
+                    } }
+                    item { ConsoleTile("Koppeln", "neuer Controller", Icons.Filled.BluetoothSearching) { ControllerNav.panel.value = "new" } }
+                    item { ConsoleTile("Gekoppelt", "entkoppeln", Icons.Filled.Bluetooth) { ControllerNav.panel.value = "paired" } }
+                    item { ConsoleTile("LEDs", "Farben", Icons.Filled.Lightbulb) { ControllerNav.panel.value = "leds" } }
+                    item { ConsoleTile("Tastentest", "alle Tasten prüfen", Icons.Filled.TouchApp) { ControllerNav.panel.value = "test" } }
+                    item { ConsoleTile("Spieler & Emulatoren", "Zuordnung", Icons.Filled.Groups) { ControllerNav.panel.value = "order" } }
+                    item { ConsoleTile("Thor als Gamepad", "für PC / anderen Thor", Icons.Filled.Gamepad, accent = true) { ctx.startActivity(Intent(ctx, GamepadActivity::class.java)) } }
                 }
             }
-        }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            val first = remember { androidx.compose.ui.focus.FocusRequester() }
-            LaunchedEffect(Unit) { delay(200); runCatching { first.requestFocus() } }
-            MenuRow("Reihenfolge ändern", Modifier.focusRequester(first)) {
-                wtf.lennard.thorbro.Logs.i("controller", "Reihenfolge ändern gestartet")
-                wtf.lennard.thorbro.Players.clearAll(ctx); Pads.lrMode = true
-            }
-            MenuRow("Neue Controller koppeln") { ControllerNav.panel.value = "new" }
-            MenuRow("Gekoppelte Controller") { ControllerNav.panel.value = "paired" }
-            MenuRow("LEDs") { ControllerNav.panel.value = "leds" }
-            MenuRow("Tastentest") { ControllerNav.panel.value = "test" }
-            MenuRow("Spieler & Emulatoren") { ControllerNav.panel.value = "order" }
-            MenuRow("Thor als Gamepad") { ctx.startActivity(Intent(ctx, GamepadActivity::class.java)) }
         }
     }
 }
