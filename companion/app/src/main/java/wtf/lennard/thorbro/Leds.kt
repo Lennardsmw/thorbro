@@ -83,10 +83,12 @@ object Leds {
     fun setPlayer(id: Int, player: Int): Boolean {
         if (Build.VERSION.SDK_INT < 31) return false
         val d = InputDevice.getDevice(id) ?: return false
-        val lights = d.lightsManager.lights.filter { it.type == Light.LIGHT_TYPE_PLAYER_ID }.ifEmpty { return false }
-        val session = sessions.getOrPut(id) { d.lightsManager.openSession() }
-        val req = LightsRequest.Builder().apply { lights.forEach { addLight(it, LightState.Builder().setPlayerId(player).build()) } }.build()
-        return runCatching { session.requestLights(req); true }.getOrDefault(false)
+        return runCatching {
+            val lights = d.lightsManager.lights.filter { it.type == Light.LIGHT_TYPE_PLAYER_ID }.ifEmpty { return false }
+            val session = sessions.getOrPut(id) { d.lightsManager.openSession() }
+            session.requestLights(LightsRequest.Builder().apply { lights.forEach { addLight(it, LightState.Builder().setPlayerId(player).build()) } }.build())
+            true
+        }.getOrElse { Logs.e("leds", "Spieler-LED", it); false }
     }
 
     /** rgb = 0 switches the light bar off */

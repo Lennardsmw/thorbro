@@ -35,13 +35,18 @@ object Players {
 
     fun assigned(ctx: Context): List<JSONObject?> = (1..SLOTS).map { slots(ctx).optJSONObject("p$it") }
 
+    private val worker = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    /** writing the emulator files happens off the UI thread */
+    fun applyAsync(ctx: Context) { val app = ctx.applicationContext; worker.execute { runCatching { apply(app) }.onFailure { Logs.e("players", "apply", it) } } }
+
     fun assign(ctx: Context, slot: Int, pad: InputDevice) {
         val s = slots(ctx)
         // a controller can only be one player
         (1..SLOTS).forEach { if (s.optJSONObject("p$it")?.optString("descriptor") == pad.descriptor) s.remove("p$it") }
         s.put("p$slot", JSONObject().put("descriptor", pad.descriptor).put("name", pad.name))
         Prefs.of(ctx).edit().putString("players", s.toString()).apply()
-        apply(ctx)
+        applyAsync(ctx)
     }
 
     fun clearAll(ctx: Context) {
@@ -59,7 +64,7 @@ object Players {
     fun clear(ctx: Context, slot: Int) {
         val s = slots(ctx); s.remove("p$slot")
         Prefs.of(ctx).edit().putString("players", s.toString()).apply()
-        apply(ctx)
+        applyAsync(ctx)
     }
 
     fun overview(ctx: Context): JSONObject {
@@ -100,6 +105,8 @@ object Players {
      */
     private fun rewriteIni(f: File, prefix: String, devices: List<Pad?>): Boolean {
         if (!f.isFile || devices.all { it == null }) return false
+        // safety: a controller ini is a few KB; never touch something that looks wrong
+        if (f.length() > 200 * 1024) { Logs.e("players", "${f.name} ist ${f.length()} Bytes groß – nicht angefasst"); return false }
         val text = f.readText()
         val sections = LinkedHashMap<String, MutableList<String>>()
         var cur = ""
@@ -118,12 +125,14 @@ object Players {
             val dev = "Device = Android/${pad.number}/${pad.name}"
             val idx = lines.indexOfFirst { it.startsWith("Device") }
             if (idx >= 0) { if (lines[idx] != dev) { lines[idx] = dev; changed = true } } else { lines.add(0, dev); changed = true }
-            if (lines.none { it.startsWith("Buttons/") } && template.isNotEmpty()) { lines.addAll(template); changed = true }
+            // GameCube players 2-4 without any mapping get player 1's mapping (once); Wii mappings are left alone
+            val hasMapping = lines.any { it.isNotBlank() && !it.startsWith("Device") }
+            if (prefix == "GCPad" && i > 0 && !hasMapping && template.isNotEmpty()) { lines.addAll(template); changed = true }
         }
         if (!changed) return false
         // keep one backup per day before ThorBro's first change
         val bak = File(f.parentFile, f.name + ".thorbro-" + SimpleDateFormat("yyyyMMdd", Locale.ROOT).format(Date()))
-        if (!bak.exists()) f.copyTo(bak)
+        if (!bak.exists() || bak.length() > 200 * 1024) f.copyTo(bak, overwrite = true)
         val out = StringBuilder()
         sections.forEach { (k, v) ->
             if (k.isNotEmpty()) out.append('[').append(k).append("]\n")
@@ -140,7 +149,7 @@ object Players {
     fun watch(ctx: Context) {
         if (listener != null) return
         val im = ctx.getSystemService(InputManager::class.java)
-        val run = Runnable { runCatching { apply(ctx) } }
+        val run = Runnable { applyAsync(ctx) }
         val l = object : InputManager.InputDeviceListener {
             override fun onInputDeviceAdded(id: Int) { handler.removeCallbacks(run); handler.postDelayed(run, 1500) }
             override fun onInputDeviceRemoved(id: Int) {}
