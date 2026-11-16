@@ -18,6 +18,8 @@
   button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
   input { font:inherit; padding:6px 8px; border-radius:8px; border:1px solid var(--line); background:#0f1114; color:var(--text); }
   .thor { display:flex; align-items:center; gap:8px; padding:8px 0; border-top:1px solid var(--line); }
+  .sw { width:28px; height:28px; border-radius:50%; border:2px solid #0000; padding:0; }
+  .sw:hover { border-color:#fff; }
   .dot { width:9px; height:9px; border-radius:50%; background:var(--err); display:inline-block; }
   .dot.ok { background:var(--ok); }
   .code { font-size:22px; letter-spacing:2px; font-weight:700; }
@@ -34,6 +36,12 @@
   <div id="found"></div>
   <div class="row"><input id="addr" placeholder="Adresse, z. B. 192.168.178.107" class="grow"><input id="code" placeholder="Code" size="9"><button id="pair" class="primary">Koppeln</button></div>
   <div class="muted">Der Kopplungscode steht in ThorBro auf dem Thor unter Einstellungen.</div>
+</div>
+
+<div class="panel">
+  <h2>Controller-LEDs</h2>
+  <div id="leds"></div>
+  <div class="row"><button id="padsReload">Controller suchen</button></div>
 </div>
 
 <div class="panel">
@@ -94,7 +102,29 @@ $('#syncNow').onclick = async () => {
   const lines = await invoke('sync_now');
   $('#syncInfo').textContent = ''; $('#last').textContent = lines.join('\n'); refresh();
 };
-refresh(); setInterval(refresh, 5000);
+const COLORS = ['ff2020', 'ff7a00', 'ffd000', '20e040', '00d0ff', '2050ff', '9040ff', 'ff40b0', 'ffffff'];
+const swatches = (attr) => COLORS.map((c) => `<button class="sw" style="background:#${c}" ${attr}="${c}"></button>`).join('') + ` <button ${attr}="000000">Aus</button>`;
+async function loadLeds() {
+  const s = await invoke('status');
+  const pads = await invoke('pads');
+  $('#leds').innerHTML =
+    s.thors.map((t) => `<div style="margin-top:8px"><strong>${esc(t.name)}</strong> <span class="muted">Stick-LEDs</span><div class="row" data-thor="${esc(t.address)}">${swatches('data-thorc')}</div></div>`).join('') +
+    pads.map((p) => `<div style="margin-top:8px"><strong>${esc(p.name)}</strong><div class="row" data-pad="${esc(p.path)}">${swatches('data-padc')}</div></div>`).join('') ||
+    '<div class="muted">Kein Thor gekoppelt und kein DualSense/DualShock 4 angeschlossen.</div>';
+}
+document.addEventListener('click', async (e) => {
+  const t = e.target;
+  try {
+    if (t.dataset.thorc) {
+      const off = t.dataset.thorc === '000000';
+      const r = await invoke('thor_leds', { address: t.closest('[data-thor]').dataset.thor, on: !off, rgb: off ? null : parseInt(t.dataset.thorc, 16) });
+      if (r.ok === false) alert(r.thor?.shizuku === 'ready' ? 'Der Thor hat die Farbe nicht übernommen.' : 'Auf dem Thor erst in ThorBro → Controller „ThorBro in Shizuku erlauben“ tippen.');
+    }
+    if (t.dataset.padc) await invoke('pad_color', { path: t.closest('[data-pad]').dataset.pad, rgb: parseInt(t.dataset.padc, 16) });
+  } catch (err) { alert(err); }
+});
+$('#padsReload').onclick = loadLeds;
+refresh(); loadLeds(); setInterval(refresh, 5000);
 </script>
 </body>
 </html>

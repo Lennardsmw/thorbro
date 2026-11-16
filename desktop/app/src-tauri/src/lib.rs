@@ -1,4 +1,5 @@
 mod config;
+mod leds;
 mod sync;
 
 use serde_json::{json, Value};
@@ -143,6 +144,26 @@ async fn sync_now() -> Vec<String> {
 }
 
 #[tauri::command]
+fn pads() -> Vec<Value> { leds::list() }
+
+#[tauri::command]
+fn pad_color(path: String, rgb: u32) -> Result<(), String> { leds::set(&path, rgb) }
+
+/// the Thor's own stick LEDs, through ThorBro on the handheld (needs Shizuku there)
+#[tauri::command]
+async fn thor_leds(address: String, on: Option<bool>, rgb: Option<u32>) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let c = config::load();
+        let t = c.thors.iter().find(|t| t.address == address).ok_or("unbekannter Thor")?;
+        let mut url = format!("http://{}/api/leds/thor?", t.address);
+        if let Some(o) = on { url += &format!("on={}&", if o { 1 } else { 0 }); }
+        if let Some(c) = rgb { url += &format!("color={c:06x}"); }
+        let r = sync::client().post(url).bearer_auth(&t.token).send().map_err(|e| format!("Thor nicht erreichbar: {e}"))?;
+        r.json::<Value>().map_err(|e| e.to_string())
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 fn set_auto(on: bool) {
     let mut c = config::load();
     c.auto_sync = on;
@@ -184,7 +205,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
-        .invoke_handler(tauri::generate_handler![status, discover, pair, forget_thor, open_thor, romm_login, sync_now, set_auto])
+        .invoke_handler(tauri::generate_handler![status, discover, pair, forget_thor, open_thor, romm_login, sync_now, set_auto, pads, pad_color, thor_leds])
         .setup(|app| {
             // start with the computer, once; the user can turn it off in the system settings
             let al = app.autolaunch();

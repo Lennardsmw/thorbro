@@ -1,6 +1,6 @@
 [package]
 name = "thorbro-desktop"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "ThorBro companion: find your handheld, open ThorBro, keep saves in sync with RomM"
 
@@ -26,6 +26,8 @@ dirs = "7.0.0"
 uuid = { version = "1.29.2", features = ["v4"] }
 chrono = "0.4.45"
 sysinfo = "0.40.3"
+hidapi = "2.6.7"
+crc32fast = "1.5.5"
 
 [profile.release]
 strip = true
