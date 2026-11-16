@@ -173,22 +173,27 @@ fun HomeScreen(open: (Screen) -> Unit, showDetail: (HomeGame) -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) { HomeData.load(ctx) }
+    Favorites.load(ctx)
+    val favs = HomeData.games.filter { it.rom.getString("path") in Favorites.paths }
     val first = remember { FocusRequester() }
     var focusedTitle by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
-    LaunchedEffect(HomeData.games.isNotEmpty()) { if (HomeData.games.isNotEmpty()) runCatching { first.requestFocus() } }
+    LaunchedEffect(Unit) { delay(300); runCatching { first.requestFocus() } }
 
     Column(Modifier.fillMaxSize().background(Bg)) {
         StatusBar("ThorBro")
         Spacer(Modifier.height(18.dp))
         Text(focusedTitle, Modifier.padding(start = 40.dp).height(28.dp), fontSize = 20.sp, color = Accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (HomeData.games.isEmpty()) {
-            Box(Modifier.fillMaxWidth().height(250.dp), contentAlignment = Alignment.Center) { Text("Lade Spiele …", color = Muted) }
-        } else {
+        run {
             LazyRow(contentPadding = PaddingValues(horizontal = 40.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                items(HomeData.games.take(40), key = { it.rom.getString("path") }) { g ->
-                    val idx = HomeData.games.indexOf(g)
-                    GameTile(g, if (idx == 0) Modifier.focusRequester(first) else Modifier,
+                item { MoreTile(Modifier.focusRequester(first), onFocus = { focusedTitle = "Alle Spiele" }) { open(Screen.GAMES) } }
+                if (favs.isEmpty()) item {
+                    Box(Modifier.size(420.dp, 210.dp).clip(RoundedCornerShape(18.dp)).background(Panel).padding(24.dp), contentAlignment = Alignment.CenterStart) {
+                        Text("Noch keine Favoriten.\nIn „Alle Spiele“ ein Spiel öffnen und „☆ Zu Favoriten“ wählen.", color = Muted, fontSize = 16.sp)
+                    }
+                }
+                items(favs, key = { it.rom.getString("path") }) { g ->
+                    GameTile(g, Modifier,
                         onFocus = { focusedTitle = g.title },
                         onStart = {
                             scope.launch {
@@ -198,7 +203,6 @@ fun HomeScreen(open: (Screen) -> Unit, showDetail: (HomeGame) -> Unit) {
                         },
                         onDetail = { showDetail(g) })
                 }
-                item { MoreTile { open(Screen.GAMES) } }
             }
         }
         if (message.isNotEmpty()) Text(message, Modifier.padding(start = 40.dp), color = Bad)
@@ -243,11 +247,13 @@ private fun GameTile(g: HomeGame, modifier: Modifier, onFocus: () -> Unit, onSta
 }
 
 @Composable
-private fun MoreTile(onClick: () -> Unit) {
+private fun MoreTile(modifier: Modifier, onFocus: () -> Unit, onClick: () -> Unit) {
     val src = remember { MutableInteractionSource() }
     val focused by src.collectIsFocusedAsState()
+    if (focused) LaunchedEffect(Unit) { onFocus() }
+    val scale by animateFloatAsState(if (focused) 1.1f else 1f, label = "more")
     val shape = RoundedCornerShape(18.dp)
-    Box(Modifier.size(210.dp).clip(shape).background(Panel).border(if (focused) 4.dp else 0.dp, if (focused) Accent else Color.Transparent, shape)
+    Box(modifier.size(210.dp).scale(scale).clip(shape).background(Panel).border(if (focused) 4.dp else 0.dp, if (focused) Accent else Color.Transparent, shape)
         .clickable(interactionSource = src, indication = null, onClick = onClick).focusable(interactionSource = src), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Filled.ViewModule, null, Modifier.size(54.dp))

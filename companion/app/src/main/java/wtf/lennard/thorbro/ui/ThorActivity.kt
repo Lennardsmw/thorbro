@@ -81,7 +81,10 @@ class ThorActivity : ComponentActivity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         Pads.onKey(event)
         if (event.action == KeyEvent.ACTION_DOWN) when (event.keyCode) {
-            KeyEvent.KEYCODE_BUTTON_B, KeyEvent.KEYCODE_BACK -> if (screen.value != null && !detailOpen) { screen.value = null; return true }
+            KeyEvent.KEYCODE_BUTTON_B, KeyEvent.KEYCODE_BACK -> if (screen.value != null && !detailOpen) {
+                if (screen.value == Screen.GAMES && GamesNav.system.value != null) GamesNav.system.value = null else screen.value = null
+                return true
+            }
             KeyEvent.KEYCODE_BUTTON_R1 -> if (screen.value == null) { screen.value = Screen.GAMES; return true }
         }
         return super.dispatchKeyEvent(event)
@@ -154,6 +157,10 @@ private fun SyncScreen() {
     var saves by remember { mutableStateOf<JSONObject?>(null) }
     LaunchedEffect(tick / 6) { saves = withContext(Dispatchers.IO) { runCatching { Saves.overview(ctx) }.getOrNull() } }
     val st = remember(tick) { Romm.status(ctx) }
+    // an upload started earlier keeps running in the background: show it again
+    val running = RommSync.current?.takeIf { !it.done }
+    if (running != null) busy = "Spiele hochladen: ${(running.progress * 100).toInt()} % · ${running.message}"
+    else if (running == null && busy.startsWith("Spiele hochladen")) busy = ""
 
     LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
@@ -184,7 +191,7 @@ private fun SyncScreen() {
                                     .filter { it.getInt("missing") > 0 }.map { it.getString("system") }.toSet() }.getOrDefault(emptySet())
                             }
                             if (systems.isEmpty()) { busy = ""; SaveWatcherNote.last = "RomM hat schon alle Spiele"; return@launch }
-                            val job = wtf.lennard.thorbro.Jobs.start("RomM-Abgleich") { j -> RommSync.run(ctx, systems, true, j) }
+                            val job = RommSync.start(ctx, systems, true)
                             while (!job.done) { busy = "Spiele hochladen: ${(job.progress * 100).toInt()} % · ${job.message}"; delay(1000) }
                             busy = ""; SaveWatcherNote.last = job.error?.let { "Fehler: $it" }
                                 ?: job.result?.let { "${it.optInt("romsUploaded")} Spiele, ${it.optInt("savesUploaded")} Spielstände hochgeladen" } ?: ""

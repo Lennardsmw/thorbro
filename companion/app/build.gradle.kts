@@ -13,8 +13,8 @@ android {
         applicationId = "wtf.lennard.thorbro"
         minSdk = 30
         targetSdk = 36
-        versionCode = 20
-        versionName = "0.13.2"
+        versionCode = 21
+        versionName = "0.14.0"
     }
 
     buildTypes {
@@ -54,4 +54,6 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("io.coil-kt.coil3:coil-compose:3.6.3")
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
 }

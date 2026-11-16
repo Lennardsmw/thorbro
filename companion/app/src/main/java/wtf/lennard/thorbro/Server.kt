@@ -312,7 +312,7 @@ object Server {
                     if (denied(ctx)) return@post
                     val systems = (q("systems") ?: "").split(',').filter { it.isNotBlank() }.toSet()
                     val withSaves = q("saves") != "0"
-                    val j = Jobs.start("RomM-Abgleich") { job -> RommSync.run(ctx, systems, withSaves, job) }
+                    val j = RommSync.start(ctx, systems, withSaves)
                     json(j.json())
                 }
                 post("/api/romm/sync/config") {
@@ -324,6 +324,21 @@ object Server {
                 get("/api/players") {
                     if (denied(ctx)) return@get
                     json(Players.overview(ctx))
+                }
+
+                // ---- controller LEDs ----
+                get("/api/leds") {
+                    if (denied(ctx)) return@get
+                    json(JSONObject().put("thor", Leds.thorState(ctx)).put("pads", Leds.pads()))
+                }
+                post("/api/leds/thor") {
+                    if (denied(ctx)) return@post
+                    json(Leds.setThor(ctx, q("on")?.let { it == "1" }, q("color")?.toIntOrNull(16)))
+                }
+                post("/api/leds/pad") {
+                    if (denied(ctx)) return@post
+                    val ok = Leds.setPad(q("id")?.toIntOrNull() ?: return@post fail("id missing"), q("color")?.toIntOrNull(16) ?: 0)
+                    json(JSONObject().put("ok", ok))
                 }
 
                 // read-only: system settings whose name matches ?q= (to find vendor keys like LED control)

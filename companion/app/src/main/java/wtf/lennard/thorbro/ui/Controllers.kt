@@ -17,6 +17,10 @@ import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -183,6 +187,7 @@ fun ControllerScreen() {
                 if (players.optString("lastApply").isNotEmpty()) Line("Zuletzt übernommen: " + players.optString("lastApply"), Muted)
             }
         }
+        item { LedCard(tick) { tick++ } }
         item {
             FocusCard(Modifier.fillMaxWidth()) {
                 Label("Tastentest – einfach drücken" + if (Pads.lastFrom.isNotEmpty()) " · ${Pads.lastFrom}" else "")
@@ -249,5 +254,69 @@ private fun Trigger(label: String, v: Float) {
         Box(Modifier.width(120.dp).height(10.dp).clip(RoundedCornerShape(5.dp)).background(Bg)) {
             Box(Modifier.width((120 * v.coerceIn(0f, 1f)).dp).height(10.dp).background(Accent))
         }
+    }
+}
+
+private val swatches = listOf(0xFF2020, 0xFF7A00, 0xFFD000, 0x20E040, 0x00D0FF, 0x2050FF, 0x9040FF, 0xFF40B0, 0xFFFFFF)
+
+@Composable
+private fun Swatches(onPick: (Int) -> Unit, offLabel: String, onOff: () -> Unit) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        swatches.forEach { c ->
+            val src = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+            val focused by src.collectIsFocusedAsState()
+            Box(Modifier.size(40.dp).clip(CircleShape).background(androidx.compose.ui.graphics.Color(0xFF000000.toInt() or c))
+                .then(if (focused) Modifier.background(androidx.compose.ui.graphics.Color.Transparent) else Modifier)
+                .androidx_border(focused)
+                .clickable(interactionSource = src, indication = null) { onPick(c) }
+                .focusable(interactionSource = src))
+        }
+        Act(offLabel, onClick = onOff)
+    }
+}
+
+private fun Modifier.androidx_border(on: Boolean) =
+    if (on) this.then(Modifier.border(3.dp, androidx.compose.ui.graphics.Color.White, CircleShape)) else this
+
+@Composable
+private fun LedCard(tick: Int, changed: () -> Unit) {
+    val ctx = LocalContext.current
+    val st = remember(tick) { wtf.lennard.thorbro.Leds.thorState(ctx) }
+    val pads = remember(tick) { wtf.lennard.thorbro.Leds.pads() }
+    var msg by remember { mutableStateOf("") }
+    FocusCard(Modifier.fillMaxWidth()) {
+        Label("LEDs")
+        if (st.optBoolean("supported")) {
+            Big("Thor-Sticks: " + if (st.optBoolean("on")) "an" else "aus")
+            when (st.optString("shizuku")) {
+                "not_running" -> {
+                    Line("Für die Thor-LEDs braucht ThorBro Shizuku. Shizuku öffnen und starten, dann hierher zurück.", Muted)
+                    Acts { Act("Shizuku öffnen", primary = true) {
+                        ctx.packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")?.let { ctx.startActivity(it) }
+                    } }
+                }
+                "needs_permission" -> {
+                    Line("Einmal erlauben: Shizuku fragt, ob ThorBro es nutzen darf.", Muted)
+                    Acts { Act("ThorBro in Shizuku erlauben", primary = true) { wtf.lennard.thorbro.Leds.requestShizuku(); changed() } }
+                }
+                else -> {
+                    Spacer(Modifier.height(6.dp))
+                    Swatches({ c -> val r = wtf.lennard.thorbro.Leds.setThor(ctx, true, c); msg = if (r.optBoolean("ok")) "" else "Konnte die LEDs nicht setzen"; changed() },
+                        if (st.optBoolean("on")) "Ausschalten" else "Einschalten") {
+                        val r = wtf.lennard.thorbro.Leds.setThor(ctx, !st.optBoolean("on"), null); msg = if (r.optBoolean("ok")) "" else "Konnte die LEDs nicht schalten"; changed()
+                    }
+                }
+            }
+        }
+        for (i in 0 until pads.length()) {
+            val p = pads.getJSONObject(i)
+            Spacer(Modifier.height(10.dp))
+            Big(p.getString("name"))
+            Swatches({ c -> msg = if (wtf.lennard.thorbro.Leds.setPad(p.getInt("id"), c)) "" else "Dieser Controller nimmt keine Farbe an" }, "Aus") {
+                wtf.lennard.thorbro.Leds.setPad(p.getInt("id"), 0)
+            }
+        }
+        if (!st.optBoolean("supported") && pads.length() == 0) Line("Kein Controller mit einstellbaren LEDs verbunden.", Muted)
+        if (msg.isNotEmpty()) Line(msg, Bad)
     }
 }

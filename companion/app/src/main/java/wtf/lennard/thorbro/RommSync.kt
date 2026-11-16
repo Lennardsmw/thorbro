@@ -106,6 +106,27 @@ object RommSync {
             .put("watcher", SaveWatcher.last).put("wifi", SaveWatcher.onWifi(ctx))
     }
 
+    /** the running "upload to RomM" job, so the UI finds it again after leaving the app */
+    @Volatile var current: Jobs.Job? = null
+
+    /** starts the upload in the background service process; keeps running when you switch apps */
+    fun start(ctx: Context, systems: Set<String>, withSaves: Boolean): Jobs.Job {
+        current?.takeIf { !it.done }?.let { return it }
+        val app = ctx.applicationContext
+        val j = Jobs.start("RomM-Abgleich") { job ->
+            Transfers.begin(app)
+            val ticker = kotlin.concurrent.thread(isDaemon = true) {
+                while (!job.done) { Progress.show(app, "Spiele zu RomM", job.progress, job.message); runCatching { Thread.sleep(2000) } }
+            }
+            try { run(app, systems, withSaves, job) } finally {
+                Transfers.end(); ticker.interrupt()
+                Progress.done(app, "Abgleich mit RomM fertig", job.message)
+            }
+        }
+        current = j
+        return j
+    }
+
     fun run(ctx: Context, systems: Set<String>, withSaves: Boolean, job: Jobs.Job): JSONObject {
         var romsUp = 0; var savesUp = 0; var savesDown = 0; val errors = JSONArray()
         var (bySlug, remoteFiles) = remote(ctx)

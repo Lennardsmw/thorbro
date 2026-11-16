@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
@@ -75,29 +76,16 @@ fun GamesScreen() {
             }
         }
     }
-    var sel by remember { mutableStateOf(0) }
     var open by remember { mutableStateOf<JSONObject?>(null) }
     val list = systems
     if (list == null) { Line("Suche Spiele …", Muted); return }
     if (list.isEmpty()) { Line("Keine Spiele gefunden. Lege sie unter ROMs/<Konsole> ab.", Muted); return }
-    val cur = list[sel.coerceIn(0, list.size - 1)]
+    val selId = GamesNav.system.value
+    val cur = list.firstOrNull { it.id == selId }
+    if (cur == null) { ConsoleGrid(list) { GamesNav.system.value = it }; return }
     val meta by produceState<JSONObject?>(null, cur.id) { value = withContext(Dispatchers.IO) { runCatching { Media.metaFor(ctx, cur.id, cur.roms) }.getOrNull() } }
 
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        LazyColumn(Modifier.width(230.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(list.size) { i ->
-                val s = list[i]
-                FocusCard(Modifier.fillMaxWidth(), onClick = { sel = i }) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        val icon by produceState<File?>(null, s.id) { value = withContext(Dispatchers.IO) { runCatching { Media.icon(ctx, s.id) }.getOrNull() } }
-                        AsyncImage(icon, null, Modifier.size(28.dp))
-                        Spacer(Modifier.width(10.dp))
-                        Text(s.name, Modifier.weight(1f), color = if (i == sel) Accent else androidx.compose.ui.graphics.Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text("${entries(s).size}", color = Muted)
-                    }
-                }
-            }
-        }
         Column(Modifier.weight(1f)) {
             Title(cur.name)
             val items = remember(cur.id) { entries(cur) }
@@ -170,10 +158,34 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, onClose: () -> Unit) {
                                 if (!res.has("error")) onClose()
                             }
                         }
+                        val fav = r.getString("path") in Favorites.paths
+                        Act(if (fav) "★ Favorit entfernen" else "☆ Zu Favoriten") { Favorites.toggle(ctx, r.getString("path")) }
                         Act("Zurück", onClick = onClose)
                     }
                     if (msg.isNotEmpty()) Line(msg, Bad)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConsoleGrid(list: List<Sys>, pick: (String) -> Unit) {
+    val ctx = LocalContext.current
+    val first = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(Unit) { kotlinx.coroutines.delay(200); runCatching { first.requestFocus() } }
+    LazyVerticalGrid(GridCells.Adaptive(190.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        items(list.size) { i ->
+            val s = list[i]
+            FocusCard(if (i == 0) Modifier.fillMaxWidth().focusRequester(first) else Modifier.fillMaxWidth(), onClick = { pick(s.id) }) {
+                val icon by produceState<File?>(null, s.id) {
+                    value = withContext(Dispatchers.IO) { runCatching { Media.icon(ctx, s.id) }.getOrNull() }
+                }
+                Box(Modifier.fillMaxWidth().height(110.dp), contentAlignment = Alignment.Center) {
+                    if (icon != null) AsyncImage(icon, null, Modifier.size(90.dp)) else Text(s.name.take(2), fontSize = 40.sp, color = Muted)
+                }
+                Text(s.name, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${entries(s).size} Spiele", color = Muted, fontSize = 13.sp)
             }
         }
     }
