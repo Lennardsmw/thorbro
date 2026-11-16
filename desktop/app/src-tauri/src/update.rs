@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 
 const RELEASES: &str = "https://api.github.com/repos/Lennardsmw/thorbro/releases?per_page=30";
+const ATOM: &str = "https://github.com/Lennardsmw/thorbro/releases.atom";
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
 
 fn newer(a: &str, b: &str) -> bool {
@@ -23,11 +24,36 @@ fn asset_for(assets: &[Value]) -> Option<(String, String)> {
         .map(|a| (a["name"].as_str().unwrap_or("").to_string(), a["browser_download_url"].as_str().unwrap_or("").to_string()))
 }
 
+/// GitHub's API allows only 60 anonymous requests per hour and connection (shared with the Thor);
+/// the release feed has no such limit. Installer names follow Tauri's pattern, so they can be built.
+fn from_atom() -> Option<Value> {
+    let atom = sync::client().get(ATOM).send().ok()?.error_for_status().ok()?.text().ok()?;
+    let latest = atom.split("/releases/tag/desktop-v").skip(1)
+        .filter_map(|s| s.split('"').next())
+        .filter(|v| !v.is_empty() && v.chars().all(|c| c.is_ascii_digit() || c == '.'))
+        .max_by(|a, b| if newer(a, b) { std::cmp::Ordering::Greater } else { std::cmp::Ordering::Less })?
+        .to_string();
+    let suffix = if cfg!(target_os = "macos") { "universal.dmg" } else if cfg!(target_os = "windows") { "x64-setup.exe" } else { "amd64.AppImage" };
+    let name = format!("ThorBro_{latest}_{suffix}");
+    let url = format!("https://github.com/Lennardsmw/thorbro/releases/download/desktop-v{latest}/{name}");
+    Some(json!({"current": CURRENT, "latest": latest, "available": newer(&latest, CURRENT), "name": name, "url": url, "via": "atom"}))
+}
+
 /// {current, latest, available, name, url}
 pub fn check() -> Value {
     let r = sync::client().get(RELEASES).header("Accept", "application/vnd.github+json").send()
+        .and_then(|r| r.error_for_status())
         .and_then(|r| r.json::<Vec<Value>>());
-    let Ok(list) = r else { return json!({"current": CURRENT, "error": "GitHub nicht erreichbar"}) };
+    let list = match r {
+        Ok(list) => list,
+        Err(e) => {
+            if let Some(v) = from_atom() { return v; }
+            let msg = if e.status().map(|s| s.as_u16() == 403 || s.as_u16() == 429).unwrap_or(false) {
+                "GitHub-Limit erreicht, in einer Stunde erneut versuchen"
+            } else { "GitHub nicht erreichbar" };
+            return json!({"current": CURRENT, "error": msg});
+        }
+    };
     let best = list.iter()
         .filter(|r| r["tag_name"].as_str().map(|t| t.starts_with("desktop-v")).unwrap_or(false) && !r["draft"].as_bool().unwrap_or(false))
         .filter_map(|r| {
