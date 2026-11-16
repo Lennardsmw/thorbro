@@ -1,6 +1,6 @@
 [package]
 name = "thorbro-desktop"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2021"
 description = "ThorBro companion: find your handheld, open ThorBro, keep saves in sync with RomM"
 

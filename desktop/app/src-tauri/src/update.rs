@@ -4,7 +4,6 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 
 const RELEASES: &str = "https://api.github.com/repos/Lennardsmw/thorbro/releases?per_page=30";
-const ATOM: &str = "https://github.com/Lennardsmw/thorbro/releases.atom";
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
 
 fn newer(a: &str, b: &str) -> bool {
@@ -24,19 +23,33 @@ fn asset_for(assets: &[Value]) -> Option<(String, String)> {
         .map(|a| (a["name"].as_str().unwrap_or("").to_string(), a["browser_download_url"].as_str().unwrap_or("").to_string()))
 }
 
-/// GitHub's API allows only 60 anonymous requests per hour and connection (shared with the Thor);
-/// the release feed has no such limit. Installer names follow Tauri's pattern, so they can be built.
-fn from_atom() -> Option<Value> {
-    let atom = sync::client().get(ATOM).send().ok()?.error_for_status().ok()?.text().ok()?;
-    let latest = atom.split("/releases/tag/desktop-v").skip(1)
-        .filter_map(|s| s.split('"').next())
-        .filter(|v| !v.is_empty() && v.chars().all(|c| c.is_ascii_digit() || c == '.'))
-        .max_by(|a, b| if newer(a, b) { std::cmp::Ordering::Greater } else { std::cmp::Ordering::Less })?
-        .to_string();
+/// the installer of a version, by Tauri's naming pattern
+fn installer(v: &str) -> (String, String) {
     let suffix = if cfg!(target_os = "macos") { "universal.dmg" } else if cfg!(target_os = "windows") { "x64-setup.exe" } else { "amd64.AppImage" };
-    let name = format!("ThorBro_{latest}_{suffix}");
-    let url = format!("https://github.com/Lennardsmw/thorbro/releases/download/desktop-v{latest}/{name}");
-    Some(json!({"current": CURRENT, "latest": latest, "available": newer(&latest, CURRENT), "name": name, "url": url, "via": "atom"}))
+    let name = format!("ThorBro_{v}_{suffix}");
+    let url = format!("https://github.com/Lennardsmw/thorbro/releases/download/desktop-v{v}/{name}");
+    (name, url)
+}
+
+/// GitHub's API allows only 60 anonymous requests per hour and connection (shared with the Thor).
+/// Release downloads have no such limit, so try the next versions (patch, minor, major) directly;
+/// the release feed is no help, it lists only the 10 highest tags and those are the app's v*.
+fn by_probing() -> Option<Value> {
+    let exists = |url: &str| sync::client().head(url).send().map(|r| r.status().is_success()).unwrap_or(false);
+    let mut v: Vec<u64> = CURRENT.split('.').map(|x| x.parse().unwrap_or(0)).collect();
+    v.resize(3, 0);
+    let mut found = None;
+    for _ in 0..20 {
+        let next = [[v[0], v[1], v[2] + 1], [v[0], v[1] + 1, 0], [v[0] + 1, 0, 0]].into_iter()
+            .map(|c| format!("{}.{}.{}", c[0], c[1], c[2]))
+            .find(|c| exists(&installer(c).1));
+        let Some(n) = next else { break };
+        v = n.split('.').map(|x| x.parse().unwrap_or(0)).collect();
+        found = Some(n);
+    }
+    let latest = found.unwrap_or_else(|| CURRENT.to_string());
+    let (name, url) = installer(&latest);
+    Some(json!({"current": CURRENT, "latest": latest, "available": newer(&latest, CURRENT), "name": name, "url": url, "via": "probe"}))
 }
 
 /// {current, latest, available, name, url}
@@ -47,7 +60,7 @@ pub fn check() -> Value {
     let list = match r {
         Ok(list) => list,
         Err(e) => {
-            if let Some(v) = from_atom() { return v; }
+            if let Some(v) = by_probing() { return v; }
             let msg = if e.status().map(|s| s.as_u16() == 403 || s.as_u16() == 429).unwrap_or(false) {
                 "GitHub-Limit erreicht, in einer Stunde erneut versuchen"
             } else { "GitHub nicht erreichbar" };
