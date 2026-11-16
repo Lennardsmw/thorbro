@@ -341,6 +341,15 @@ object Server {
                     json(JSONObject().put("ok", ok))
                 }
 
+                get("/api/debug/frames") {
+                    if (denied(ctx)) return@get
+                    json(FrameStats.json())
+                }
+                post("/api/debug/frames/reset") {
+                    if (denied(ctx)) return@post
+                    FrameStats.reset(); json(JSONObject().put("ok", true))
+                }
+
                 // read-only: system settings whose name matches ?q= (to find vendor keys like LED control)
                 get("/api/debug/settings") {
                     if (denied(ctx)) return@get

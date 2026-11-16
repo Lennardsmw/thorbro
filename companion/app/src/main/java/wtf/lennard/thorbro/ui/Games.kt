@@ -120,7 +120,7 @@ private fun GameCard(sys: String, r: JSONObject, m: JSONObject, onOpen: () -> Un
     FocusCard(Modifier.fillMaxWidth(), onClick = onOpen) {
         val img = cover(sys, r, m)
         Box(Modifier.fillMaxWidth().aspectRatio(3f / 4f).clip(RoundedCornerShape(8.dp)).background(Bg), contentAlignment = Alignment.Center) {
-            if (img != null) AsyncImage(img, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+            if (img != null) Img(img, 360, Modifier.fillMaxSize())
             else Text(title(r, m), color = Muted, fontSize = 13.sp, modifier = Modifier.padding(8.dp))
         }
         Spacer(Modifier.height(6.dp))
@@ -141,7 +141,7 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, onClose: () -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                 val img = cover(sys, r, m)
                 Box(Modifier.width(200.dp).aspectRatio(3f / 4f).clip(RoundedCornerShape(10.dp)).background(Bg)) {
-                    if (img != null) AsyncImage(img, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                    Img(img, 600, Modifier.fillMaxSize())
                 }
                 Column(Modifier.weight(1f)) {
                     Title(title(r, m))
@@ -182,7 +182,7 @@ private fun ConsoleGrid(list: List<Sys>, pick: (String) -> Unit) {
                     value = withContext(Dispatchers.IO) { runCatching { Media.icon(ctx, s.id) }.getOrNull() }
                 }
                 Box(Modifier.fillMaxWidth().height(110.dp), contentAlignment = Alignment.Center) {
-                    if (icon != null) AsyncImage(icon, null, Modifier.size(90.dp)) else Text(s.name.take(2), fontSize = 40.sp, color = Muted)
+                    if (icon != null) Img(icon, 200, Modifier.size(90.dp)) else Text(s.name.take(2), fontSize = 40.sp, color = Muted)
                 }
                 Text(s.name, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("${entries(s).size} Spiele", color = Muted, fontSize = 13.sp)

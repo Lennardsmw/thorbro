@@ -94,25 +94,25 @@ object HomeData {
     val games = mutableStateListOf<HomeGame>()
     @Volatile var loaded = false
 
-    /** all games, recently played first (as far as Cocoon knows), then by name; meta loads console by console */
+    /** favorite games only: only the consoles that contain favorites are read (meta for all consoles is a lot of work) */
     suspend fun load(ctx: Context) = withContext(Dispatchers.IO) {
-        if (loaded) return@withContext
+        Favorites.load(ctx)
+        val favs = Favorites.paths.toSet()
+        val have = games.map { it.rom.getString("path") }.toSet()
+        if (favs.all { it in have } && loaded) return@withContext
         loaded = true
         val a = Roms.scan(ctx, false).getJSONArray("systems")
+        val out = mutableListOf<HomeGame>()
         for (i in 0 until a.length()) {
             val s = a.getJSONObject(i)
             val id = s.getString("id")
-            if (id == "_unassigned") continue
-            var roms = s.getJSONArray("roms").let { r -> (0 until r.length()).map { r.getJSONObject(it) } }
-            if (id == "switch") roms = roms.filter { it.optString("switchKind", "base") == "base" }
+            val roms = s.getJSONArray("roms").let { r -> (0 until r.length()).map { r.getJSONObject(it) } }.filter { it.getString("path") in favs }
+            if (roms.isEmpty()) continue
             val meta = runCatching { Media.metaFor(ctx, id, roms) }.getOrDefault(JSONObject())
-            val add = roms.map { HomeGame(id, it, meta.optJSONObject(it.getString("path")) ?: JSONObject()) }
-            withContext(Dispatchers.Main) {
-                games.addAll(add)
-                val sorted = games.sortedWith(compareByDescending<HomeGame> { it.lastPlayed }.thenBy { it.title.lowercase() })
-                games.clear(); games.addAll(sorted)
-            }
+            roms.forEach { out += HomeGame(id, it, meta.optJSONObject(it.getString("path")) ?: JSONObject()) }
         }
+        val sorted = out.sortedWith(compareByDescending<HomeGame> { it.lastPlayed }.thenBy { it.title.lowercase() })
+        withContext(Dispatchers.Main) { games.clear(); games.addAll(sorted) }
     }
 }
 
@@ -172,7 +172,7 @@ fun ButtonHints(vararg hints: Pair<String, String>) {
 fun HomeScreen(open: (Screen) -> Unit, showDetail: (HomeGame) -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    LaunchedEffect(Unit) { HomeData.load(ctx) }
+    LaunchedEffect(Favorites.paths.size) { HomeData.load(ctx) }
     Favorites.load(ctx)
     val favs = HomeData.games.filter { it.rom.getString("path") in Favorites.paths }
     val first = remember { FocusRequester() }
@@ -237,11 +237,11 @@ private fun GameTile(g: HomeGame, modifier: Modifier, onFocus: () -> Unit, onSta
             .focusable(interactionSource = src),
         contentAlignment = Alignment.Center,
     ) {
-        if (img != null) AsyncImage(img, g.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        if (img != null) Img(img, 400, Modifier.fillMaxSize(), ContentScale.Crop, g.title)
         else Text(g.title, Modifier.padding(14.dp), textAlign = TextAlign.Center, fontSize = 16.sp)
         val icon by produceState<File?>(null, g.system) { value = withContext(Dispatchers.IO) { runCatching { Media.icon(ctx, g.system) }.getOrNull() } }
         if (icon != null) Box(Modifier.align(Alignment.BottomEnd).padding(8.dp).size(32.dp).clip(CircleShape).background(Color(0xCC000000)).padding(5.dp)) {
-            AsyncImage(icon, null, Modifier.fillMaxSize())
+            Img(icon, 96, Modifier.fillMaxSize())
         }
     }
 }

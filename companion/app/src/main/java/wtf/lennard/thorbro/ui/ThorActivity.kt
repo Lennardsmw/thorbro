@@ -74,6 +74,7 @@ class ThorActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         if (!ThorService.running) ThorService.start(this)
         if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+        wtf.lennard.thorbro.FrameStats.attach(this)
         setContent { ThorTheme { Root(screen.value) { screen.value = it } } }
     }
 
@@ -109,6 +110,11 @@ class ThorActivity : ComponentActivity() {
 
 @Composable
 private fun Root(screen: Screen?, open: (Screen?) -> Unit) {
+    wtf.lennard.thorbro.FrameStats.page = when {
+        screen == null -> "Start"
+        screen == Screen.GAMES && GamesNav.system.value != null -> "Spiele: " + GamesNav.system.value
+        else -> screen.label
+    }
     var detail by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<HomeGame?>(null) }
     val ctx = androidx.compose.ui.platform.LocalContext.current
     if (screen == Screen.GAMEPAD) {
