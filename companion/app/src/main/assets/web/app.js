@@ -52,7 +52,7 @@ function showTab(name) {
   if (name === 'library') loadLibrary();
   if (name === 'screen') screenStatus();
   if (name === 'stream') loadStream();
-  if (name === 'netplay') loadNetplay();
+  if (name === 'netplay') { loadNetplay(); loadDirect(); }
   if (name === 'store') loadStore(false);
   if (name === 'drivers') loadDrivers(false);
   if (name === 'files') loadFiles(currentDir);
@@ -1353,6 +1353,21 @@ $('#npPeers').addEventListener('click', async (e) => {
   } catch (err) { alert(err.message); $('#npScanInfo').textContent = ''; }
   b.disabled = false;
 });
+
+// ---------- Wi-Fi Direct ----------
+function showDirect(d) {
+  $('#dxStop').hidden = !d.active; $('#dxStart').hidden = d.active;
+  $('#dxInfo').innerHTML = d.active
+    ? `Netz <strong>${esc(d.ssid)}</strong> · Passwort <code>${esc(d.pass)}</code> · ThorBro laden: <a href="${esc(d.download)}">${esc(d.download)}</a>`
+    : (d.permission ? 'aus' : 'Beim ersten Mal am Thor unter Multiplayer → Wi-Fi Direct die Berechtigung erlauben.')
+      + (d.lanDownload ? ` · Im selben WLAN gibt es ThorBro unter <a href="${esc(d.lanDownload)}">${esc(d.lanDownload)}</a>` : '');
+}
+async function loadDirect() { try { showDirect((await api('/api/direct')).body); } catch {} }
+$('#dxStart').onclick = async () => {
+  $('#dxInfo').textContent = 'Startet …';
+  try { const { body } = await api('/api/direct/start', { method: 'POST' }); if (body.error) alert(body.error); showDirect(body); } catch (err) { alert(err.message); }
+};
+$('#dxStop').onclick = async () => { try { showDirect((await api('/api/direct/stop', { method: 'POST' })).body); } catch (err) { alert(err.message); } };
 
 // ---------- GPU drivers ----------
 let drv = null;

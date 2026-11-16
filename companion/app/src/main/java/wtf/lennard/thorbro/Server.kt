@@ -54,6 +54,12 @@ object Server {
             routing {
                 // ---- web UI ----
                 get("/") { asset(ctx, "index.html") }
+                // ThorBro for another device (e.g. over Wi-Fi Direct): public, it is only the app itself
+                get("/get") { call.respondText(Direct.page(ctx), ContentType.Text.Html) }
+                get("/thorbro.apk") {
+                    call.response.header(HttpHeaders.ContentDisposition, "attachment; filename=\"ThorBro.apk\"")
+                    call.respondFile(Direct.apk(ctx))
+                }
                 get("/{file}") {
                     val name = call.parameters["file"] ?: ""
                     if (!Regex("^[a-z0-9._-]+$").matches(name)) return@get fail("not found", HttpStatusCode.NotFound)
@@ -562,6 +568,20 @@ object Server {
                     val addr = q("address")?.takeIf { Regex("^[0-9.]{7,15}$").matches(it) } ?: return@post fail("address missing")
                     val pin = q("pin") ?: return@post fail("pin missing")
                     json(Jobs.start("Netplay beitreten") { Netplay.join(ctx, addr, pin, it) }.json())
+                }
+
+                get("/api/direct") {
+                    if (denied(ctx)) return@get
+                    json(Direct.status(ctx))
+                }
+                post("/api/direct/start") {
+                    if (denied(ctx)) return@post
+                    val res = withContext(Dispatchers.IO) { Direct.start(ctx) }
+                    json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
+                }
+                post("/api/direct/stop") {
+                    if (denied(ctx)) return@post
+                    json(withContext(Dispatchers.IO) { Direct.stop(ctx) })
                 }
 
                 // ---- background jobs ----

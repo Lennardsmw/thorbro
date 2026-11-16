@@ -202,6 +202,7 @@ private fun SettingsScreen() {
     fun open(action: String) = ctx.startActivity(Intent(action, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     val (lan, mesh) = remember(tick) { ipv4() }
     val version = remember { Updater.current(ctx) }
+    val direct = rememberDirect()
 
     TileGrid(first) {
         header("ThorBro $version", (if (ThorService.running) "läuft" else "Server gestoppt") + (lan?.let { " · http://$it:${ThorService.PORT}" } ?: "") + " · Code ${Prefs.token(ctx)}")
@@ -222,6 +223,8 @@ private fun SettingsScreen() {
             wtf.lennard.thorbro.Apps.restart(ctx, wtf.lennard.thorbro.Apps.COCOON) } }
         item { ConsoleTile("Neuer Code", "alte Kopplungen ungültig", androidx.compose.material.icons.Icons.Filled.Key) { Prefs.newToken(ctx); tick++ } }
         item { ConsoleTile("Web-Oberfläche", "alles auf dem Thor", androidx.compose.material.icons.Icons.Filled.Web) { ctx.startActivity(Intent(ctx, AppActivity::class.java)) } }
+        header("Weitergeben", "ThorBro an einen anderen Thor schicken – auch ohne gemeinsames WLAN")
+        directTiles(ctx, direct, scope, share = true)
 
         header("Berechtigungen", if (p.getBoolean("allFiles") && p.getBoolean("overlay") && p.getBoolean("install") && grants > 0) "alles erteilt" else "fehlende antippen")
         fun perm(title: String, ok: Boolean, fix: () -> Unit) = item {
@@ -238,4 +241,5 @@ private fun SettingsScreen() {
     if (menu) ConsoleMenu("Im Browser öffnen",
         listOfNotNull(lan?.let { "http://$it:${ThorService.PORT}" }, mesh?.let { "http://$it:${ThorService.PORT}  (NetBird)" }).joinToString("\n") + "\nCode: ${Prefs.token(ctx)}",
         mono = true, options = emptyList()) { menu = false }
+    DirectDialog(direct)
 }

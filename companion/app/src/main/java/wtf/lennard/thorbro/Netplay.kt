@@ -359,6 +359,8 @@ object Netplay {
         Thread.sleep(ms)
         runCatching { nsd.stopServiceDiscovery(l) }
         val out = JSONArray()
+        // inside another Thor's Wi-Fi Direct network the owner is always 192.168.49.1 (mDNS may not pass there)
+        if (Direct.inForeignGroup()) out.put(peer(Direct.OWNER_IP).put("service", "Wi-Fi Direct"))
         found.values.forEach { s ->
             val latch = CountDownLatch(1)
             var res: NsdServiceInfo? = null
@@ -370,7 +372,7 @@ object Netplay {
             latch.await(3, TimeUnit.SECONDS)
             @Suppress("DEPRECATION")
             val addr = res?.host?.hostAddress ?: return@forEach
-            if (addr == me || addr.contains(':')) return@forEach
+            if (addr == me || addr.contains(':') || (Direct.inForeignGroup() && addr == Direct.OWNER_IP)) return@forEach
             out.put(peer(addr).put("service", s.serviceName))
         }
         return out

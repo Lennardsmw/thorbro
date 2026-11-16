@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material3.Text
@@ -62,6 +63,7 @@ fun NetplayScreen() {
     var info by remember { mutableStateOf<Pair<String, String>?>(null) }
     var joinJob by remember { mutableStateOf<Jobs.Job?>(null) }
     var joinProg by remember { mutableStateOf(0f) }
+    val direct = rememberDirect()
 
     LaunchedEffect(tick) {
         withContext(Dispatchers.IO) {
@@ -103,7 +105,9 @@ fun NetplayScreen() {
             }
             item { ConsoleTile("Lobby schließen", "", Icons.Filled.Close) { Netplay.close(); tick++ } }
         }
-        header("Beitreten", if (s.optString("ip").isEmpty()) "kein WLAN – Hotspot am anderen Thor einschalten" else "selbes WLAN oder Hotspot")
+        header("Ohne WLAN", "ein Thor startet Wi-Fi Direct, der andere verbindet sich damit")
+        directTiles(ctx, direct, scope, share = true)
+        header("Beitreten", if (s.optString("ip").isEmpty()) "kein Netz – oben Wi-Fi Direct nutzen" else "selbes WLAN, Hotspot oder Wi-Fi Direct")
         item {
             val j = joinJob
             if (j != null) ConsoleTile(if (j.done) (j.error ?: "Gestartet") else j.message.ifEmpty { "Verbinde …" }, "${(joinProg * 100).toInt()} %",
@@ -151,6 +155,7 @@ fun NetplayScreen() {
         }
     }
     info?.let { (t, x) -> ConsoleMenu(t, x, options = emptyList()) { info = null } }
+    DirectDialog(direct)
 }
 
 /** 4-digit PIN entry with big buttons, works with the D-pad */
@@ -184,5 +189,72 @@ private fun PinPad(game: String, onClose: () -> Unit, onDone: (String) -> Unit) 
             Spacer(Modifier.height(8.dp))
             BigButton("Zurück") { onClose() }
         }
+    }
+}
+
+/** Wi-Fi Direct + passing ThorBro on; shared by Settings and Multiplayer */
+class DirectUi {
+    var st by mutableStateOf<JSONObject?>(null)
+    var busy by mutableStateOf(false)
+    var menu by mutableStateOf<String?>(null)
+}
+
+@Composable
+fun rememberDirect(): DirectUi {
+    val ctx = LocalContext.current
+    val d = remember { DirectUi() }
+    LaunchedEffect(Unit) { while (true) { d.st = withContext(Dispatchers.IO) { wtf.lennard.thorbro.Direct.status(ctx) }; delay(3000) } }
+    return d
+}
+
+private fun directOn(ctx: android.content.Context, d: DirectUi, scope: kotlinx.coroutines.CoroutineScope, then: String) {
+    if (!wtf.lennard.thorbro.Direct.permitted(ctx)) {
+        (ctx as? android.app.Activity)?.requestPermissions(arrayOf(wtf.lennard.thorbro.Direct.permissionName()), 7)
+        return
+    }
+    if (d.busy) return
+    d.busy = true
+    scope.launch {
+        val r = withContext(Dispatchers.IO) { runCatching { wtf.lennard.thorbro.Direct.start(ctx) }.getOrElse { JSONObject().put("error", it.message) } }
+        d.st = r; d.busy = false
+        d.menu = if (r.has("error")) "error:" + r.optString("error") else then
+    }
+}
+
+fun androidx.compose.foundation.lazy.grid.LazyGridScope.directTiles(
+    ctx: android.content.Context, d: DirectUi, scope: kotlinx.coroutines.CoroutineScope, share: Boolean,
+) {
+    val on = d.st?.optBoolean("active") == true
+    item {
+        ConsoleTile(when { d.busy -> "Startet …"; on -> "Wi-Fi Direct an"; else -> "Wi-Fi Direct" },
+            if (on) d.st!!.optString("ssid") else "eigenes Netz, kein Router nötig", Icons.Filled.WifiTethering, accent = on) {
+            if (on) d.menu = "info" else directOn(ctx, d, scope, "info")
+        }
+    }
+    if (share) item {
+        ConsoleTile("ThorBro weitergeben", "an einen anderen Thor", Icons.Filled.Share) { d.menu = "share" }
+    }
+}
+
+@Composable
+fun DirectDialog(d: DirectUi) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val s = d.st
+    when (val m = d.menu) {
+        null -> {}
+        "info" -> ConsoleMenu("Wi-Fi Direct",
+            "Am anderen Gerät in den WLAN-Einstellungen verbinden:\nNetz: ${s?.optString("ssid")}\nPasswort: ${s?.optString("pass")}\n\nThorBro dort im Browser: ${s?.optString("download")}\nMultiplayer: dort „Thors suchen“",
+            mono = true, options = listOf("Wi-Fi Direct beenden" to {
+                scope.launch { d.st = withContext(Dispatchers.IO) { wtf.lennard.thorbro.Direct.stop(ctx) } }; d.menu = null
+            })) { d.menu = null }
+        "share" -> ConsoleMenu("ThorBro weitergeben",
+            "Ohne gemeinsames WLAN: Wi-Fi Direct starten, der andere Thor verbindet sich und öffnet die angezeigte Adresse im Browser." +
+                (s?.optString("lanDownload")?.takeIf { it.isNotEmpty() }?.let { "\n\nIm selben WLAN: $it" } ?: ""),
+            options = listOf(
+                "Über Wi-Fi Direct" to { if (s?.optBoolean("active") == true) d.menu = "info" else directOn(ctx, d, scope, "info") },
+                "Quick Share / Bluetooth" to { d.menu = null; runCatching { ctx.startActivity(wtf.lennard.thorbro.Direct.shareIntent(ctx)) } },
+            )) { d.menu = null }
+        else -> ConsoleMenu("Wi-Fi Direct", m.removePrefix("error:"), options = emptyList()) { d.menu = null }
     }
 }
