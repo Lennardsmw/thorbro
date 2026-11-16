@@ -1,0 +1,32 @@
+[package]
+name = "thorbro-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "ThorBro companion: find your handheld, open ThorBro, keep saves in sync with RomM"
+
+[lib]
+name = "thorbro_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }
+
+[dependencies]
+tauri = { version = "2.12.5", features = ["tray-icon"] }
+tauri-plugin-autostart = "2.7.0"
+tauri-plugin-opener = "2.7.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "json", "rustls", "multipart"] }
+mdns-sd = "0.21.7"
+zip = { version = "9.6.0", default-features = false, features = ["deflate"] }
+md-5 = "0.11.0"
+notify = "8.2.2"
+dirs = "7.0.0"
+uuid = { version = "1.29.2", features = ["v4"] }
+chrono = "0.4.45"
+sysinfo = "0.40.3"
+
+[profile.release]
+strip = true
+lto = true

@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ThorBro</title>
+<style>
+  :root { --bg:#111317; --panel:#1b1e24; --line:#2c3039; --text:#e8eaee; --muted:#9097a5; --accent:#ff5a3c; --ok:#4cc27f; --err:#ff6b57; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; padding:18px; }
+  h1 { font-size:20px; margin:0 0 14px; color:var(--accent); }
+  h2 { font-size:15px; margin:0 0 8px; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:12px; }
+  .muted { color:var(--muted); font-size:13px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+  .grow { flex:1; }
+  button { font:inherit; padding:6px 12px; border-radius:8px; border:1px solid var(--line); background:#22262e; color:var(--text); cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  input { font:inherit; padding:6px 8px; border-radius:8px; border:1px solid var(--line); background:#0f1114; color:var(--text); }
+  .thor { display:flex; align-items:center; gap:8px; padding:8px 0; border-top:1px solid var(--line); }
+  .dot { width:9px; height:9px; border-radius:50%; background:var(--err); display:inline-block; }
+  .dot.ok { background:var(--ok); }
+  .code { font-size:22px; letter-spacing:2px; font-weight:700; }
+  pre { white-space:pre-wrap; margin:6px 0 0; font:13px/1.4 ui-monospace, monospace; color:var(--muted); }
+</style>
+</head>
+<body>
+<h1>ThorBro</h1>
+
+<div class="panel">
+  <h2>Deine Thors</h2>
+  <div id="thors"></div>
+  <div class="row"><button id="find">Im Netzwerk suchen</button><span id="findInfo" class="muted"></span></div>
+  <div id="found"></div>
+  <div class="row"><input id="addr" placeholder="Adresse, z. B. 192.168.178.107" class="grow"><input id="code" placeholder="Code" size="9"><button id="pair" class="primary">Koppeln</button></div>
+  <div class="muted">Der Kopplungscode steht in ThorBro auf dem Thor unter Einstellungen.</div>
+</div>
+
+<div class="panel">
+  <h2>RomM</h2>
+  <div id="romm"></div>
+</div>
+
+<div class="panel">
+  <h2>Spielstände</h2>
+  <div id="items"></div>
+  <label class="row"><input type="checkbox" id="auto"> Automatisch abgleichen (beim Speichern und alle 5 Minuten)</label>
+  <div class="row"><button id="syncNow" class="primary">Jetzt abgleichen</button><span id="syncInfo" class="muted"></span></div>
+  <pre id="last"></pre>
+</div>
+
+<script>
+const { invoke } = window.__TAURI__.core;
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+async function refresh() {
+  const s = await invoke('status');
+  $('#thors').innerHTML = s.thors.length ? s.thors.map((t) => `<div class="thor"><span class="grow"><strong>${esc(t.name)}</strong> <span class="muted">${esc(t.address)}</span></span>
+      <button data-open="${esc(t.address)}" class="primary">Öffnen</button><button data-forget="${esc(t.address)}">Entfernen</button></div>`).join('')
+    : '<div class="muted">Noch kein Thor gekoppelt.</div>';
+  const r = s.romm;
+  $('#romm').innerHTML = r.connected
+    ? `<div><span class="dot ok"></span> Angemeldet bei <strong>${esc(r.url)}</strong></div>`
+    : r.pending
+      ? `<div>In RomM bestätigen: <span class="code">${esc(r.pending.code)}</span></div><div class="row"><button id="openVerify" class="primary" data-url="${esc(r.pending.verify)}">RomM öffnen</button><span class="muted">wartet auf Bestätigung …</span></div>`
+      : `<div class="row"><input id="rommUrl" class="grow" placeholder="https://games.example.org" value="${esc(r.url)}"><button id="rommLogin" class="primary">Anmelden</button></div>`;
+  $('#items').innerHTML = s.items.map((i) => `<div><span class="dot ${i.exists ? 'ok' : ''}"></span> ${esc(i.name)}<div class="muted">${esc(i.dir)}${i.exists ? '' : ' (nicht gefunden)'}</div></div>`).join('');
+  $('#auto').checked = s.auto;
+  $('#last').textContent = s.last ? `Zuletzt ${new Date(s.last.at * 1000).toLocaleTimeString()}:\n` + s.last.lines.join('\n') : '';
+}
+
+$('#find').onclick = async () => {
+  $('#findInfo').textContent = 'suche …'; $('#found').innerHTML = '';
+  const list = await invoke('discover');
+  $('#findInfo').textContent = list.length ? '' : 'Kein Thor gefunden. Läuft ThorBro im selben Netz?';
+  $('#found').innerHTML = list.map((t) => `<div class="thor"><span class="grow">${esc(t.name)} <span class="muted">${esc(t.address)}</span></span><button data-pick="${esc(t.address)}">Übernehmen</button></div>`).join('');
+};
+$('#pair').onclick = async () => {
+  try { await invoke('pair', { address: $('#addr').value, code: $('#code').value }); $('#code').value = ''; refresh(); }
+  catch (e) { alert(e); }
+};
+document.addEventListener('click', async (e) => {
+  const t = e.target;
+  if (t.dataset.pick) { $('#addr').value = t.dataset.pick; $('#code').focus(); }
+  if (t.dataset.open) { try { await invoke('open_thor', { address: t.dataset.open }); } catch (err) { alert(err); } }
+  if (t.dataset.forget && confirm('Diesen Thor entfernen?')) { await invoke('forget_thor', { address: t.dataset.forget }); refresh(); }
+  if (t.id === 'rommLogin') { try { const p = await invoke('romm_login', { url: $('#rommUrl').value }); await window.__TAURI__.opener.openUrl(p.verify); refresh(); } catch (err) { alert(err); } }
+  if (t.id === 'openVerify') window.__TAURI__.opener.openUrl(t.dataset.url);
+});
+$('#auto').onchange = (e) => invoke('set_auto', { on: e.target.checked });
+$('#syncNow').onclick = async () => {
+  $('#syncInfo').textContent = 'gleicht ab …';
+  const lines = await invoke('sync_now');
+  $('#syncInfo').textContent = ''; $('#last').textContent = lines.join('\n'); refresh();
+};
+refresh(); setInterval(refresh, 5000);
+</script>
+</body>
+</html>

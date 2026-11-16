@@ -16,6 +16,13 @@ companion/  Android-App auf dem Thor (Kotlin + Ktor CIO, Port 7330)
             └─ /             Web-Oberfläche (assets/web), direkt vom Thor ausgeliefert
 ```
 
+## Desktop-App (Mac, Windows, Linux)
+
+`desktop/app` (Tauri): findet ThorBro im Netzwerk, koppelt per Code, öffnet die Oberfläche des Thor
+in einem Fenster und gleicht Spielstände (z. B. Ocarina of Time über nxnative) im Hintergrund mit
+RomM ab – beim Speichern und alle 5 Minuten. Läuft in der Menüleiste und startet mit dem Computer.
+Downloads: Releases `desktop-v*`. Selbst bauen: `cd desktop/app && npm install && npx tauri build`.
+
 ## Bauen und installieren
 
 ```bash
