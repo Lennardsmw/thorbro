@@ -5,6 +5,23 @@ plugins {
 
 val ktor = "3.6.1"
 
+// ---- version (several chats build in parallel worktrees, see CLAUDE.md) ----
+// VERSION at the repo root holds the release version; only scripts/release.sh bumps it, on main.
+// Builds from any other branch are called "<VERSION>-<branch>+<commit>", so the Thor shows whose build is on it.
+// versionCode counts minutes, so every newer build installs over an older one, whatever branch it came from.
+fun git(vararg args: String): String = runCatching {
+    providers.exec { commandLine("git", *args); isIgnoreExitValue = true }.standardOutput.asText.get().trim()
+}.getOrDefault("")
+val baseVersion = rootProject.file("../VERSION").readText().trim()
+val gitBranch = git("rev-parse", "--abbrev-ref", "HEAD")
+val gitSha = git("rev-parse", "--short", "HEAD")
+val gitDirty = git("status", "--porcelain").isNotEmpty()
+val onMain = gitBranch == "main" || gitBranch.isEmpty() || gitBranch == "HEAD"
+val appVersionName = if (onMain && !gitDirty) baseVersion
+    else baseVersion + (if (onMain) "" else "-" + gitBranch.removePrefix("feature/").replace(Regex("[^A-Za-z0-9]+"), "-")) +
+        "+" + gitSha + (if (gitDirty) ".dirty" else "")
+val appVersionCode = (System.currentTimeMillis() / 60_000L - 28_000_000L).toInt()
+
 android {
     namespace = "wtf.lennard.thorbro"
     compileSdk = 37
@@ -13,8 +30,8 @@ android {
         applicationId = "wtf.lennard.thorbro"
         minSdk = 30
         targetSdk = 36
-        versionCode = 47
-        versionName = "0.23.3"
+        versionCode = appVersionCode
+        versionName = appVersionName
     }
 
     buildTypes {
