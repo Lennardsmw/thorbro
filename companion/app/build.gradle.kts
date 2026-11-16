@@ -13,8 +13,8 @@ android {
         applicationId = "wtf.lennard.thorbro"
         minSdk = 30
         targetSdk = 36
-        versionCode = 25
-        versionName = "0.15.0"
+        versionCode = 26
+        versionName = "0.15.1"
     }
 
     buildTypes {

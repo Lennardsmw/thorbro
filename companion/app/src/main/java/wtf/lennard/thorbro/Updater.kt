@@ -34,7 +34,10 @@ object Updater {
     /** {current, latest, url, available, feed, auto} or {error} */
     fun check(ctx: Context): JSONObject {
         val out = JSONObject().put("current", current(ctx)).put("feed", feed(ctx)).put("auto", auto(ctx))
-        val body = try { get(feed(ctx)) } catch (e: Exception) { return out.put("error", "Update-Quelle nicht erreichbar: ${e.message}") }
+        val body = try { get(feed(ctx)) } catch (e: Exception) {
+            // GitHub's API allows only 60 anonymous requests per hour and connection; the release feed has no such limit
+            return fromAtom(ctx, out) ?: out.put("error", "Update-Quelle nicht erreichbar: ${e.message}")
+        }
         // a release list (GitHub /releases): take the newest app release ("v1.2.3" with an .apk), skip desktop ones
         val j = try {
             if (body.trimStart().startsWith("[")) {
@@ -60,6 +63,15 @@ object Updater {
         if (latest.isEmpty() || url == null) return out.put("error", "Kein APK im neuesten Release gefunden")
         return out.put("latest", latest).put("url", url).put("available", newer(latest, current(ctx)))
     }
+
+    private fun fromAtom(ctx: Context, out: JSONObject): JSONObject? = runCatching {
+        if (!feed(ctx).contains("api.github.com/repos/Lennardsmw/thorbro")) return null
+        val atom = get("https://github.com/Lennardsmw/thorbro/releases.atom")
+        val latest = Regex("/releases/tag/v(\\d+\\.\\d+\\.\\d+)").findAll(atom).map { it.groupValues[1] }
+            .maxWithOrNull { a, b -> if (newer(a, b)) 1 else -1 } ?: return null
+        out.put("latest", latest).put("url", "https://github.com/Lennardsmw/thorbro/releases/download/v$latest/ThorBro-$latest.apk")
+            .put("available", newer(latest, current(ctx))).put("via", "atom")
+    }.getOrNull()
 
     /** Downloads and installs the newest version. Returns the check result plus "session" when an install started. */
     fun update(ctx: Context): JSONObject {
