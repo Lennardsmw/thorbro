@@ -1,0 +1,18 @@
+# Libraries that use reflection or service loading: keep them whole.
+-keep class io.ktor.** { *; }
+-keep class kotlinx.coroutines.** { *; }
+-keep class org.slf4j.** { *; }
+-keep class rikka.shizuku.** { *; }
+-keep class moe.shizuku.** { *; }
+-keep class org.apache.commons.compress.** { *; }
+-keep class org.tukaani.xz.** { *; }
+-dontwarn io.ktor.**
+-dontwarn org.slf4j.**
+-dontwarn org.apache.commons.compress.**
+-dontwarn org.tukaani.xz.**
+-dontwarn java.lang.management.**
+-dontwarn javax.**
+-dontwarn org.osgi.**
+-dontwarn com.github.luben.zstd.**
+-dontwarn org.brotli.**
+-dontwarn org.objectweb.asm.**

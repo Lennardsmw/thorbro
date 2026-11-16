@@ -13,14 +13,17 @@ android {
         applicationId = "wtf.lennard.thorbro"
         minSdk = 30
         targetSdk = 36
-        versionCode = 21
-        versionName = "0.14.0"
+        versionCode = 22
+        versionName = "0.14.1"
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
-            // Until there is a real release key, release builds use the debug key.
+            // optimized build: much smoother Compose UI than the debug build
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Until there is a real release key, release builds use the debug key (same key as before: updates keep working).
             signingConfig = signingConfigs.getByName("debug")
         }
     }

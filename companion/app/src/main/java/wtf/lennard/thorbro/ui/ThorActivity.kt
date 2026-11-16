@@ -79,7 +79,8 @@ class ThorActivity : ComponentActivity() {
 
     // L1 / R1 switch sections; every key and stick move also feeds the controller tester
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        Pads.onKey(event)
+        // the live tester and player assignment only matter on the controller page
+        if (screen.value == Screen.CONTROLLER) Pads.onKey(event)
         if (event.action == KeyEvent.ACTION_DOWN) when (event.keyCode) {
             KeyEvent.KEYCODE_BUTTON_B, KeyEvent.KEYCODE_BACK -> if (screen.value != null && !detailOpen) {
                 if (screen.value == Screen.GAMES && GamesNav.system.value != null) GamesNav.system.value = null else screen.value = null
@@ -91,7 +92,7 @@ class ThorActivity : ComponentActivity() {
     }
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
-        if (event.isFromSource(InputDevice.SOURCE_JOYSTICK)) Pads.onMotion(event)
+        if (screen.value == Screen.CONTROLLER && event.isFromSource(InputDevice.SOURCE_JOYSTICK)) Pads.onMotion(event)
         return super.dispatchGenericMotionEvent(event)
     }
 

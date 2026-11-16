@@ -10,8 +10,8 @@ CODE="${THORBRO_CODE:-$(cat "$HOME/.config/thorbro/code" 2>/dev/null || true)}"
 [ -n "$CODE" ] || { echo "Pairing code missing: set THORBRO_CODE or write it to ~/.config/thorbro/code" >&2; exit 1; }
 
 export JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@17}"
-./gradlew assembleDebug -q
-APK=app/build/outputs/apk/debug/app-debug.apk
+./gradlew assembleRelease -q
+APK=app/build/outputs/apk/release/app-release.apk
 
 echo "Uploading $(du -h "$APK" | cut -f1) to $THOR ..."
 curl -sS --fail-with-body -X POST \
