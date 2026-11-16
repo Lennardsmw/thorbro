@@ -698,11 +698,72 @@ function openRom(path, sysId) {
           <span class="grow"></span>
           <button data-close>Schließen</button>
         </div>
+        ${sysId !== '_unassigned' ? `<div class="panel" id="romSaves" style="margin-top:12px"><h3>Spielstände</h3><div class="sub">Lade …</div></div>` : ''}
         ${sysId === '_unassigned' ? `<div class="row"><select data-assign-sel="${esc(r.path)}"><option value="">Konsole wählen …</option>${romData.systemIds.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select><button data-assign="${esc(r.path)}" class="primary">In Konsolen-Ordner verschieben</button></div>` : ''}
       </div>
     </div>`;
   $('#romDetail').showModal();
+  if (sysId !== '_unassigned') loadRomSaves(path, sysId);
 }
+
+// ---------- saves of one game: profiles, own RomM saves, shared ones ----------
+let romSavesFor = null;
+const when = (t) => (t ? new Date(t).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) : '');
+async function loadRomSaves(path, sys) {
+  romSavesFor = { path, sys };
+  const box = $('#romSaves');
+  if (!box) return;
+  let d;
+  try { d = (await api('/api/saves/game?' + q({ path, system: sys }))).body; } catch (err) { box.innerHTML = `<h3>Spielstände</h3><div class="sub">${esc(err.message)}</div>`; return; }
+  if (romSavesFor?.path !== path || !$('#romSaves')) return;
+  const profiles = d.profiles || [];
+  const opts = profiles.map((p) => `<option value="${esc(p.id)}"${p.active ? ' selected' : ''}>${esc(p.name)}</option>`).join('');
+  const installBtn = (id) => d.supported
+    ? `<select data-sv-for="${id}">${opts}</select> <button data-sv-install="${id}">Installieren</button>` : '';
+  box.innerHTML = `<h3>Spielstände</h3>
+    ${d.supported ? `<div class="sub">Aktiv ist der Spielstand von <b>${esc(profiles.find((p) => p.active)?.name || '–')}</b>. Wechseln tauscht die Dateien, der alte Stand wird vorher gesichert.</div>
+      <div class="proflist">${profiles.map((p) => `<button class="prof${p.active ? ' active' : ''}" data-sv-activate="${esc(p.id)}" ${p.active ? 'disabled' : ''}>${profDot(p)}${esc(p.name)}${p.hasSave ? ' 💾' : ''}</button>`).join('')}</div>`
+      : '<div class="sub">Switch-Spielstände liegen in Eden, das eigene Profile hat. Hier nur ansehen und teilen.</div>'}
+    ${!d.connected ? '<div class="sub">RomM nicht verbunden – geteilte Spielstände gibt es nur mit RomM.</div>'
+      : d.inRomm === false ? '<div class="sub">Das Spiel ist nicht in RomM, darum gibt es keine Spielstände dort.</div>'
+      : d.error ? `<div class="sub">${esc(d.error)}</div>` : `
+    <h4 style="margin:12px 0 4px">Deine Spielstände in RomM</h4>
+    ${d.own.length ? `<table class="savetable">${d.own.map((s) => `<tr><td>${esc(s.profile)}<div class="muted">${when(s.updated)} · ${fmt(s.size)}</div></td>
+      <td><button data-sv-share="${s.id}" data-sv-on="${s.public ? 0 : 1}">${s.public ? '🌐 Geteilt – zurücknehmen' : 'Teilen'}</button> ${installBtn(s.id)}</td></tr>`).join('')}</table>`
+      : '<div class="sub">Noch keiner – nach dem ersten Speichern lädt ThorBro ihn hoch.</div>'}
+    <h4 style="margin:12px 0 4px">Geteilte Spielstände</h4>
+    ${d.shared.length ? `<table class="savetable">${d.shared.map((s) => `<tr><td>${esc(s.user)}${s.slot ? ' · ' + esc(s.slot) : ''}<div class="muted">${esc(s.name)} · ${when(s.updated)} · ${fmt(s.size)}</div></td>
+      <td>${installBtn(s.id)}</td></tr>`).join('')}</table>`
+      : '<div class="sub">Niemand hat für dieses Spiel einen Spielstand geteilt. In RomM beim Spielstand „öffentlich“ setzen, dann taucht er hier auf.</div>'}`}`;
+}
+$('#romDetail').addEventListener('click', async (e) => {
+  const t = e.target.closest('[data-sv-activate],[data-sv-share],[data-sv-install]');
+  if (!t || !romSavesFor) return;
+  const { path, sys } = romSavesFor;
+  try {
+    if (t.dataset.svActivate) {
+      const { body } = await api('/api/saves/profile?' + q({ path, system: sys, id: t.dataset.svActivate }), { method: 'POST' });
+      if (body.error) return alert(body.error);
+      toast(`Spielstand von ${body.profile} ist jetzt aktiv`);
+    }
+    if (t.dataset.svShare) {
+      const { body } = await api('/api/saves/share?' + q({ save: t.dataset.svShare, on: t.dataset.svOn }), { method: 'POST' });
+      if (body.error) return alert(body.error);
+      toast(body.public ? 'Geteilt – alle RomM-Nutzer sehen ihn jetzt' : 'Nicht mehr geteilt');
+    }
+    if (t.dataset.svInstall) {
+      const sel = $('#romDetail').querySelector(`[data-sv-for="${t.dataset.svInstall}"]`);
+      const prof = sel?.value;
+      const name = sel?.selectedOptions[0]?.textContent || '';
+      if (!confirm(`Spielstand für ${name} installieren?\nDer jetzige Spielstand von ${name} wird vorher gesichert.`)) return;
+      t.disabled = true;
+      const { body } = await api('/api/saves/install?' + q({ path, system: sys, save: t.dataset.svInstall, profile: prof }), { method: 'POST' });
+      if (body.error) { t.disabled = false; return alert(body.error); }
+      toast(`Installiert für ${body.profile}`);
+    }
+    loadRomSaves(path, sys);
+  } catch (err) { alert(err.message); }
+});
 
 $('#romDetail').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-offload]');
@@ -791,9 +852,37 @@ $('#sysList').onclick = (e) => {
   $('#romFilter').value = '';
   renderRoms();
 };
+// ---------- profiles (like the Switch: who is playing?) ----------
+const profColor = (p) => p.color || '#4F8EF7';
+const profDot = (p) => `<span class="pdot" style="background:${esc(profColor(p))}">${esc((p.name || '?').slice(0, 1).toUpperCase())}</span>`;
+// resolves to a profile id, or null when cancelled; undefined = no picker needed
+async function pickProfile(path, sys) {
+  if (sys === 'switch') return undefined;
+  const { body } = await api('/api/profiles?' + q({ path }));
+  if (!body.needsPicker) return undefined;
+  const dlg = $('#profilePick');
+  const list = body.game || body.profiles;
+  dlg.innerHTML = `<h2 style="margin:0;text-align:center">Wer spielt?</h2>
+    <div class="pickgrid">${list.map((p) => `<button data-pick="${esc(p.id)}">${profDot(p)}<span>${esc(p.name)}</span><small>${p.active ? 'zuletzt gespielt' : p.hasSave ? 'hat Spielstand' : 'neu'}</small></button>`).join('')}</div>
+    <div class="row"><span class="grow"></span><button data-pick-cancel>Abbrechen</button></div>`;
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; dlg.onclick = null; dlg.onclose = null; if (dlg.open) dlg.close(); resolve(v); };
+    dlg.onclick = (e) => {
+      const b = e.target.closest('[data-pick]');
+      if (b) return finish(b.dataset.pick);
+      if (e.target === dlg || e.target.closest('[data-pick-cancel]')) finish(null);
+    };
+    dlg.onclose = () => finish(null);
+    dlg.showModal();
+    (dlg.querySelector('.pickgrid button') || dlg).focus();
+  });
+}
 async function play(path, sys) {
   try {
-    const r = await api('/api/roms/launch?' + q({ path, system: sys }), { method: 'POST' });
+    const profile = await pickProfile(path, sys);
+    if (profile === null) return;
+    const r = await api('/api/roms/launch?' + q({ path, system: sys, ...(profile ? { profile } : {}) }), { method: 'POST' });
     if (r.body.error) {
       if (r.body.code === 'need_folder_grant' && confirm(r.body.error + '\n\nOrdnerauswahl jetzt auf dem Thor öffnen?')) await api('/api/emulators/grant', { method: 'POST' });
       else if (r.body.code !== 'need_folder_grant') alert(r.body.error);
@@ -934,7 +1023,7 @@ $('#rommList').onclick = async (e) => {
 };
 
 // ---------- save backups ----------
-const histLabel = { save_up: '⬆ Spielstand hochgeladen', save_down: '⬇ Spielstand von RomM', rom_up: '⬆ Spiel zu RomM', offload: '📦 Ausgelagert', download: '⬇ Aus RomM geladen', restore: '↺ Spielstand zurückgesetzt' };
+const histLabel = { save_up: '⬆ Spielstand hochgeladen', save_down: '⬇ Spielstand von RomM', rom_up: '⬆ Spiel zu RomM', offload: '📦 Ausgelagert', download: '⬇ Aus RomM geladen', restore: '↺ Spielstand zurückgesetzt', save_install: '⤓ Spielstand installiert' };
 async function loadHistory() {
   try {
     const list = (await api('/api/history?limit=30')).body;
@@ -942,8 +1031,39 @@ async function loadHistory() {
       : '<p class="muted">Noch nichts passiert.</p>';
   } catch (err) { $('#historyList').textContent = 'Fehler: ' + err.message; }
 }
+async function loadProfiles() {
+  const { body } = await api('/api/profiles');
+  $('#profileList').innerHTML = body.profiles.map((p) => `<span class="prof">${profDot(p)}${esc(p.name)}
+    <button data-prof-rename="${esc(p.id)}" data-prof-name="${esc(p.name)}" title="Umbenennen">✎</button>
+    ${p.id === 'main' ? '' : `<button data-prof-del="${esc(p.id)}" data-prof-name="${esc(p.name)}" title="Löschen">✕</button>`}</span>`).join('');
+}
+$('#profileAdd').onclick = async () => {
+  const name = $('#profileName').value.trim();
+  if (!name) return;
+  const { body } = await api('/api/profiles?' + q({ name }), { method: 'POST' });
+  if (body.error) return alert(body.error);
+  $('#profileName').value = ''; toast(`Profil ${name} angelegt`); loadProfiles();
+};
+$('#profileList').onclick = async (e) => {
+  const t = e.target;
+  try {
+    if (t.dataset.profRename) {
+      const name = prompt('Neuer Name', t.dataset.profName);
+      if (!name) return;
+      const { body } = await api('/api/profiles/rename?' + q({ id: t.dataset.profRename, name }), { method: 'POST' });
+      if (body.error) return alert(body.error);
+    }
+    if (t.dataset.profDel) {
+      if (!confirm(`Profil ${t.dataset.profName} löschen?\nSeine Spielstände bleiben als Sicherung in save-backups und in RomM (Slot ${t.dataset.profName}).`)) return;
+      const { body } = await api('/api/profiles/delete?' + q({ id: t.dataset.profDel }), { method: 'POST' });
+      if (body.error) return alert(body.error);
+    }
+    loadProfiles();
+  } catch (err) { alert(err.message); }
+};
 async function loadSaves() {
   loadHistory();
+  loadProfiles().catch(() => {});
   $('#savesInfo').textContent = 'Lade …';
   const { body } = await api('/api/saves');
   $('#savesAuto').checked = body.auto;

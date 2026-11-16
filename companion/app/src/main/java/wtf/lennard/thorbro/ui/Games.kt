@@ -57,6 +57,8 @@ import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.ui.draw.blur
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Save
@@ -169,7 +171,9 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
     var msg by remember { mutableStateOf("") }
     val canPlay = remember(sys) { Emulators.forSystem(ctx, sys) }
     var confirm by remember { mutableStateOf(false) }
+    var savesOpen by remember { mutableStateOf(false) }
     var job by remember { mutableStateOf<Jobs.Job?>(null) }
+    val start = rememberPlay(onError = { msg = it }, onStarted = onClose)
     val size = group.sumOf { it.optLong("size") }
     val first = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(Unit) { kotlinx.coroutines.delay(200); runCatching { first.requestFocus() } }
@@ -198,14 +202,10 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
 
     @Composable
     fun Buttons(stacked: Boolean) {
-        val play: (() -> Unit)? = if (canPlay != null && !r.optBoolean("noBase")) ({
-            scope.launch {
-                val res = withContext(Dispatchers.IO) { Emulators.launch(ctx, sys, File(r.getString("path"))) }
-                msg = res.optString("error"); if (!res.has("error")) onClose()
-            }
-        }) else null
+        val play: (() -> Unit)? = if (canPlay != null && !r.optBoolean("noBase")) ({ start(sys, File(r.getString("path"))) }) else null
         val list = buildList<Triple<String, androidx.compose.ui.graphics.vector.ImageVector, () -> Unit>> {
             play?.let { add(Triple("Spielen", Icons.Filled.PlayArrow, it)) }
+            if (sys != "ports" || lib != null) add(Triple("Spielstände", Icons.Filled.Save, { savesOpen = true }))
             add(Triple(if (fav) "Favorit ✓" else "Favorit", if (fav) Icons.Filled.Star else Icons.Filled.StarBorder, { Favorites.toggle(ctx, r.getString("path")) }))
             val queued = Background.isQueued(r.getString("path"))
             if (sys != "ports" && lib != null && !queued) add(Triple(if (lib.optBoolean("inRomm")) "Auslagern" else "Hochladen + auslagern", Icons.Filled.CloudUpload, { confirm = true }))
@@ -218,7 +218,7 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
                     BigButton(l, ic, primary = row == 0 && i == 0 && play != null, modifier = Modifier.weight(1f).firstFocus(first, row == 0 && i == 0), onClick = a)
                 }
             } }
-        } else Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        } else Row(Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 6.dp, horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             list.forEachIndexed { i, (l, ic, a) ->
                 BigButton(l, ic, primary = i == 0 && play != null, modifier = (if (i == 0 && play != null) Modifier.width(220.dp) else Modifier).firstFocus(first, i == 0), onClick = a)
             }
@@ -286,6 +286,7 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
             }
         }
     }
+    if (savesOpen) GameSaves(sys, r.getString("path"), title(r, m)) { savesOpen = false }
     if (confirm) OffloadConfirm(title(r, m), size, lib?.optBoolean("inRomm") == true, onYes = {
         confirm = false
         Background.offload(ctx, group.map { it.getString("path") }, title(r, m), size)

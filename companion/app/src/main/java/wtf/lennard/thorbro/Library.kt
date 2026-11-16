@@ -17,7 +17,7 @@ object Library {
     class Remote(val bySlug: Map<String, Int>, val roms: Map<Int, List<JSONObject>>) {
         fun find(system: String, file: String): JSONObject? {
             val pid = bySlug[RommSync.slugFor(system)] ?: return null
-            return roms[pid]?.firstOrNull { val n = it.optString("fs_name"); n == file || n == "$file.zip" }
+            return roms[pid]?.firstOrNull { val n = it.optString("fs_name"); n == file || n == "$file.zip" || (n == file.substringBeforeLast('.') && it.optBoolean("has_multiple_files")) }
         }
     }
 
@@ -57,8 +57,8 @@ object Library {
                 val mine = saves[r.getString("path")].orEmpty()
                 val save = when {
                     mine.isEmpty() -> "none"
-                    mine.all { st.optJSONObject(it.file.path)?.optString("local") == runCatching { RommSync.md5(it.file) }.getOrNull() } -> "synced"
-                    mine.any { st.has(it.file.path) } -> "pending"
+                    mine.all { st.optJSONObject(RommSync.stateKey(ctx, it))?.optString("local") == runCatching { RommSync.md5(it.file) }.getOrNull() } -> "synced"
+                    mine.any { st.has(RommSync.stateKey(ctx, it)) } -> "pending"
                     else -> "local"
                 }
                 games.put(r.getString("path"), JSONObject().put("inRomm", hit != null).put("romId", hit?.optInt("id")).put("save", save))

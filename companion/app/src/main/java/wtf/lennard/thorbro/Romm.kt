@@ -227,12 +227,13 @@ object Romm {
     fun uploadComplete(ctx: Context, uploadId: String) { read(open(ctx, "POST", "/api/roms/upload/$uploadId/complete")) }
 
     /** returns RomM's save object (id, updated_at …) */
-    fun uploadSave(ctx: Context, romId: Int, f: File, emulator: String, contentHash: String): JSONObject {
+    fun uploadSave(ctx: Context, romId: Int, f: File, emulator: String, contentHash: String, slot: String? = null): JSONObject {
         val boundary = "thorbro" + System.currentTimeMillis()
         val head = "--$boundary\r\nContent-Disposition: form-data; name=\"saveFile\"; filename=\"${f.name.replace("\"", "")}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
         val tail = "\r\n--$boundary--\r\n"
         // no device_id: RomM would then also require the devices.write scope
-        val q = "rom_id=$romId&emulator=${URLEncoder.encode(emulator, "UTF-8")}&overwrite=true&content_hash=$contentHash"
+        val q = "rom_id=$romId&emulator=${URLEncoder.encode(emulator, "UTF-8")}&overwrite=true&content_hash=$contentHash" +
+            (slot?.let { "&slot=" + URLEncoder.encode(it, "UTF-8") } ?: "")
         val c = open(ctx, "POST", "/api/saves?$q", headers = mapOf("Content-Type" to "multipart/form-data; boundary=$boundary"))
         c.doOutput = true
         c.setFixedLengthStreamingMode(head.toByteArray().size + f.length() + tail.toByteArray().size)
@@ -242,6 +243,16 @@ object Romm {
 
     fun listSaves(ctx: Context, romId: Int): List<JSONObject> =
         JSONArray(request(ctx, "GET", "/api/saves?rom_id=$romId")).let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
+
+    /** a save's slot; null for RomM's default slot */
+    fun slotOf(s: JSONObject): String? = if (s.isNull("slot")) null else s.optString("slot").ifEmpty { null }
+
+    /** a game's detail; "all_user_saves" holds own saves plus other users' public ones */
+    fun romDetail(ctx: Context, romId: Int): JSONObject = JSONObject(request(ctx, "GET", "/api/roms/$romId"))
+
+    /** public saves can be seen and downloaded by every RomM user */
+    fun setSavePublic(ctx: Context, saveId: Int, on: Boolean): JSONObject =
+        JSONObject(request(ctx, "PUT", "/api/saves/$saveId/visibility", JSONObject().put("is_public", on).toString()))
 
     fun downloadSave(ctx: Context, saveId: Int, target: File) {
         val c = open(ctx, "GET", "/api/saves/$saveId/content")

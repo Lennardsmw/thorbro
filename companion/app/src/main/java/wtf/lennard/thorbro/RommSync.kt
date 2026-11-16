@@ -61,6 +61,11 @@ object RommSync {
                 if (rom != null && (f.listFiles()?.isNotEmpty() == true)) out += SaveItem(f, "switch", rom, true)
             }
         }
+        // 3DS (Azahar): one save folder per title id
+        for (rom in systems["n3ds"].orEmpty()) {
+            val dir = N3ds.saveDir(File(rom.getString("path"))) ?: continue
+            if (dir.listFiles()?.isNotEmpty() == true) out += SaveItem(dir, "n3ds", rom, true)
+        }
         // ports/recomps: their save folder belongs to the port's placeholder entry
         val portEntries = Ports.entries(ctx)
         for ((p, dir) in Ports.saveDirs(ctx)) {
@@ -79,7 +84,30 @@ object RommSync {
     /** per save: hash of the local files and the RomM save ("id@updated_at") at the last sync */
     private fun stateFile(ctx: Context) = File(ctx.filesDir, "romm-save-state.json")
     internal fun state(ctx: Context): JSONObject = runCatching { JSONObject(stateFile(ctx).readText()) }.getOrDefault(JSONObject())
+    /** sync state is per profile: the same save file holds a different profile's save after a swap */
+    internal fun stateKey(ctx: Context, s: SaveItem): String {
+        val o = Profiles.owner(ctx, s.rom.optString("path"))
+        return if (o == Profiles.MAIN) s.file.path else "${s.file.path}#$o"
+    }
+    /** RomM saves of the profile that is live for this save (its slot) */
+    private fun slotSaves(ctx: Context, romId: Int, s: SaveItem): List<JSONObject> {
+        val slot = Profiles.slot(ctx, Profiles.owner(ctx, s.rom.optString("path")))
+        return Romm.listSaves(ctx, romId).filter { Romm.slotOf(it) == slot }
+    }
     private fun remoteKey(s: JSONObject) = "${s.getInt("id")}@${s.optString("updated_at")}"
+    private fun parseTime(t: String): Long? = runCatching { java.time.OffsetDateTime.parse(t).toInstant().toEpochMilli() }
+        .recoverCatching { java.time.LocalDateTime.parse(t.take(19)).toInstant(java.time.ZoneOffset.UTC).toEpochMilli() }.getOrNull()
+    /**
+     * is [s] the RomM save we saw at the last sync? Same id and same second: the upload answer and the save list
+     * write the time differently (fractions, offset), so comparing the raw strings re-downloaded our own uploads
+     */
+    private fun sameRemote(prev: String?, s: JSONObject): Boolean {
+        if (prev.isNullOrEmpty()) return false
+        val id = prev.substringBefore('@'); val t = prev.substringAfter('@', "")
+        if (id != s.getInt("id").toString()) return false
+        val a = parseTime(t); val b = parseTime(s.optString("updated_at"))
+        return if (a != null && b != null) a / 1000 == b / 1000 else t == s.optString("updated_at")
+    }
     private fun remoteTime(s: JSONObject): Long = runCatching { java.time.OffsetDateTime.parse(s.getString("updated_at")).toInstant().toEpochMilli() }
         .getOrElse { java.time.LocalDateTime.parse(s.getString("updated_at").take(19)).toInstant(java.time.ZoneOffset.UTC).toEpochMilli() }
 
@@ -100,7 +128,7 @@ object RommSync {
         }
         val st = state(ctx)
         val saves = localSaves(ctx)
-        val pendingSaves = saves.count { s -> st.optJSONObject(s.file.path)?.optString("local") != md5(s.file) }
+        val pendingSaves = saves.count { s -> st.optJSONObject(stateKey(ctx, s))?.optString("local") != md5(s.file) }
         return JSONObject().put("systems", systems).put("saves", saves.size).put("savesPending", pendingSaves)
             .put("canWrite", Romm.hasScope(ctx, "roms.write")).put("auto", auto(ctx))
             .put("watcher", SaveWatcher.last).put("wifi", SaveWatcher.onWifi(ctx))
@@ -171,14 +199,15 @@ object RommSync {
         var n = 0; val errors = JSONArray(); var skipped = 0
         for (s in localSaves(ctx)) {
             val hash = md5(s.file)
-            val prev = st.optJSONObject(s.file.path)
+            val key = stateKey(ctx, s)
+            val prev = st.optJSONObject(key)
             if (prev?.optString("local") == hash) continue
             val romId = bySlug[slugFor(s.system)]?.let { remoteFiles[it]?.get(s.rom.getString("file")) }
             if (romId == null) { skipped++; continue }
             // RomM has a save we have not seen yet (another device): only upload when ours is newer
             if (s.isFolder) {
-                val newest = runCatching { Romm.listSaves(ctx, romId).maxByOrNull { it.optString("updated_at") } }.getOrNull()
-                if (newest != null && remoteKey(newest) != prev?.optString("remote")) {
+                val newest = runCatching { slotSaves(ctx, romId, s).maxByOrNull { it.optString("updated_at") } }.getOrNull()
+                if (newest != null && !sameRemote(prev?.optString("remote"), newest)) {
                     val localTime = s.file.walkTopDown().filter { it.isFile }.maxOfOrNull { it.lastModified() } ?: 0L
                     if (localTime <= remoteTime(newest) + 30_000) continue
                 }
@@ -186,9 +215,10 @@ object RommSync {
             job?.message = "Spielstand ${s.file.name}"
             try {
                 val payload = if (s.isFolder) File(ctx.cacheDir, s.file.name + ".zip").also { zipFolder(s.file, it) } else s.file
-                val res = Romm.uploadSave(ctx, romId, payload, emulator = s.system, contentHash = hash)
+                val res = Romm.uploadSave(ctx, romId, payload, emulator = s.system, contentHash = hash,
+                    slot = Profiles.slot(ctx, Profiles.owner(ctx, s.rom.optString("path"))))
                 if (s.isFolder) payload.delete()
-                st.put(s.file.path, JSONObject().put("local", hash).put("remote", remoteKey(res))); n++
+                st.put(key, JSONObject().put("local", hash).put("remote", remoteKey(res))); n++
                 History.add(ctx, "save_up", s.rom.optString("name"), s.system)
             } catch (e: Exception) { errors.put("${s.file.name}: ${e.message}") }
         }
@@ -209,11 +239,12 @@ object RommSync {
         for (s in localSaves(ctx).filter { it.isFolder }) {
             val romId = bySlug[slugFor(s.system)]?.let { remoteFiles[it]?.get(s.rom.getString("file")) } ?: continue
             try {
-                val newest = Romm.listSaves(ctx, romId).maxByOrNull { it.optString("updated_at") } ?: continue
+                val newest = slotSaves(ctx, romId, s).maxByOrNull { it.optString("updated_at") } ?: continue
                 val st = state(ctx)
-                val prev = st.optJSONObject(s.file.path)
+                val key = stateKey(ctx, s)
+                val prev = st.optJSONObject(key)
                 val localHash = md5(s.file)
-                val remoteChanged = remoteKey(newest) != prev?.optString("remote")
+                val remoteChanged = !sameRemote(prev?.optString("remote"), newest)
                 val localChanged = localHash != prev?.optString("local")
                 if (!remoteChanged) continue
                 if (localChanged) { // both changed (or first sync): the newer one wins
@@ -227,7 +258,7 @@ object RommSync {
                 targets.forEach { unzipStripped(zip, it) }
                 zip.delete()
                 val st2 = state(ctx)
-                st2.put(s.file.path, JSONObject().put("local", md5(s.file)).put("remote", remoteKey(newest)))
+                st2.put(key, JSONObject().put("local", md5(s.file)).put("remote", remoteKey(newest)))
                 History.add(ctx, "save_down", s.rom.optString("name"), s.system)
                 stateFile(ctx).writeText(st2.toString())
                 n++
@@ -238,7 +269,7 @@ object RommSync {
     }
 
     /** unpacks a save zip whose entries sit in one top folder ("<folder>/slot_00/...") into [dir] */
-    private fun unzipStripped(zip: File, dir: File) {
+    internal fun unzipStripped(zip: File, dir: File) {
         val base = dir.canonicalPath
         java.util.zip.ZipInputStream(zip.inputStream().buffered()).use { z ->
             while (true) {

@@ -61,7 +61,7 @@ object Saves {
         return out
     }
 
-    private fun backupRoot(): File {
+    internal fun backupRoot(): File {
         // prefer the SD card: more space, and it survives an app reinstall
         val sd = File("/storage").listFiles()?.firstOrNull { Regex("[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}").matches(it.name) && it.canWrite() }
         return File(sd ?: Storage.primary, "ThorBro/save-backups").apply { mkdirs() }

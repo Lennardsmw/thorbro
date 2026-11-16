@@ -64,6 +64,7 @@ private val kinds = mapOf(
     "offload" to Triple(Icons.Filled.Inventory2, "Ausgelagert", false),
     "download" to Triple(Icons.Filled.Download, "Aus RomM geladen", false),
     "restore" to Triple(Icons.Filled.Restore, "Spielstand zurückgesetzt", true),
+    "save_install" to Triple(Icons.Filled.Download, "Spielstand installiert", true),
 )
 
 /** "Ordner „Saves“ (SD)" means nothing to a player; name it after the console/emulator instead */
@@ -101,6 +102,10 @@ fun SyncScreen() {
     var history by remember { mutableStateOf(org.json.JSONArray()) }
     var saves by remember { mutableStateOf<JSONObject?>(null) }
     var pick by remember { mutableStateOf<JSONObject?>(null) }
+    var profiles by remember { mutableStateOf(emptyList<JSONObject>()) }
+    var profileOpen by remember { mutableStateOf<JSONObject?>(null) }
+    var profileAdd by remember { mutableStateOf(false) }
+    LaunchedEffect(tick) { profiles = withContext(Dispatchers.IO) { wtf.lennard.thorbro.Profiles.json(ctx).optJSONArray("profiles").objs() } }
     LaunchedEffect(tick) { history = withContext(Dispatchers.IO) { History.list(ctx, 40) } }
     LaunchedEffect(tick / 8) { saves = withContext(Dispatchers.IO) { runCatching { Saves.overview(ctx) }.getOrNull() } }
     val st = remember(tick) { Romm.status(ctx) }
@@ -147,6 +152,8 @@ fun SyncScreen() {
         }
         if (!connected) item { ConsoleTile("Nicht verbunden", "", Icons.Filled.CloudOff) {} }
 
+        profileTiles(profiles) { p -> if (p == null) profileAdd = true else profileOpen = p }
+
         val locs = saves?.optJSONArray("locations").objs().filter { (it.optJSONArray("snapshots")?.length() ?: 0) > 0 }
         header("Spielstand zurücksetzen", "Spielstand kaputt oder aus Versehen überschrieben? Älteren Stand zurückholen.")
         if (saves == null) item { ConsoleTile("Lade …", "", Icons.Filled.History) {} }
@@ -167,6 +174,8 @@ fun SyncScreen() {
         }
 
     }
+
+    ProfileDialogs(profileOpen, profileAdd, onDone = { note = it; tick++ }) { profileOpen = null; profileAdd = false }
 
     pick?.let { l ->
         val snaps = l.optJSONArray("snapshots").objs().take(5)

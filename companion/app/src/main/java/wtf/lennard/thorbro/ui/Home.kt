@@ -182,6 +182,7 @@ fun HomeScreen(open: (Screen) -> Unit, showDetail: (HomeGame) -> Unit) {
     val first = remember { FocusRequester() }
     var focusedTitle by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
+    val start = rememberPlay(onError = { message = it })
     LaunchedEffect(Unit) { delay(300); runCatching { first.requestFocus() } }
 
     Column(Modifier.fillMaxSize().glassBackground()) {
@@ -199,12 +200,7 @@ fun HomeScreen(open: (Screen) -> Unit, showDetail: (HomeGame) -> Unit) {
                 items(favs, key = { it.rom.getString("path") }) { g ->
                     GameTile(g, Modifier,
                         onFocus = { focusedTitle = g.title },
-                        onStart = {
-                            scope.launch {
-                                val r = withContext(Dispatchers.IO) { Emulators.launch(ctx, g.system, File(g.rom.getString("path"))) }
-                                message = r.optString("error")
-                            }
-                        },
+                        onStart = { start(g.system, File(g.rom.getString("path"))) },
                         onDetail = { showDetail(g) })
                 }
             }

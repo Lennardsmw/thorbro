@@ -159,7 +159,8 @@ object Server {
                 post("/api/roms/launch") {
                     if (denied(ctx)) return@post
                     val rom = Storage.resolve(q("path")) ?: return@post fail("path not allowed")
-                    val res = Emulators.launch(ctx, q("system") ?: return@post fail("system missing"), rom, q("emulator"))
+                    val sys = q("system") ?: return@post fail("system missing")
+                    val res = withContext(Dispatchers.IO) { Profiles.launch(ctx, sys, rom, q("emulator"), q("profile")) }
                     json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
                 }
 
@@ -182,6 +183,56 @@ object Server {
                     if (denied(ctx)) return@post
                     q("auto")?.let { Saves.setAuto(ctx, it == "1") }
                     json(JSONObject().put("auto", Saves.auto(ctx)))
+                }
+
+                // ---- profiles + shared saves ----
+                get("/api/profiles") {
+                    if (denied(ctx)) return@get
+                    val rom = q("path")?.let { Storage.resolve(it) }
+                    // with a game: whose save is live and who has one (for the start picker)
+                    json(Profiles.json(ctx).apply { if (rom != null) put("game", withContext(Dispatchers.IO) { Profiles.forGame(ctx, rom.path) }) })
+                }
+                post("/api/profiles") {
+                    if (denied(ctx)) return@post
+                    val res = Profiles.add(ctx, q("name") ?: "")
+                    json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
+                }
+                post("/api/profiles/rename") {
+                    if (denied(ctx)) return@post
+                    val res = Profiles.rename(ctx, q("id") ?: "", q("name") ?: "")
+                    json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
+                }
+                post("/api/profiles/delete") {
+                    if (denied(ctx)) return@post
+                    val res = withContext(Dispatchers.IO) { Profiles.remove(ctx, q("id") ?: "") }
+                    json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
+                }
+                get("/api/saves/game") {
+                    if (denied(ctx)) return@get
+                    val rom = Storage.resolve(q("path")) ?: return@get fail("path not allowed")
+                    json(withContext(Dispatchers.IO) { SharedSaves.forGame(ctx, q("system") ?: "", rom.path) })
+                }
+                post("/api/saves/profile") {
+                    if (denied(ctx)) return@post
+                    val rom = Storage.resolve(q("path")) ?: return@post fail("path not allowed")
+                    if (!Profiles.supports(q("system") ?: "")) return@post fail("Switch-Spielstände verwaltet Eden selbst", HttpStatusCode.Conflict)
+                    val res = withContext(Dispatchers.IO) { Profiles.activate(ctx, rom.path, q("id") ?: "") }
+                    json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
+                }
+                post("/api/saves/install") {
+                    if (denied(ctx)) return@post
+                    val rom = Storage.resolve(q("path")) ?: return@post fail("path not allowed")
+                    val ids = (q("save") ?: "").split(',').mapNotNull { it.trim().toIntOrNull() }
+                    if (ids.isEmpty()) return@post fail("save missing")
+                    val res = withContext(Dispatchers.IO) { SharedSaves.install(ctx, q("system") ?: "", rom.path, ids, q("profile") ?: Profiles.MAIN) }
+                    json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
+                }
+                post("/api/saves/share") {
+                    if (denied(ctx)) return@post
+                    val ids = (q("save") ?: "").split(',').mapNotNull { it.trim().toIntOrNull() }
+                    if (ids.isEmpty()) return@post fail("save missing")
+                    val res = withContext(Dispatchers.IO) { SharedSaves.share(ctx, ids, q("on") == "1") }
+                    json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
                 }
 
                 // ---- cleanup ----
