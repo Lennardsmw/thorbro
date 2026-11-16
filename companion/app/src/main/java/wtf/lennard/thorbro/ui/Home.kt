@@ -30,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BatteryFull
 import androidx.compose.material.icons.filled.Cast
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Gamepad
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Storefront
@@ -125,6 +126,7 @@ enum class Screen(val label: String, val icon: ImageVector) {
     CONTROLLER("Controller", Icons.Filled.SportsEsports),
     STORE("Store", Icons.Filled.Storefront),
     STREAM("Streaming", Icons.Filled.Cast),
+    NETPLAY("Multiplayer", Icons.Filled.Groups),
     DRIVERS("Treiber", Icons.Filled.Memory),
     SETTINGS("Einstellungen", Icons.Filled.Settings),
 }

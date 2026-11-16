@@ -164,6 +164,7 @@ private fun Root(screen: Screen?, open: (Screen?) -> Unit) {
                     Screen.SETTINGS -> SettingsScreen()
                     Screen.STORE -> StoreScreen()
                     Screen.STREAM -> StreamScreen()
+                    Screen.NETPLAY -> NetplayScreen()
                     Screen.DRIVERS -> DriversScreen()
                 }
             }

@@ -520,6 +520,50 @@ object Server {
                     json(JSONObject().put("hosts", withContext(Dispatchers.IO) { Streaming.hosts(ctx) }))
                 }
 
+                // ---- netplay (local multiplayer between two ThorBro devices) ----
+                // public for the other Thor: only the open lobby; data needs the lobby PIN
+                get("/api/netplay/lobby") {
+                    json(Netplay.lobby?.public() ?: JSONObject().put("open", false))
+                }
+                post("/api/netplay/join") {
+                    val l = Netplay.checkPin(q("pin")) ?: return@post fail("wrong pin or no lobby", HttpStatusCode.Forbidden)
+                    Netplay.joined(l, q("name") ?: "")
+                    json(l.public().put("ok", true))
+                }
+                get("/api/netplay/rom") {
+                    val l = Netplay.checkPin(q("pin")) ?: return@get fail("wrong pin or no lobby", HttpStatusCode.Forbidden)
+                    if (!l.rom.isFile) return@get fail("no file", HttpStatusCode.NotFound)
+                    Transfers.begin(ctx)
+                    try { call.respondFile(l.rom) } finally { Transfers.end() }
+                }
+                // own device (pairing code)
+                get("/api/netplay") {
+                    if (denied(ctx)) return@get
+                    json(Netplay.status(ctx))
+                }
+                get("/api/netplay/peers") {
+                    if (denied(ctx)) return@get
+                    val res = withContext(Dispatchers.IO) { q("address")?.let { org.json.JSONArray().put(Netplay.peer(it)) } ?: Netplay.peers(ctx) }
+                    json(JSONObject().put("peers", res))
+                }
+                post("/api/netplay/host") {
+                    if (denied(ctx)) return@post
+                    val rom = Storage.resolve(q("path")) ?: return@post fail("path not allowed")
+                    val res = withContext(Dispatchers.IO) { Netplay.host(ctx, q("system") ?: "", rom) }
+                    json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
+                }
+                post("/api/netplay/close") {
+                    if (denied(ctx)) return@post
+                    Netplay.close()
+                    json(JSONObject().put("ok", true))
+                }
+                post("/api/netplay/connect") {
+                    if (denied(ctx)) return@post
+                    val addr = q("address")?.takeIf { Regex("^[0-9.]{7,15}$").matches(it) } ?: return@post fail("address missing")
+                    val pin = q("pin") ?: return@post fail("pin missing")
+                    json(Jobs.start("Netplay beitreten") { Netplay.join(ctx, addr, pin, it) }.json())
+                }
+
                 // ---- background jobs ----
                 get("/api/jobs/{id}") {
                     if (denied(ctx)) return@get

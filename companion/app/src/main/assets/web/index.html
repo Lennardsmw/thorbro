@@ -18,6 +18,7 @@
     <button data-tab="cleanup">Aufräumen</button>
     <button data-tab="screen">Bildschirm</button>
     <button data-tab="stream">Streaming</button>
+    <button data-tab="netplay">Multiplayer</button>
     <button data-tab="drivers">Treiber</button>
     <button data-tab="apps">Apps</button>
     <button data-tab="files">Dateien</button>
@@ -148,6 +149,26 @@
       <h3>Thor am PC zeigen</h3>
       <div class="sub">Zeigt den Thor-Bildschirm hier im Browser, ohne Installation. Auf dem Thor einmal „Jetzt starten“ bestätigen.</div>
       <div class="row"><button id="mlScreen" class="primary">Bildschirm übertragen</button></div>
+    </div>
+  </section>
+
+  <section id="netplay" class="tab" hidden>
+    <div class="panel">
+      <h3>Zusammen spielen (Netplay)</h3>
+      <div class="sub">Zwei Thors im selben WLAN – unterwegs: ein Thor macht einen Hotspot, der andere verbindet sich. Beide Thors spielen selbst, nur die Eingaben gehen übers Netz (kein Bildverzug).</div>
+      <div class="row"><span id="npStatus" class="muted grow">Lade …</span><button id="npClose" hidden>Lobby schließen</button></div>
+      <div id="npLobby"></div>
+    </div>
+    <div class="panel">
+      <h3>Spiel hosten</h3>
+      <div class="sub" id="npSupported"></div>
+      <div class="row"><input id="npFilter" placeholder="Spiel suchen" class="grow"></div>
+      <div id="npGames"></div>
+    </div>
+    <div class="panel">
+      <h3>Einem Thor beitreten</h3>
+      <div class="row"><button id="npScan" class="primary">Thors suchen</button><input id="npAddr" placeholder="oder IP, z. B. 192.168.43.1" size="18"><button id="npAddrGo">Prüfen</button><span id="npScanInfo" class="muted grow"></span></div>
+      <div id="npPeers" class="cards"></div>
     </div>
   </section>
 

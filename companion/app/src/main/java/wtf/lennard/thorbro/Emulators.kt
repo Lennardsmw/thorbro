@@ -23,7 +23,8 @@ object Emulators {
         val systems: Set<String>,
     )
 
-    private const val RA = "com.retroarch.aarch64"
+    const val RA = "com.retroarch.aarch64"
+    const val RA_CONFIG = "/storage/emulated/0/Android/data/$RA/files/retroarch.cfg"
     val all = listOf(
         Emu("eden", "Eden", "dev.eden.eden_emulator", "org.yuzu.yuzu_emu.activities.EmulationActivity", Pass.DATA, systems = setOf("switch")),
         Emu("azahar", "Azahar", "org.azahar_emu.azahar", "org.citra.citra_emu.activities.EmulationActivity", Pass.DATA, systems = setOf("n3ds")),
@@ -39,7 +40,7 @@ object Emulators {
     )
 
     /** libretro core per console when RetroArch runs it */
-    private val cores = mapOf(
+    val cores = mapOf(
         "nes" to "fceumm", "snes" to "snes9x", "n64" to "mupen64plus_next_gles3", "gb" to "gambatte", "gbc" to "gambatte",
         "gba" to "mgba", "nds" to "melondsds", "virtualboy" to "mednafen_vb", "psx" to "swanstation", "megadrive" to "genesis_plus_gx",
         "segacd" to "genesis_plus_gx", "mastersystem" to "genesis_plus_gx", "gamegear" to "genesis_plus_gx",
@@ -116,7 +117,7 @@ object Emulators {
     }
 
     /** {ok} or {error, code}; code "need_folder_grant" means: open ThorBro on the device and grant the ROM folder */
-    fun launch(ctx: Context, system: String, rom: File, emuId: String? = null): JSONObject {
+    fun launch(ctx: Context, system: String, rom: File, emuId: String? = null, raConfig: String? = null): JSONObject {
         if (system == "ports") {
             val p = Ports.known.firstOrNull { rom.name == "${it.name}.port" } ?: return JSONObject().put("error", "Unbekannter Port")
             return if (Apps.launch(ctx, p.pkg)) JSONObject().put("ok", true).put("emulator", p.name)
@@ -131,7 +132,7 @@ object Emulators {
             val core = cores[system] ?: return JSONObject().put("error", "Kein RetroArch-Core für $system hinterlegt")
             i.putExtra("ROM", file.path)
                 .putExtra("LIBRETRO", "/data/data/$RA/cores/${core}_libretro_android.so")
-                .putExtra("CONFIGFILE", "/storage/emulated/0/Android/data/$RA/files/retroarch.cfg")
+                .putExtra("CONFIGFILE", raConfig ?: RA_CONFIG)
                 .putExtra("QUITFOCUS", "")
         } else {
             val (uri, tree) = safUri(ctx, file)

@@ -52,6 +52,7 @@ function showTab(name) {
   if (name === 'library') loadLibrary();
   if (name === 'screen') screenStatus();
   if (name === 'stream') loadStream();
+  if (name === 'netplay') loadNetplay();
   if (name === 'store') loadStore(false);
   if (name === 'drivers') loadDrivers(false);
   if (name === 'files') loadFiles(currentDir);
@@ -1270,6 +1271,88 @@ $('#mlScan').onclick = async () => {
       <p><a class="btn" href="${esc(h.web)}" target="_blank" rel="noopener">PIN eingeben</a></p></div>`).join('');
   } catch (err) { $('#mlScanInfo').textContent = 'Fehler: ' + err.message; }
 };
+
+// ---------- netplay (local multiplayer) ----------
+let np = null;
+const npModes = { retroarch: 'RetroArch', ppsspp: 'PPSSPP', eden: 'Eden' };
+async function loadNetplay() {
+  try { np = (await api('/api/netplay')).body; } catch (err) { $('#npStatus').textContent = 'Fehler: ' + err.message; return; }
+  const l = np.lobby;
+  $('#npClose').hidden = !l;
+  if (l) {
+    const state = { starting: 'startet …', hosting: '<span class="ok">wartet auf Mitspieler</span>', manual: '<span class="err">RetroArch hostet nicht von selbst: im RetroArch-Menü Netplay → Host starten</span>' }[l.hostState] || '';
+    $('#npStatus').innerHTML = `Lobby offen: <strong>${esc(l.game)}</strong> (${esc(npModes[l.mode] || l.mode)}) ${state}`;
+    $('#npLobby').innerHTML = `<p style="font-size:2em;letter-spacing:.2em" class="ok">PIN ${esc(l.pin)}</p>
+      <p class="muted">IP dieses Thors: ${esc(np.ip || '?')} · Mitspieler: ${l.guestNames.length ? l.guestNames.map(esc).join(', ') : 'noch keiner'}</p>`;
+  } else {
+    $('#npStatus').textContent = `Keine Lobby offen. Dieser Thor: ${np.ip || 'kein WLAN'}`;
+    $('#npLobby').innerHTML = '';
+  }
+  if (np.shizuku !== 'ready') $('#npLobby').innerHTML += '<p class="muted">Tipp: Mit Shizuku übernimmt ThorBro deine RetroArch-Einstellungen 1:1 und kann PPSSPP einstellen.</p>';
+  $('#npSupported').textContent = np.supported.length
+    ? 'Geht mit: ' + np.supported.map((s) => s.name + (s.shaky ? ' (wackelig)' : '')).join(', ')
+    : 'Kein passender Emulator installiert (RetroArch, PPSSPP oder Eden).';
+  if (!romData) { try { romData = (await api('/api/roms')).body; } catch {} }
+  renderNetplayGames();
+}
+function renderNetplayGames() {
+  if (!np || !romData) return;
+  const ids = new Set(np.supported.map((s) => s.id));
+  const f = $('#npFilter').value.trim().toLowerCase();
+  const rows = [];
+  romData.systems.filter((s) => ids.has(s.id)).forEach((s) => s.roms.filter((r) => !r.dir && (!f || r.name.toLowerCase().includes(f)))
+    .forEach((r) => rows.push(`<tr><td>${esc(r.name)}<div class="muted">${esc(s.name)} · ${fmt(r.size)}</div></td>
+      <td><button data-host="${esc(r.path)}" data-sys="${esc(s.id)}">Hosten</button></td></tr>`)));
+  $('#npGames').innerHTML = rows.length ? `<table class="files"><tbody>${rows.slice(0, 200).join('')}</tbody></table>` : '<p class="muted">Keine passenden Spiele.</p>';
+}
+$('#npFilter').oninput = renderNetplayGames;
+$('#npClose').onclick = async () => { await api('/api/netplay/close', { method: 'POST' }); loadNetplay(); };
+$('#npGames').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-host]'); if (!b) return;
+  b.disabled = true;
+  try {
+    const { body } = await api('/api/netplay/host?' + q({ system: b.dataset.sys, path: b.dataset.host }), { method: 'POST' });
+    if (body.error) throw new Error(body.error);
+    toast(`Lobby offen – PIN ${body.pin}`); if (body.hint) toast(body.hint);
+  } catch (err) { alert(err.message); }
+  b.disabled = false; loadNetplay();
+  setTimeout(loadNetplay, 12000);
+});
+function renderPeers(peers) {
+  $('#npPeers').innerHTML = peers.map((p) => {
+    const l = p.lobby;
+    const body = !p.reachable ? '<div class="err">nicht erreichbar</div>'
+      : l && l.open ? `<div><strong>${esc(l.game)}</strong></div><div class="muted">${esc(npModes[l.mode] || l.mode)} · ${fmt(l.size)}</div>
+        <p><button class="primary" data-join="${esc(p.address)}">Beitreten</button></p>`
+      : '<div class="muted">keine Lobby offen</div>';
+    return `<div class="card"><h3>${esc(l?.host || p.service || p.address)}</h3><div class="muted">${esc(p.address)}</div>${body}</div>`;
+  }).join('');
+}
+$('#npScan').onclick = async () => {
+  $('#npScanInfo').textContent = 'Suche …'; $('#npPeers').innerHTML = '';
+  try {
+    const { peers } = (await api('/api/netplay/peers')).body;
+    $('#npScanInfo').textContent = peers.length ? `${peers.length} gefunden` : 'Keiner gefunden. Selbes WLAN/Hotspot? Sonst IP eintippen.';
+    renderPeers(peers);
+  } catch (err) { $('#npScanInfo').textContent = 'Fehler: ' + err.message; }
+};
+$('#npAddrGo').onclick = async () => {
+  const a = $('#npAddr').value.trim(); if (!a) return;
+  try { renderPeers((await api('/api/netplay/peers?' + q({ address: a }))).body.peers); } catch (err) { alert(err.message); }
+};
+$('#npPeers').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-join]'); if (!b) return;
+  const pin = prompt('PIN vom anderen Thor:'); if (!pin) return;
+  b.disabled = true;
+  try {
+    const { body } = await api('/api/netplay/connect?' + q({ address: b.dataset.join, pin: pin.trim() }), { method: 'POST' });
+    const j = await waitJob(body.id, (j) => ($('#npScanInfo').textContent = `${j.message || ''} ${Math.round(j.progress * 100)} %`));
+    if (j.error) throw new Error(j.error);
+    $('#npScanInfo').textContent = j.result.hint || 'Gestartet';
+    toast('Spiel startet');
+  } catch (err) { alert(err.message); $('#npScanInfo').textContent = ''; }
+  b.disabled = false;
+});
 
 // ---------- GPU drivers ----------
 let drv = null;
