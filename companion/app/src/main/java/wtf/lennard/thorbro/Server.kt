@@ -326,6 +326,24 @@ object Server {
                     json(Players.overview(ctx))
                 }
 
+                // read-only: system settings whose name matches ?q= (to find vendor keys like LED control)
+                get("/api/debug/settings") {
+                    if (denied(ctx)) return@get
+                    val rx = Regex(q("q") ?: "led|light|rgb|joy", RegexOption.IGNORE_CASE)
+                    val out = JSONObject()
+                    for ((table, uri) in listOf("system" to android.provider.Settings.System.CONTENT_URI,
+                        "secure" to android.provider.Settings.Secure.CONTENT_URI, "global" to android.provider.Settings.Global.CONTENT_URI)) {
+                        val m = JSONObject()
+                        runCatching {
+                            ctx.contentResolver.query(uri, arrayOf("name", "value"), null, null, null)?.use { c ->
+                                while (c.moveToNext()) { val n = c.getString(0) ?: continue; if (rx.containsMatchIn(n)) m.put(n, c.getString(1)) }
+                            }
+                        }.onFailure { m.put("_error", it.message) }
+                        out.put(table, m)
+                    }
+                    json(out)
+                }
+
                 // ---- background jobs ----
                 get("/api/jobs/{id}") {
                     if (denied(ctx)) return@get
