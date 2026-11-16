@@ -74,6 +74,7 @@ $('#loginForm').onsubmit = async (e) => {
     start();
   } catch (err) { $('#loginErr').textContent = 'Code stimmt nicht.'; }
 };
+$('#cocoonRestart').onclick = async () => { try { await api('/api/apps/rip.moth.cocoonshell/restart', { method: 'POST' }); toast('Cocoon startet neu …'); } catch (err) { alert(err.message); } };
 $('#logout').onclick = () => { token = ''; store.set('token', ''); showLogin(); };
 
 // ---------- device ----------

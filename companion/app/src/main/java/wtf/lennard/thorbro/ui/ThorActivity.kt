@@ -5,6 +5,7 @@ import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Web
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -214,6 +215,8 @@ private fun SettingsScreen() {
             autoUpdate = !autoUpdate; Updater.configure(ctx, null, autoUpdate) } }
         item { ConsoleTile(if (autostart) "Autostart an" else "Autostart aus", "beim Hochfahren", androidx.compose.material.icons.Icons.Filled.PowerSettingsNew, accent = autostart) {
             autostart = !autostart; Prefs.setAutostart(ctx, autostart) } }
+        item { ConsoleTile("Cocoon neu starten", "wenn der Launcher hängt", androidx.compose.material.icons.Icons.Filled.RestartAlt) {
+            wtf.lennard.thorbro.Apps.restart(ctx, wtf.lennard.thorbro.Apps.COCOON) } }
         item { ConsoleTile("Neuer Code", "alte Kopplungen ungültig", androidx.compose.material.icons.Icons.Filled.Key) { Prefs.newToken(ctx); tick++ } }
         item { ConsoleTile("Web-Oberfläche", "alles auf dem Thor", androidx.compose.material.icons.Icons.Filled.Web) { ctx.startActivity(Intent(ctx, AppActivity::class.java)) } }
 

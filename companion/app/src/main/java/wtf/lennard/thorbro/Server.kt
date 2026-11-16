@@ -87,6 +87,10 @@ object Server {
                     val ok = Apps.launch(ctx, call.parameters["pkg"]!!)
                     if (ok) json(JSONObject().put("ok", true)) else fail("app has no launcher", HttpStatusCode.NotFound)
                 }
+                post("/api/apps/{pkg}/restart") {
+                    if (denied(ctx)) return@post
+                    if (Apps.restart(ctx, call.parameters["pkg"]!!)) json(JSONObject().put("ok", true)) else fail("app not installed", HttpStatusCode.NotFound)
+                }
                 post("/api/apps/{pkg}/uninstall") {
                     if (denied(ctx)) return@post
                     Apps.uninstall(ctx, call.parameters["pkg"]!!)
