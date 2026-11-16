@@ -162,6 +162,15 @@ object Media {
     }
 
     fun icon(ctx: Context, systemId: String): File? {
+        // RomM's console icons first (crisp SVG, same look as the library), libretro's PNG as fallback
+        val svg = File(dir(ctx, "icons"), "romm-$systemId.svg")
+        if (svg.length() > 0 && System.currentTimeMillis() - svg.lastModified() < MAX_AGE) return svg
+        val noSvg = File(dir(ctx, "icons"), "romm-$systemId.missing")
+        if (!(noSvg.exists() && System.currentTimeMillis() - noSvg.lastModified() < 24 * 3600 * 1000L)) {
+            if (Romm.platformIcon(ctx, systemId, svg)) return svg
+            noSvg.writeText("")
+        }
+        if (svg.length() > 0) return svg
         val sys = libretro[systemId] ?: return null
         val f = File(dir(ctx, "icons"), "$systemId.png")
         val miss = File(dir(ctx, "icons"), "$systemId.missing")

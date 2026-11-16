@@ -64,14 +64,19 @@ object Apps {
     fun restart(ctx: Context, pkg: String): Boolean {
         if (runCatching { ctx.packageManager.getPackageInfo(pkg, 0) }.isFailure) return false
         val am = ctx.getSystemService(android.app.ActivityManager::class.java)
-        runCatching { am.killBackgroundProcesses(pkg) }
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        // Android only ends apps that are in the background: put ThorBro in front first (when triggered from the
+        // web or the Mac the launcher may be showing), then end it, then start it fresh
+        runCatching { ctx.startActivity(android.content.Intent(ctx, wtf.lennard.thorbro.ui.ThorActivity::class.java)
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)) }
+        main.postDelayed({ runCatching { am.killBackgroundProcesses(pkg) } }, 700)
         Logs.i("apps", "neu gestartet: $pkg")
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+        main.postDelayed({
             val home = android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_HOME).setPackage(pkg)
                 .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
             val i = if (ctx.packageManager.resolveActivity(home, 0) != null) home else ctx.packageManager.getLaunchIntentForPackage(pkg)?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
             runCatching { i?.let { ctx.startActivity(it) } }
-        }, 700)
+        }, 1500)
         return true
     }
 }

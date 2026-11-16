@@ -133,6 +133,16 @@ object Romm {
         return JSONObject().put("total", page.optInt("total", out.length())).put("items", out)
     }
 
+    /** RomM's own console icon (SVG) for a ThorBro console id; null when RomM has none or is not set up */
+    fun platformIcon(ctx: Context, systemId: String, target: File): Boolean = runCatching {
+        if (url(ctx).isEmpty()) return false
+        val c = open(ctx, "GET", "/assets/platforms/${RommSync.slugFor(systemId)}.svg", auth = false)
+        if (c.responseCode != 200 || c.contentType?.contains("svg") != true) return false
+        val bytes = c.inputStream.use { it.readBytes() }
+        if (bytes.size < 100) return false
+        target.parentFile?.mkdirs(); target.writeBytes(bytes); true
+    }.getOrDefault(false)
+
     fun cover(ctx: Context, romId: Int): ByteArray? {
         val r = JSONObject(request(ctx, "GET", "/api/roms/$romId/simple"))
         val path = r.optString("path_cover_small").ifEmpty { r.optString("path_cover_large") }.ifEmpty { return null }

@@ -87,6 +87,8 @@ class ThorActivity : ComponentActivity() {
         wtf.lennard.thorbro.FrameStats.attach(this)
         rememberDisplay()
         immersive(window)
+        // console icons from RomM are SVG
+        coil3.SingletonImageLoader.setSafe { c -> coil3.ImageLoader.Builder(c).components { add(coil3.svg.SvgDecoder.Factory()) }.build() }
         setContent { ThorTheme { Box(Modifier.fillMaxSize()) {
             Root(screen.value) { screen.value = it }
             BackgroundOverlay(Modifier.align(Alignment.TopEnd))
