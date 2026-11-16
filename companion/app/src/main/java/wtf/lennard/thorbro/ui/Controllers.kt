@@ -209,6 +209,44 @@ fun ControllerScreen() {
         }
         item {
             FocusCard(Modifier.fillMaxWidth()) {
+                Label("Gekoppelte Controller")
+                val paired = remember(tick) { if (needPerms) emptyList() else wtf.lennard.thorbro.BtPads.list(ctx) }
+                var confirmAll by remember { mutableStateOf(false) }
+                if (paired.isEmpty()) Line(if (needPerms) "Erst Bluetooth erlauben (unten)." else "Keine Bluetooth-Controller gekoppelt.", Muted)
+                paired.forEach { p ->
+                    Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(p.name, Modifier.weight(1f), fontSize = 16.sp)
+                        Act("Entkoppeln") {
+                            kotlin.concurrent.thread {
+                                val ok = wtf.lennard.thorbro.BtPads.unpair(ctx, p.address)
+                                note = if (ok) "${p.name} entkoppelt – jetzt kann er neu in den Kopplungsmodus" else "Android lässt das nicht zu – in den Bluetooth-Einstellungen entfernen"
+                                if (!ok) ctx.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                                tick++
+                            }
+                        }
+                    }
+                }
+                if (paired.size > 1) Acts {
+                    if (!confirmAll) Act("Alle Controller entkoppeln") { confirmAll = true }
+                    else {
+                        Text("Wirklich alle ${paired.size} entkoppeln?", color = Accent)
+                        Act("Ja, alle", primary = true) {
+                            confirmAll = false
+                            kotlin.concurrent.thread {
+                                val done = paired.count { wtf.lennard.thorbro.BtPads.unpair(ctx, it.address) }
+                                note = if (done == paired.size) "Alle Controller entkoppelt" else "$done von ${paired.size} entkoppelt – Rest in den Bluetooth-Einstellungen"
+                                if (done < paired.size) ctx.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                                tick++
+                            }
+                        }
+                        Act("Abbrechen") { confirmAll = false }
+                    }
+                }
+                if (note.isNotEmpty()) Line(note, Muted)
+            }
+        }
+        item {
+            FocusCard(Modifier.fillMaxWidth()) {
                 Label("Neuen Controller koppeln")
                 Line("Controller in den Kopplungsmodus versetzen (z. B. Share+PS, Sync-Taste, Start+Y), dann suchen.", Muted)
                 Acts {

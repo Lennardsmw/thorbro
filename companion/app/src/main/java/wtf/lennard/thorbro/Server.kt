@@ -326,6 +326,16 @@ object Server {
                     json(Players.overview(ctx))
                 }
 
+                get("/api/bt/pads") {
+                    if (denied(ctx)) return@get
+                    json(org.json.JSONArray(BtPads.list(ctx).map { JSONObject().put("address", it.address).put("name", it.name) }))
+                }
+                post("/api/bt/unpair") {
+                    if (denied(ctx)) return@post
+                    val a = q("address") ?: return@post fail("address missing")
+                    json(JSONObject().put("ok", withContext(Dispatchers.IO) { BtPads.unpair(ctx, a) }))
+                }
+
                 // ---- controller LEDs ----
                 get("/api/leds") {
                     if (denied(ctx)) return@get
