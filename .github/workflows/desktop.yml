@@ -45,4 +45,6 @@ jobs:
           releaseName: "ThorBro Desktop ${{ github.ref_name }}"
           releaseBody: "ThorBro für Mac, Windows und Linux: Thor finden, ThorBro öffnen, Spielstände mit RomM abgleichen."
           releaseDraft: false
+          # never "latest": the handheld app looks for its updates in the latest release
+          prerelease: true
           args: ${{ matrix.args }}

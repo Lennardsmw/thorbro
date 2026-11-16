@@ -16,7 +16,7 @@ import kotlin.concurrent.thread
  * With auto-update on, the server checks every 6 hours and installs newer versions by itself.
  */
 object Updater {
-    const val DEFAULT_FEED = "https://api.github.com/repos/Lennardsmw/thorbro/releases/latest"
+    const val DEFAULT_FEED = "https://api.github.com/repos/Lennardsmw/thorbro/releases"
     private const val EVERY = 6L * 3600 * 1000
 
     fun feed(ctx: Context): String = Prefs.of(ctx).getString("updateFeed", null) ?: DEFAULT_FEED
@@ -35,7 +35,17 @@ object Updater {
     fun check(ctx: Context): JSONObject {
         val out = JSONObject().put("current", current(ctx)).put("feed", feed(ctx)).put("auto", auto(ctx))
         val body = try { get(feed(ctx)) } catch (e: Exception) { return out.put("error", "Update-Quelle nicht erreichbar: ${e.message}") }
-        val j = try { JSONObject(body) } catch (_: Exception) { return out.put("error", "Update-Quelle liefert kein JSON") }
+        // a release list (GitHub /releases): take the newest app release ("v1.2.3" with an .apk), skip desktop ones
+        val j = try {
+            if (body.trimStart().startsWith("[")) {
+                val arr = org.json.JSONArray(body)
+                (0 until arr.length()).map { arr.getJSONObject(it) }
+                    .filter { r -> Regex("^v\\d").containsMatchIn(r.optString("tag_name")) && !r.optBoolean("draft") &&
+                        r.optJSONArray("assets")?.let { a -> (0 until a.length()).any { a.getJSONObject(it).optString("name").endsWith(".apk") } } == true }
+                    .maxWithOrNull { a, b -> if (newer(a.getString("tag_name").removePrefix("v"), b.getString("tag_name").removePrefix("v"))) 1 else -1 }
+                    ?: return out.put("error", "Kein App-Release gefunden")
+            } else JSONObject(body)
+        } catch (_: Exception) { return out.put("error", "Update-Quelle liefert kein JSON") }
         val latest: String
         val url: String?
         if (j.has("tag_name")) {
