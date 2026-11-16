@@ -1,5 +1,9 @@
 package wtf.lennard.thorbro.ui
 
+import androidx.compose.material3.Icon
+import androidx.compose.ui.draw.scale
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BluetoothSearching
@@ -441,56 +445,139 @@ fun ControllerScreen() {
     val panel = ControllerNav.panel.value
     DisposableEffect(Unit) { onDispose { Pads.lrMode = false; ControllerNav.panel.value = null } }
     if (panel != null) { ControllerPanels(panel); return }
-
     val pads = remember(tick) { livePads(ctx) }
-    Row(Modifier.fillMaxSize()) {
-        Column(Modifier.weight(1f)) {
-            if (Pads.lrMode) {
-                Text("Jeder Spieler drückt L + R gleichzeitig auf seinem Controller.", fontSize = 18.sp, color = Accent)
-                Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    for (slot in 1..4) {
-                        val p = pads.firstOrNull { it.slot == slot }
-                        Box(Modifier.weight(1f).height(190.dp).clip(RoundedCornerShape(14.dp)).background(Panel)
-                            .border(if (p != null) 3.dp else 1.dp, if (p != null) Ok else androidx.compose.ui.graphics.Color(0xFF2C3039), RoundedCornerShape(14.dp)),
-                            contentAlignment = Alignment.Center) {
-                            if (p == null) Text("$slot", fontSize = 48.sp, color = Muted)
-                            else Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                PlayerDots(slot); Spacer(Modifier.height(8.dp))
-                                PadArt(p.model, Modifier.size(140.dp, 90.dp)); Spacer(Modifier.height(6.dp))
-                                Text(p.model.label, fontSize = 14.sp); Battery(p.battery)
-                            }
-                        }
+    if (Pads.lrMode) { OrderScreen(pads); return }
+
+    val menu: List<Triple<String, androidx.compose.ui.graphics.vector.ImageVector, () -> Unit>> = listOf(
+        Triple("Reihenfolge ändern", Icons.Filled.SwapHoriz) {
+            wtf.lennard.thorbro.Logs.i("controller", "Reihenfolge ändern gestartet")
+            wtf.lennard.thorbro.Players.clearAll(ctx); Pads.lrMode = true
+        },
+        Triple("Controller koppeln", Icons.Filled.BluetoothSearching) { ControllerNav.panel.value = "new" },
+        Triple("Gekoppelte Controller", Icons.Filled.Bluetooth) { ControllerNav.panel.value = "paired" },
+        Triple("Tastentest", Icons.Filled.TouchApp) { ControllerNav.panel.value = "test" },
+        Triple("LEDs", Icons.Filled.Lightbulb) { ControllerNav.panel.value = "leds" },
+        Triple("Spieler & Emulatoren", Icons.Filled.Groups) { ControllerNav.panel.value = "order" },
+        Triple("Thor als Gamepad", Icons.Filled.Gamepad) { ctx.startActivity(Intent(ctx, GamepadActivity::class.java)) },
+    )
+    val first = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(Unit) { delay(200); runCatching { first.requestFocus() } }
+
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+        val wide = maxWidth / maxHeight > 1.3f
+        val bw = maxWidth; val bh = maxHeight
+        @Composable fun Menu(mod: Modifier) {
+            val (st, fl) = snapList()
+            CenteredFocus {
+                LazyColumn(mod, state = st, flingBehavior = fl, contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp, horizontal = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    menu.forEachIndexed { i, (label, icon, act) ->
+                        item { MenuPill(label, icon, Modifier.firstFocus(first, i == 0), act) }
                     }
-                }
-                Acts { Act("Fertig", primary = true) { Pads.lrMode = false } }
-            } else {
-                val first = remember { androidx.compose.ui.focus.FocusRequester() }
-                TileGrid(first, min = 170) {
-                    header("Verbunden", if (pads.isEmpty()) "kein Controller – die Thor-Tasten zählen mit" else "${pads.size} Controller")
-                    pads.forEachIndexed { i, p ->
-                        item {
-                            ConsoleTile(if (p.model == wtf.lennard.thorbro.PadModel.GENERIC) p.name else p.model.label,
-                                listOfNotNull(if (p.slot > 0) "Spieler ${p.slot}" else null, if (!p.battery.isNaN()) "${(p.battery * 100).toInt()} %" else null,
-                                    if (p.model == wtf.lennard.thorbro.PadModel.THOR) "eingebaut" else null).joinToString(" · "),
-                                modifier = Modifier.firstFocus(first, i == 0),
-                                badges = { PadArt(p.model, Modifier.align(Alignment.Center).padding(start = 14.dp, end = 14.dp, bottom = 40.dp).fillMaxWidth().aspectRatio(1.5f)) }) {}
-                        }
-                    }
-                    header("Einrichten")
-                    item { ConsoleTile("Reihenfolge ändern", "L + R drücken", Icons.Filled.SwapHoriz, modifier = Modifier.firstFocus(first, pads.isEmpty())) {
-                        wtf.lennard.thorbro.Logs.i("controller", "Reihenfolge ändern gestartet")
-                        wtf.lennard.thorbro.Players.clearAll(ctx); Pads.lrMode = true
-                    } }
-                    item { ConsoleTile("Koppeln", "neuer Controller", Icons.Filled.BluetoothSearching) { ControllerNav.panel.value = "new" } }
-                    item { ConsoleTile("Gekoppelt", "entkoppeln", Icons.Filled.Bluetooth) { ControllerNav.panel.value = "paired" } }
-                    item { ConsoleTile("LEDs", "Farben", Icons.Filled.Lightbulb) { ControllerNav.panel.value = "leds" } }
-                    item { ConsoleTile("Tastentest", "alle Tasten prüfen", Icons.Filled.TouchApp) { ControllerNav.panel.value = "test" } }
-                    item { ConsoleTile("Spieler & Emulatoren", "Zuordnung", Icons.Filled.Groups) { ControllerNav.panel.value = "order" } }
-                    item { ConsoleTile("Thor als Gamepad", "für PC / anderen Thor", Icons.Filled.Gamepad, accent = true) { ctx.startActivity(Intent(ctx, GamepadActivity::class.java)) } }
                 }
             }
         }
+        if (wide) Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+            Menu(Modifier.width(bw * 0.34f).fillMaxHeight())
+            Stage(pads, Modifier.weight(1f).fillMaxHeight().padding(vertical = 12.dp))
+        } else Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Stage(pads, Modifier.fillMaxWidth().height(bh * 0.45f))
+            Menu(Modifier.fillMaxWidth().weight(1f))
+        }
+    }
+}
+
+/** left menu entry: wide rounded pill, icon left, white when focused */
+@Composable
+private fun MenuPill(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, modifier: Modifier, onClick: () -> Unit) {
+    val src = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val focused by src.collectIsFocusedAsState()
+    val scale by androidx.compose.animation.core.animateFloatAsState(if (focused) 1.03f else 1f, label = "pill")
+    val shape = RoundedCornerShape(50)
+    Row(modifier.fillMaxWidth().height(62.dp).scale(scale).clip(shape)
+        .then(if (focused) Modifier.background(Accent) else Modifier.background(GlassFill))
+        .border(if (focused) 2.dp else 1.dp, if (focused) androidx.compose.ui.graphics.Color.White else GlassLine, shape)
+        .clickable(interactionSource = src, indication = null, onClick = onClick).focusable(interactionSource = src)
+        .padding(horizontal = 22.dp), verticalAlignment = Alignment.CenterVertically) {
+        val fg = if (focused) OnAccent else androidx.compose.ui.graphics.Color.White
+        Icon(icon, null, Modifier.size(26.dp), tint = fg)
+        Spacer(Modifier.width(16.dp))
+        Text(label, fontSize = 18.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, color = fg, maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+    }
+}
+
+/** the bright stage with every connected controller standing side by side */
+@Composable
+private fun Stage(pads: List<LivePad>, modifier: Modifier) {
+    val shape = RoundedCornerShape(28.dp)
+    Box(modifier.clip(shape).background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(androidx.compose.ui.graphics.Color(0x2EFFFFFF), androidx.compose.ui.graphics.Color(0x0FFFFFFF))))
+        .border(1.dp, GlassLine, shape), contentAlignment = Alignment.Center) {
+        if (pads.isEmpty()) Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(Icons.Filled.Gamepad, null, Modifier.size(72.dp), tint = Muted)
+            Text("Kein Controller verbunden", fontSize = 18.sp, color = Muted, modifier = Modifier.padding(top = 10.dp))
+        } else androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(28.dp, Alignment.CenterHorizontally),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically) {
+            items(pads.size) { i -> PadOnStage(pads[i]) }
+        }
+    }
+}
+
+@Composable
+private fun PadOnStage(p: LivePad) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(190.dp)) {
+        PadArt(p.model, Modifier.size(180.dp, 125.dp))
+        Spacer(Modifier.height(12.dp))
+        PlayerLights(p.slot)
+        Spacer(Modifier.height(8.dp))
+        Text(if (p.model == wtf.lennard.thorbro.PadModel.GENERIC) p.name else p.model.label, fontSize = 16.sp,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        if (p.model == wtf.lennard.thorbro.PadModel.THOR) Text("eingebaut", fontSize = 12.sp, color = Muted) else Battery(p.battery)
+    }
+}
+
+/** four small player lamps; the controller's slot is lit */
+@Composable
+private fun PlayerLights(slot: Int) {
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        for (i in 1..4) {
+            val on = i <= slot && slot > 0 && (i == slot)
+            Box(Modifier.size(14.dp, 6.dp).clip(RoundedCornerShape(3.dp))
+                .background(if (on) androidx.compose.ui.graphics.Color(0xFF7CFF9C) else androidx.compose.ui.graphics.Color(0x33FFFFFF)))
+        }
+        if (slot > 0) Text("  P$slot", fontSize = 13.sp, color = Muted)
+    }
+}
+
+/** "Reihenfolge ändern": four places that fill as players press L + R */
+@Composable
+private fun OrderScreen(pads: List<LivePad>) {
+    val done = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(Unit) { delay(200); runCatching { done.requestFocus() } }
+    Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("Drücke L + R auf dem Controller", fontSize = 26.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
+        Text("Die Reihenfolge, in der gedrückt wird, ergibt Spieler 1 bis 4", fontSize = 15.sp, color = Muted, modifier = Modifier.padding(top = 4.dp, bottom = 18.dp))
+        Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            for (slot in 1..4) {
+                val p = pads.firstOrNull { it.slot == slot }
+                val shape = RoundedCornerShape(24.dp)
+                Box(Modifier.weight(1f).fillMaxHeight().clip(shape)
+                    .background(if (p != null) androidx.compose.ui.graphics.Color(0x26FFFFFF) else androidx.compose.ui.graphics.Color(0x0DFFFFFF))
+                    .border(if (p != null) 3.dp else 1.dp, if (p != null) androidx.compose.ui.graphics.Color(0xFF7CFF9C) else GlassLine, shape),
+                    contentAlignment = Alignment.Center) {
+                    if (p == null) Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("$slot", fontSize = 64.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = androidx.compose.ui.graphics.Color(0x40FFFFFF))
+                        Text("L + R", fontSize = 15.sp, color = Muted)
+                    } else Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(12.dp)) {
+                        PadArt(p.model, Modifier.fillMaxWidth().aspectRatio(1.4f))
+                        Spacer(Modifier.height(12.dp)); PlayerLights(slot); Spacer(Modifier.height(6.dp))
+                        Text(p.model.label, fontSize = 15.sp, maxLines = 1)
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        BigButton("Fertig", Icons.Filled.CheckCircle, primary = true, modifier = Modifier.width(260.dp).focusRequester(done)) { Pads.lrMode = false }
     }
 }
 
