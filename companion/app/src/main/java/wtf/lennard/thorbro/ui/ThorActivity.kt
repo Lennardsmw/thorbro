@@ -75,16 +75,28 @@ class ThorActivity : ComponentActivity() {
         if (!ThorService.running) ThorService.start(this)
         if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         wtf.lennard.thorbro.FrameStats.attach(this)
+        rememberDisplay()
         setContent { ThorTheme { Root(screen.value) { screen.value = it } } }
     }
 
     // L1 / R1 switch sections; every key and stick move also feeds the controller tester
+    private fun rememberDisplay() { runCatching { wtf.lennard.thorbro.Emulators.display = display?.displayId ?: 0 } }
+
+    // moving between the two screens no longer recreates the activity (configChanges) – just note where we are
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) { super.onConfigurationChanged(newConfig); rememberDisplay() }
+    override fun onResume() { super.onResume(); rememberDisplay() }
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         // the live tester and player assignment only matter on the controller page
         if (screen.value == Screen.CONTROLLER) Pads.onKey(event)
         if (event.action == KeyEvent.ACTION_DOWN) when (event.keyCode) {
             KeyEvent.KEYCODE_BUTTON_B, KeyEvent.KEYCODE_BACK -> if (screen.value != null && !detailOpen) {
-                if (screen.value == Screen.GAMES && GamesNav.system.value != null) GamesNav.system.value = null else screen.value = null
+                when {
+                    screen.value == Screen.GAMES && GamesNav.system.value != null -> GamesNav.system.value = null
+                    screen.value == Screen.CONTROLLER && Pads.lrMode -> Pads.lrMode = false
+                    screen.value == Screen.CONTROLLER && ControllerNav.panel.value != null -> ControllerNav.panel.value = null
+                    else -> screen.value = null
+                }
                 return true
             }
             KeyEvent.KEYCODE_BUTTON_R1 -> if (screen.value == null) { screen.value = Screen.GAMES; return true }

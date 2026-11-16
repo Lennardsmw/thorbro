@@ -171,17 +171,42 @@ fn forget_thor(address: String) {
     config::save(&c);
 }
 
+fn thor_answers(address: &str, token: &str) -> bool {
+    sync::client().get(format!("http://{address}/api/info")).bearer_auth(token).timeout(Duration::from_secs(3)).send()
+        .map(|r| r.status().is_success()).unwrap_or(false)
+}
+
+/// the saved address if the Thor answers there; otherwise looks for it again (its IP may have changed)
+/// and remembers the new address. Without this an unreachable Thor opened as a blank white window.
+fn reachable_address(address: &str) -> Result<String, String> {
+    let c = config::load();
+    let t = c.thors.iter().find(|t| t.address == address).ok_or("unbekannter Thor")?.clone();
+    if thor_answers(&t.address, &t.token) { return Ok(t.address); }
+    for found in discover_blocking() {
+        let Some(a) = found["address"].as_str() else { continue };
+        if a != t.address && thor_answers(a, &t.token) {
+            let mut c = config::load();
+            c.thors.retain(|x| x.address != a);
+            for x in c.thors.iter_mut().filter(|x| x.address == t.address) { x.address = a.to_string(); }
+            config::save(&c);
+            return Ok(a.to_string());
+        }
+    }
+    Err(format!("{} ist unter {} nicht erreichbar. Ist der Thor an, ThorBro dort geöffnet und im selben WLAN (oder mit NetBird verbunden)?", t.name, t.address))
+}
+
 /// opens ThorBro's own interface from the handheld in a window
 #[tauri::command]
-fn open_thor(app: AppHandle, address: String) -> Result<(), String> {
+async fn open_thor(app: AppHandle, address: String) -> Result<String, String> {
+    let address = tauri::async_runtime::spawn_blocking(move || reachable_address(&address)).await.map_err(|e| e.to_string())??;
     let c = config::load();
     let t = c.thors.iter().find(|t| t.address == address).ok_or("unbekannter Thor")?;
     let url = format!("http://{}/?token={}", t.address, t.token);
     let label = format!("thor-{}", address.replace(['.', ':'], "-"));
-    if let Some(w) = app.get_webview_window(&label) { let _ = w.show(); let _ = w.set_focus(); return Ok(()); }
+    if let Some(w) = app.get_webview_window(&label) { let _ = w.show(); let _ = w.set_focus(); return Ok(address); }
     WebviewWindowBuilder::new(&app, label, WebviewUrl::External(url.parse().map_err(|e| format!("{e}"))?))
         .title(format!("ThorBro – {}", t.name)).inner_size(1180.0, 800.0).build().map_err(|e| e.to_string())?;
-    Ok(())
+    Ok(address)
 }
 
 /// RomM device sign-in: returns the code to approve in RomM, then waits for it in the background

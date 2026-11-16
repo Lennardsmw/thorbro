@@ -42,7 +42,7 @@
             android:name=".ui.ThorActivity"
             android:exported="true"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
-            android:configChanges="orientation|screenSize|keyboardHidden|keyboard|navigation|screenLayout|smallestScreenSize">
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard|navigation|screenLayout|smallestScreenSize|density|fontScale|uiMode|layoutDirection">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -54,13 +54,13 @@
             android:exported="false"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
             android:screenOrientation="sensorLandscape"
-            android:configChanges="orientation|screenSize|keyboardHidden|keyboard|navigation|screenLayout|smallestScreenSize" />
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard|navigation|screenLayout|smallestScreenSize|density|fontScale|uiMode|layoutDirection" />
 
         <activity
             android:name=".AppActivity"
             android:label="ThorBro Web"
             android:exported="false"
-            android:configChanges="orientation|screenSize|keyboardHidden|keyboard|navigation|screenLayout|smallestScreenSize" />
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard|navigation|screenLayout|smallestScreenSize|density|fontScale|uiMode|layoutDirection" />
 
         <activity
             android:name=".MainActivity"

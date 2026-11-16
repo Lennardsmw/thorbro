@@ -50,6 +50,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -65,6 +67,11 @@ object Pads {
     var rx by mutableFloatStateOf(0f); var ry by mutableFloatStateOf(0f)
     var lt by mutableFloatStateOf(0f); var rt by mutableFloatStateOf(0f)
     var lastFrom by mutableStateOf("")
+    /** "Reihenfolge ändern": every pad that presses L + R together becomes the next player */
+    var lrMode by mutableStateOf(false)
+    var appCtx: Context? = null
+    private val lr = HashMap<Int, Pair<Boolean, Boolean>>()
+
     /** set while ThorBro waits for "press a button on the controller for player N" */
     var assigning by mutableStateOf(0)
     var assignArmedAt = 0L
@@ -84,6 +91,13 @@ object Pads {
 
     fun onKey(e: KeyEvent) {
         if (!isPad(e.device)) return
+        if (lrMode && (e.keyCode == KeyEvent.KEYCODE_BUTTON_L1 || e.keyCode == KeyEvent.KEYCODE_BUTTON_R1)) {
+            val down = e.action == KeyEvent.ACTION_DOWN
+            val (l, r) = lr[e.deviceId] ?: (false to false)
+            val now = if (e.keyCode == KeyEvent.KEYCODE_BUTTON_L1) down to r else l to down
+            lr[e.deviceId] = now
+            if (now.first && now.second) { e.device?.let { d -> appCtx?.let { wtf.lennard.thorbro.Players.assignNext(it, d) } }; lr.remove(e.deviceId) }
+        }
         if (assigning > 0 && e.action == KeyEvent.ACTION_DOWN && System.currentTimeMillis() - assignArmedAt > 400) {
             val slot = assigning; assigning = 0
             e.device?.let { d -> onAssigned?.invoke(slot, d) }
@@ -116,7 +130,7 @@ private val buttons = listOf(
 
 @SuppressLint("MissingPermission")
 @Composable
-fun ControllerScreen() {
+fun ControllerPanels(panel: String) {
     val ctx = LocalContext.current
     var tick by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) { while (true) { Pads.refresh(ctx); delay(2000); tick++ } }
@@ -154,14 +168,14 @@ fun ControllerScreen() {
     }
 
     LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item {
+        if (panel == "none") item {
             FocusCard(Modifier.fillMaxWidth()) {
                 Label("Verbunden")
                 if (Pads.pads.isEmpty()) Line("Kein externer Controller verbunden (die Thor-Tasten zählen mit).", Muted)
                 Pads.pads.forEach { p -> Row(verticalAlignment = Alignment.CenterVertically) { StatusDot(true); Big(p.name); if (p.battery.isNotEmpty()) Line("  ·  Akku ${p.battery}", Muted) } }
             }
         }
-        item {
+        if (panel == "order") item {
             FocusCard(Modifier.fillMaxWidth()) {
                 Label("Spieler – gilt automatisch in Dolphin, auch nach Neuverbinden")
                 val players = remember(tick) { wtf.lennard.thorbro.Players.overview(ctx) }
@@ -187,8 +201,8 @@ fun ControllerScreen() {
                 if (players.optString("lastApply").isNotEmpty()) Line("Zuletzt übernommen: " + players.optString("lastApply"), Muted)
             }
         }
-        item { LedCard(tick) { tick++ } }
-        item {
+        if (panel == "leds") item { LedCard(tick) { tick++ } }
+        if (panel == "test") item {
             FocusCard(Modifier.fillMaxWidth()) {
                 Label("Tastentest – einfach drücken" + if (Pads.lastFrom.isNotEmpty()) " · ${Pads.lastFrom}" else "")
                 Spacer(Modifier.height(8.dp))
@@ -207,7 +221,7 @@ fun ControllerScreen() {
                 }
             }
         }
-        item {
+        if (panel == "paired") item {
             FocusCard(Modifier.fillMaxWidth()) {
                 Label("Gekoppelte Controller")
                 val paired = remember(tick) { if (needPerms) emptyList() else wtf.lennard.thorbro.BtPads.list(ctx) }
@@ -245,7 +259,7 @@ fun ControllerScreen() {
                 if (note.isNotEmpty()) Line(note, Muted)
             }
         }
-        item {
+        if (panel == "new") item {
             FocusCard(Modifier.fillMaxWidth()) {
                 Label("Neuen Controller koppeln")
                 Line("Controller in den Kopplungsmodus versetzen (z. B. Share+PS, Sync-Taste, Start+Y), dann suchen.", Muted)
@@ -265,7 +279,7 @@ fun ControllerScreen() {
                 }
             }
         }
-        item {
+        if (panel == "order") item {
             FocusCard(Modifier.fillMaxWidth()) {
                 Label("In den Emulatoren")
                 Line("Dolphin: Die Spieler oben werden bei jedem Verbinden automatisch eingetragen, die Tastenbelegung bleibt. " +
@@ -357,4 +371,115 @@ private fun LedCard(tick: Int, changed: () -> Unit) {
         if (!st.optBoolean("supported") && pads.length() == 0) Line("Kein Controller mit einstellbaren LEDs verbunden.", Muted)
         if (msg.isNotEmpty()) Line(msg, Bad)
     }
+}
+
+
+/** which part of the controller page is open (null = overview); B goes back to the overview */
+object ControllerNav { val panel = mutableStateOf<String?>(null) }
+
+private class LivePad(val id: Int, val name: String, val model: wtf.lennard.thorbro.PadModel, val battery: Float, val slot: Int)
+
+private fun livePads(ctx: Context): List<LivePad> {
+    val slots = wtf.lennard.thorbro.Players.assigned(ctx).map { it?.optString("descriptor") }
+    return InputDevice.getDeviceIds().toList().mapNotNull { id: Int -> InputDevice.getDevice(id) }
+        .filter { d -> !d.isVirtual && (d.sources and InputDevice.SOURCE_GAMEPAD == InputDevice.SOURCE_GAMEPAD) }
+        .distinctBy { it.descriptor }
+        .map { d ->
+            val bat = if (Build.VERSION.SDK_INT >= 31) d.batteryState.let { if (it.isPresent) it.capacity else Float.NaN } else Float.NaN
+            LivePad(d.id, d.name, wtf.lennard.thorbro.PadModel.of(d), bat, slots.indexOf(d.descriptor) + 1)
+        }
+        .sortedWith(compareBy<LivePad> { if (it.slot == 0) 99 else it.slot }.thenBy { it.name })
+}
+
+@Composable
+private fun PlayerDots(slot: Int) {
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        for (i in 1..4) Box(Modifier.size(10.dp).clip(RoundedCornerShape(2.dp)).background(if (i == slot) Ok else androidx.compose.ui.graphics.Color(0xFF3A3F49)))
+    }
+}
+
+@Composable
+private fun Battery(level: Float) {
+    if (level.isNaN()) return
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(28.dp, 13.dp).border(1.5.dp, androidx.compose.ui.graphics.Color(0xFF9AA0AE), RoundedCornerShape(3.dp)).padding(2.dp)) {
+            Box(Modifier.fillMaxWidth(level.coerceIn(0.05f, 1f)).height(9.dp).background(if (level < 0.2f) Bad else Ok))
+        }
+        Text(" ${(level * 100).toInt()} %", color = Muted, fontSize = 12.sp)
+    }
+}
+
+@Composable
+private fun PadCard(p: LivePad, big: Boolean = false) {
+    FocusCard(Modifier.fillMaxWidth(), onClick = {}) {
+        Box(Modifier.fillMaxWidth().height(if (big) 120.dp else 90.dp), contentAlignment = Alignment.Center) {
+            PadArt(p.model, Modifier.size(if (big) 170.dp else 130.dp, if (big) 110.dp else 84.dp))
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { PlayerDots(p.slot) }
+        Spacer(Modifier.height(6.dp))
+        Text(if (p.model == wtf.lennard.thorbro.PadModel.GENERIC) p.name else p.model.label, fontSize = 15.sp, maxLines = 1)
+        if (p.model == wtf.lennard.thorbro.PadModel.GENERIC || p.model == wtf.lennard.thorbro.PadModel.THOR) Text(if (p.model == wtf.lennard.thorbro.PadModel.THOR) "eingebaut" else "", color = Muted, fontSize = 12.sp)
+        Battery(p.battery)
+    }
+}
+
+@Composable
+fun ControllerScreen() {
+    val ctx = LocalContext.current
+    Pads.appCtx = ctx.applicationContext
+    var tick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) { while (true) { delay(800); tick++ } }
+    val panel = ControllerNav.panel.value
+    DisposableEffect(Unit) { onDispose { Pads.lrMode = false; ControllerNav.panel.value = null } }
+    if (panel != null) { ControllerPanels(panel); return }
+
+    val pads = remember(tick) { livePads(ctx) }
+    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+        Column(Modifier.weight(2f)) {
+            if (Pads.lrMode) {
+                Text("Jeder Spieler drückt L + R gleichzeitig auf seinem Controller.", fontSize = 18.sp, color = Accent)
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    for (slot in 1..4) {
+                        val p = pads.firstOrNull { it.slot == slot }
+                        Box(Modifier.weight(1f).height(190.dp).clip(RoundedCornerShape(14.dp)).background(Panel)
+                            .border(if (p != null) 3.dp else 1.dp, if (p != null) Ok else androidx.compose.ui.graphics.Color(0xFF2C3039), RoundedCornerShape(14.dp)),
+                            contentAlignment = Alignment.Center) {
+                            if (p == null) Text("$slot", fontSize = 48.sp, color = Muted)
+                            else Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                PlayerDots(slot); Spacer(Modifier.height(8.dp))
+                                PadArt(p.model, Modifier.size(140.dp, 90.dp)); Spacer(Modifier.height(6.dp))
+                                Text(p.model.label, fontSize = 14.sp); Battery(p.battery)
+                            }
+                        }
+                    }
+                }
+                Acts { Act("Fertig", primary = true) { Pads.lrMode = false } }
+            } else {
+                if (pads.isEmpty()) Line("Kein Controller verbunden.", Muted)
+                androidx.compose.foundation.lazy.grid.LazyVerticalGrid(androidx.compose.foundation.lazy.grid.GridCells.Fixed(4),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(pads.size) { i -> PadCard(pads[i]) }
+                }
+            }
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            val first = remember { androidx.compose.ui.focus.FocusRequester() }
+            LaunchedEffect(Unit) { delay(200); runCatching { first.requestFocus() } }
+            MenuRow("Reihenfolge ändern", Modifier.focusRequester(first)) {
+                wtf.lennard.thorbro.Players.clearAll(ctx); Pads.lrMode = true
+            }
+            MenuRow("Neue Controller koppeln") { ControllerNav.panel.value = "new" }
+            MenuRow("Gekoppelte Controller") { ControllerNav.panel.value = "paired" }
+            MenuRow("LEDs") { ControllerNav.panel.value = "leds" }
+            MenuRow("Tastentest") { ControllerNav.panel.value = "test" }
+            MenuRow("Spieler & Emulatoren") { ControllerNav.panel.value = "order" }
+            MenuRow("Thor als Gamepad") { ctx.startActivity(Intent(ctx, GamepadActivity::class.java)) }
+        }
+    }
+}
+
+@Composable
+private fun MenuRow(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    FocusCard(modifier.fillMaxWidth(), onClick = onClick) { Text(text, fontSize = 17.sp, color = androidx.compose.ui.graphics.Color(0xFF8FB4FF)) }
 }

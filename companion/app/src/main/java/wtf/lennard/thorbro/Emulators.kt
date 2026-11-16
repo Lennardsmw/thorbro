@@ -107,6 +107,14 @@ object Emulators {
         if (system == "wiiu" && rom.isDirectory) rom.walkTopDown().maxDepth(3).firstOrNull { it.isFile && it.name.endsWith(".rpx", true) }
         else rom
 
+    /** the display ThorBro is shown on (the Thor has two); games start there, not on the other screen */
+    @Volatile var display: Int = android.view.Display.DEFAULT_DISPLAY
+
+    fun startOnDisplay(ctx: Context, i: Intent) {
+        val opts = android.app.ActivityOptions.makeBasic().setLaunchDisplayId(display)
+        runCatching { ctx.startActivity(i, opts.toBundle()) }.getOrElse { ctx.startActivity(i) }
+    }
+
     /** {ok} or {error, code}; code "need_folder_grant" means: open ThorBro on the device and grant the ROM folder */
     fun launch(ctx: Context, system: String, rom: File, emuId: String? = null): JSONObject {
         if (system == "ports") {
@@ -138,7 +146,7 @@ object Emulators {
             if (emu.id == "duckstation") i.putExtra("resumeState", false)
         }
         return try {
-            ctx.startActivity(i)
+            startOnDisplay(ctx, i)
             JSONObject().put("ok", true).put("emulator", emu.name)
         } catch (e: Exception) {
             JSONObject().put("error", "${emu.name} ließ sich nicht starten: ${e.message}")

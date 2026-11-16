@@ -101,7 +101,12 @@ $('#pair').onclick = async () => {
 document.addEventListener('click', async (e) => {
   const t = e.target;
   if (t.dataset.pick) { $('#addr').value = t.dataset.pick; $('#code').focus(); }
-  if (t.dataset.open) { try { await invoke('open_thor', { address: t.dataset.open }); } catch (err) { alert(err); } }
+  if (t.dataset.open) {
+    const label = t.textContent; t.disabled = true; t.textContent = 'Verbinde…';
+    try { const a = await invoke('open_thor', { address: t.dataset.open }); if (a !== t.dataset.open) refresh(); }
+    catch (err) { alert(err); }
+    finally { t.disabled = false; t.textContent = label; }
+  }
   if (t.dataset.forget && confirm('Diesen Thor entfernen?')) { await invoke('forget_thor', { address: t.dataset.forget }); refresh(); }
   if (t.id === 'rommLogin') { try { const p = await invoke('romm_login', { url: $('#rommUrl').value }); await window.__TAURI__.opener.openUrl(p.verify); refresh(); } catch (err) { alert(err); } }
   if (t.id === 'openVerify') window.__TAURI__.opener.openUrl(t.dataset.url);

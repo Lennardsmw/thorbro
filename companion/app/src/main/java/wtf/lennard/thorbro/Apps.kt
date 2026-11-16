@@ -43,7 +43,7 @@ object Apps {
     /** Needs "display over other apps", otherwise Android blocks starts from the background. */
     fun launch(ctx: Context, pkg: String): Boolean {
         val i = ctx.packageManager.getLaunchIntentForPackage(pkg) ?: return false
-        ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        Emulators.startOnDisplay(ctx, i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         return true
     }
 

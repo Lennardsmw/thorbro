@@ -79,6 +79,16 @@ object Leds {
             .map { JSONObject().put("id", it.id).put("name", it.name) }
     )
 
+    /** shows the player number on pads with player LEDs */
+    fun setPlayer(id: Int, player: Int): Boolean {
+        if (Build.VERSION.SDK_INT < 31) return false
+        val d = InputDevice.getDevice(id) ?: return false
+        val lights = d.lightsManager.lights.filter { it.type == Light.LIGHT_TYPE_PLAYER_ID }.ifEmpty { return false }
+        val session = sessions.getOrPut(id) { d.lightsManager.openSession() }
+        val req = LightsRequest.Builder().apply { lights.forEach { addLight(it, LightState.Builder().setPlayerId(player).build()) } }.build()
+        return runCatching { session.requestLights(req); true }.getOrDefault(false)
+    }
+
     /** rgb = 0 switches the light bar off */
     fun setPad(id: Int, rgb: Int): Boolean {
         if (Build.VERSION.SDK_INT < 31) return false

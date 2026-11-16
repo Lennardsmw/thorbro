@@ -44,6 +44,18 @@ object Players {
         apply(ctx)
     }
 
+    fun clearAll(ctx: Context) {
+        Prefs.of(ctx).edit().putString("players", "{}").apply()
+    }
+
+    /** "L + R": the pad becomes the next free player (once) */
+    fun assignNext(ctx: Context, pad: InputDevice) {
+        val s = slots(ctx)
+        if ((1..SLOTS).any { s.optJSONObject("p$it")?.optString("descriptor") == pad.descriptor }) return
+        val free = (1..SLOTS).firstOrNull { s.optJSONObject("p$it") == null } ?: return
+        assign(ctx, free, pad)
+    }
+
     fun clear(ctx: Context, slot: Int) {
         val s = slots(ctx); s.remove("p$slot")
         Prefs.of(ctx).edit().putString("players", s.toString()).apply()
@@ -70,6 +82,8 @@ object Players {
     fun apply(ctx: Context) {
         val connected = pads()
         val devices = assigned(ctx).map { a -> a?.let { x -> connected.firstOrNull { it.descriptor == x.optString("descriptor") } } }
+        // player LEDs on pads that have them (DualSense, DualShock 4 …)
+        devices.forEachIndexed { i, p -> if (p != null) Leds.setPlayer(p.id, i + 1) }
         val done = mutableListOf<String>()
         if (dolphin.isDirectory) {
             if (rewriteIni(File(dolphin, "GCPadNew.ini"), "GCPad", devices)) done += "Dolphin GameCube"
