@@ -50,6 +50,12 @@
 </div>
 
 <div class="panel">
+  <h2>Version</h2>
+  <div class="row"><span id="ver" class="grow"></span><button id="updBtn">Nach Updates suchen</button></div>
+  <div id="updInfo" class="muted"></div>
+</div>
+
+<div class="panel">
   <h2>Spielstände</h2>
   <div id="items"></div>
   <label class="row"><input type="checkbox" id="auto"> Automatisch abgleichen (beim Speichern und alle 5 Minuten)</label>
@@ -75,6 +81,10 @@ async function refresh() {
       : `<div class="row"><input id="rommUrl" class="grow" placeholder="https://games.example.org" value="${esc(r.url)}"><button id="rommLogin" class="primary">Anmelden</button></div>`;
   $('#items').innerHTML = s.items.map((i) => `<div><span class="dot ${i.exists ? 'ok' : ''}"></span> ${esc(i.name)}<div class="muted">${esc(i.dir)}${i.exists ? '' : ' (nicht gefunden)'}</div></div>`).join('');
   $('#auto').checked = s.auto;
+  $('#ver').textContent = 'ThorBro Desktop ' + s.version;
+  const u = s.update;
+  if (u && u.available) { $('#updBtn').textContent = `Update ${u.latest} installieren`; $('#updBtn').classList.add('primary'); }
+  else { $('#updBtn').textContent = 'Nach Updates suchen'; $('#updBtn').classList.remove('primary'); }
   $('#last').textContent = s.last ? `Zuletzt ${new Date(s.last.at * 1000).toLocaleTimeString()}:\n` + s.last.lines.join('\n') : '';
 }
 
@@ -124,6 +134,18 @@ document.addEventListener('click', async (e) => {
   } catch (err) { alert(err); }
 });
 $('#padsReload').onclick = loadLeds;
+$('#updBtn').onclick = async () => {
+  const s = await invoke('status');
+  if (s.update && s.update.available) {
+    $('#updInfo').textContent = `Lade ${s.update.latest} … ThorBro startet danach neu.`;
+    try { await invoke('install_update'); } catch (e) { $('#updInfo').textContent = 'Update fehlgeschlagen: ' + e; }
+  } else {
+    $('#updInfo').textContent = 'Suche …';
+    const u = await invoke('check_update');
+    $('#updInfo').textContent = u.error ? u.error : u.available ? `Version ${u.latest} ist verfügbar.` : 'Du hast die neueste Version.';
+    refresh();
+  }
+};
 refresh(); loadLeds(); setInterval(refresh, 5000);
 </script>
 </body>

@@ -1,6 +1,7 @@
 mod config;
 mod leds;
 mod sync;
+mod update;
 
 use serde_json::{json, Value};
 use std::sync::Mutex;
@@ -12,6 +13,32 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
 static LAST: Mutex<Option<(u64, Vec<String>)>> = Mutex::new(None);
 static PENDING_LOGIN: Mutex<Option<Value>> = Mutex::new(None);
+static UPDATE: Mutex<Option<Value>> = Mutex::new(None);
+static UPDATE_ITEM: std::sync::OnceLock<MenuItem<tauri::Wry>> = std::sync::OnceLock::new();
+
+fn check_updates() -> Value {
+    let u = update::check();
+    if let Some(item) = UPDATE_ITEM.get() {
+        let text = if u["available"].as_bool().unwrap_or(false) { format!("Update {} installieren", u["latest"].as_str().unwrap_or("")) } else { "Nach Updates suchen".into() };
+        let _ = item.set_text(text);
+    }
+    *UPDATE.lock().unwrap() = Some(u.clone());
+    u
+}
+
+fn install_and_restart(app: &AppHandle) -> Result<String, String> {
+    let v = update::install()?;
+    app.exit(0);
+    Ok(v)
+}
+
+#[tauri::command]
+async fn check_update() -> Value { tauri::async_runtime::spawn_blocking(check_updates).await.unwrap_or_default() }
+
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || install_and_restart(&app)).await.map_err(|e| e.to_string())?
+}
 
 fn do_sync() -> Vec<String> {
     let lines = sync::run();
@@ -29,6 +56,8 @@ fn status() -> Value {
         "items": c.items.iter().map(|i| json!({"name": i.name, "dir": i.dir, "exists": std::path::Path::new(&i.dir).is_dir()})).collect::<Vec<_>>(),
         "auto": c.auto_sync,
         "last": last.map(|(t, l)| json!({"at": t, "lines": l})),
+        "version": update::CURRENT,
+        "update": UPDATE.lock().unwrap().clone(),
     })
 }
 
@@ -205,7 +234,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
-        .invoke_handler(tauri::generate_handler![status, discover, pair, forget_thor, open_thor, romm_login, sync_now, set_auto, pads, pad_color, thor_leds])
+        .invoke_handler(tauri::generate_handler![status, discover, pair, forget_thor, open_thor, romm_login, sync_now, set_auto, pads, pad_color, thor_leds, check_update, install_update])
         .setup(|app| {
             // start with the computer, once; the user can turn it off in the system settings
             let al = app.autolaunch();
@@ -215,8 +244,10 @@ pub fn run() {
             }
             let open = MenuItem::with_id(app, "open", "ThorBro öffnen", true, None::<&str>)?;
             let sync_item = MenuItem::with_id(app, "sync", "Spielstände jetzt synchronisieren", true, None::<&str>)?;
+            let upd = MenuItem::with_id(app, "update", "Nach Updates suchen", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Beenden", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open, &sync_item, &quit])?;
+            let menu = Menu::with_items(app, &[&open, &sync_item, &upd, &quit])?;
+            let _ = UPDATE_ITEM.set(upd);
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("ThorBro")
@@ -224,11 +255,20 @@ pub fn run() {
                 .on_menu_event(|app, e| match e.id.as_ref() {
                     "open" => { if let Some(w) = app.get_webview_window("main") { let _ = w.show(); let _ = w.set_focus(); } }
                     "sync" => { std::thread::spawn(do_sync); }
+                    "update" => {
+                        let app = app.clone();
+                        std::thread::spawn(move || {
+                            let available = UPDATE.lock().unwrap().as_ref().and_then(|u| u["available"].as_bool()).unwrap_or(false);
+                            if available { let _ = install_and_restart(&app); } else { check_updates(); }
+                        });
+                    }
                     "quit" => app.exit(0),
                     _ => {}
                 })
                 .build(app)?;
             background();
+            // look for a new version now and every 6 hours
+            std::thread::spawn(|| loop { check_updates(); std::thread::sleep(Duration::from_secs(6 * 3600)); });
             Ok(())
         })
         .on_window_event(|w, e| {
