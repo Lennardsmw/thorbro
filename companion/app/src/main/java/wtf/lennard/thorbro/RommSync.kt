@@ -147,7 +147,7 @@ object RommSync {
                     zipFolder(f, zip); upload(ctx, pid, f.name + ".zip", zip) { n -> job.progress = (done + n).toDouble() / total }; zip.delete()
                 } else upload(ctx, pid, f.name, f) { n -> job.progress = (done + n).toDouble() / total }
                 romsUp++
-            } catch (e: Exception) { errors.put("${f.name}: ${e.message}") }
+            } catch (e: Exception) { errors.put("${f.name}: ${e.message}"); Logs.e("romm", "Upload ${f.name}", e) }
             done += rom.getLong("size")
         }
         if (withSaves) {

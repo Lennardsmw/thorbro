@@ -74,6 +74,7 @@ class ThorActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         if (!ThorService.running) ThorService.start(this)
         if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+        wtf.lennard.thorbro.CrashLog.install(this)
         wtf.lennard.thorbro.FrameStats.attach(this)
         rememberDisplay()
         setContent { ThorTheme { Root(screen.value) { screen.value = it } } }
@@ -122,11 +123,12 @@ class ThorActivity : ComponentActivity() {
 
 @Composable
 private fun Root(screen: Screen?, open: (Screen?) -> Unit) {
-    wtf.lennard.thorbro.FrameStats.page = when {
+    val page = when {
         screen == null -> "Start"
         screen == Screen.GAMES && GamesNav.system.value != null -> "Spiele: " + GamesNav.system.value
         else -> screen.label
     }
+    if (wtf.lennard.thorbro.FrameStats.page != page) { wtf.lennard.thorbro.Logs.i("ui", "Seite: $page"); wtf.lennard.thorbro.FrameStats.page = page }
     var detail by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<HomeGame?>(null) }
     val ctx = androidx.compose.ui.platform.LocalContext.current
     if (screen == Screen.GAMEPAD) {
@@ -136,7 +138,7 @@ private fun Root(screen: Screen?, open: (Screen?) -> Unit) {
     if (screen == null) {
         HomeScreen(open = { open(it) }, showDetail = { detail = it })
     } else {
-        Column(Modifier.fillMaxSize().background(Bg)) {
+        Column(Modifier.fillMaxSize().glassBackground()) {
             StatusBar(screen.label)
             Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 32.dp, vertical = 8.dp)) {
                 when (screen) {

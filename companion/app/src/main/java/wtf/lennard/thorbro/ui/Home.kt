@@ -137,7 +137,7 @@ fun StatusBar(title: String) {
         cm.getNetworkCapabilities(cm.activeNetwork)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
     }
     Row(Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(34.dp).clip(CircleShape).background(Accent), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(34.dp).clip(CircleShape).background(GlassFill).border(1.dp, GlassLine, CircleShape), contentAlignment = Alignment.Center) {
             Text("T", fontWeight = FontWeight.Bold, color = Color.White)
         }
         Spacer(Modifier.width(12.dp))
@@ -154,7 +154,7 @@ fun StatusBar(title: String) {
 
 @Composable
 fun ButtonHints(vararg hints: Pair<String, String>) {
-    Box(Modifier.fillMaxWidth().background(Color(0xFF0B0C0F)).padding(horizontal = 32.dp, vertical = 10.dp)) {
+    Box(Modifier.fillMaxWidth().background(Color(0x99000000)).padding(horizontal = 32.dp, vertical = 10.dp)) {
         Row(Modifier.align(Alignment.CenterEnd), horizontalArrangement = Arrangement.spacedBy(22.dp)) {
             hints.forEach { (btn, what) ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -180,10 +180,10 @@ fun HomeScreen(open: (Screen) -> Unit, showDetail: (HomeGame) -> Unit) {
     var message by remember { mutableStateOf("") }
     LaunchedEffect(Unit) { delay(300); runCatching { first.requestFocus() } }
 
-    Column(Modifier.fillMaxSize().background(Bg)) {
+    Column(Modifier.fillMaxSize().glassBackground()) {
         StatusBar("ThorBro")
         Spacer(Modifier.height(18.dp))
-        Text(focusedTitle, Modifier.padding(start = 40.dp).height(28.dp), fontSize = 20.sp, color = Accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(focusedTitle, Modifier.padding(start = 40.dp).height(30.dp), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
         run {
             LazyRow(contentPadding = PaddingValues(horizontal = 40.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                 item { MoreTile(Modifier.focusRequester(first), onFocus = { focusedTitle = "Alle Spiele" }) { open(Screen.GAMES) } }
@@ -231,7 +231,7 @@ private fun GameTile(g: HomeGame, modifier: Modifier, onFocus: () -> Unit, onSta
     val shape = RoundedCornerShape(18.dp)
     Box(
         modifier.size(210.dp).scale(scale).clip(shape).background(Panel)
-            .border(if (focused) 4.dp else 0.dp, if (focused) Accent else Color.Transparent, shape)
+            .border(if (focused) 3.dp else 1.dp, if (focused) Color(0xF2FFFFFF) else GlassLine, shape)
             .onKeyEvent { e -> if (e.type == KeyEventType.KeyDown && (e.key == Key.ButtonX || e.key == Key.ButtonY)) { onDetail(); true } else false }
             .clickable(interactionSource = src, indication = null, onClick = onStart)
             .focusable(interactionSource = src),
@@ -253,7 +253,7 @@ private fun MoreTile(modifier: Modifier, onFocus: () -> Unit, onClick: () -> Uni
     if (focused) LaunchedEffect(Unit) { onFocus() }
     val scale by animateFloatAsState(if (focused) 1.1f else 1f, label = "more")
     val shape = RoundedCornerShape(18.dp)
-    Box(modifier.size(210.dp).scale(scale).clip(shape).background(Panel).border(if (focused) 4.dp else 0.dp, if (focused) Accent else Color.Transparent, shape)
+    Box(modifier.size(210.dp).scale(scale).clip(shape).background(GlassFill).border(if (focused) 3.dp else 1.dp, if (focused) Color(0xF2FFFFFF) else GlassLine, shape)
         .clickable(interactionSource = src, indication = null, onClick = onClick).focusable(interactionSource = src), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Filled.ViewModule, null, Modifier.size(54.dp))
@@ -268,9 +268,9 @@ private fun RoundButton(label: String, icon: ImageVector, onClick: () -> Unit) {
     val focused by src.collectIsFocusedAsState()
     val scale by animateFloatAsState(if (focused) 1.12f else 1f, label = "round")
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(64.dp).scale(scale).clip(CircleShape).background(if (focused) Accent else Panel)
+        Box(Modifier.size(64.dp).scale(scale).clip(CircleShape).then(if (focused) Modifier.background(Accent) else Modifier.background(GlassFill)).border(1.dp, GlassLine, CircleShape)
             .clickable(interactionSource = src, indication = null, onClick = onClick).focusable(interactionSource = src),
-            contentAlignment = Alignment.Center) { Icon(icon, label, Modifier.size(30.dp)) }
+            contentAlignment = Alignment.Center) { Icon(icon, label, Modifier.size(30.dp), tint = if (focused) OnAccent else Color.White) }
         Spacer(Modifier.height(6.dp))
         Text(if (focused) label else "", fontSize = 13.sp, color = Muted)
     }

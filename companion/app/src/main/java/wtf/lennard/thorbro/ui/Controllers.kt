@@ -209,8 +209,8 @@ fun ControllerPanels(panel: String) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     buttons.forEach { (code, label) ->
                         val on = Pads.pressed[code] == true
-                        Box(Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) Accent else Bg).padding(horizontal = 12.dp, vertical = 8.dp)) {
-                            Text(label, fontSize = 15.sp)
+                        Box(Modifier.clip(RoundedCornerShape(10.dp)).background(if (on) Accent else Panel).padding(horizontal = 12.dp, vertical = 8.dp)) {
+                            Text(label, fontSize = 15.sp, color = if (on) OnAccent else androidx.compose.ui.graphics.Color.White)
                         }
                     }
                 }
@@ -467,6 +467,7 @@ fun ControllerScreen() {
             val first = remember { androidx.compose.ui.focus.FocusRequester() }
             LaunchedEffect(Unit) { delay(200); runCatching { first.requestFocus() } }
             MenuRow("Reihenfolge ändern", Modifier.focusRequester(first)) {
+                wtf.lennard.thorbro.Logs.i("controller", "Reihenfolge ändern gestartet")
                 wtf.lennard.thorbro.Players.clearAll(ctx); Pads.lrMode = true
             }
             MenuRow("Neue Controller koppeln") { ControllerNav.panel.value = "new" }
@@ -481,5 +482,5 @@ fun ControllerScreen() {
 
 @Composable
 private fun MenuRow(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    FocusCard(modifier.fillMaxWidth(), onClick = onClick) { Text(text, fontSize = 17.sp, color = androidx.compose.ui.graphics.Color(0xFF8FB4FF)) }
+    FocusCard(modifier.fillMaxWidth(), onClick = onClick) { Text(text, fontSize = 17.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold) }
 }

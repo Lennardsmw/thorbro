@@ -25,6 +25,8 @@ class ThorService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        CrashLog.install(this)
+        Logs.i("service", "Dienst gestartet (${intent?.action ?: "start"})")
         startInForeground(capture = intent?.action == ACTION_CAPTURE)
         if (intent?.action == ACTION_CAPTURE) {
             @Suppress("DEPRECATION")

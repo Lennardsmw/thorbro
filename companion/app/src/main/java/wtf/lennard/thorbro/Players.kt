@@ -89,6 +89,7 @@ object Players {
             if (rewriteIni(File(dolphin, "GCPadNew.ini"), "GCPad", devices)) done += "Dolphin GameCube"
             if (rewriteIni(File(dolphin, "WiimoteNew.ini"), "Wiimote", devices)) done += "Dolphin Wii"
         }
+        Logs.i("players", "Spieler: " + devices.mapIndexed { i, p -> "${i + 1}=${p?.name ?: "-"}" }.joinToString(", ") + " · " + done.joinToString())
         lastApply = SimpleDateFormat("HH:mm", Locale.GERMANY).format(Date()) + " · " +
             (if (done.isEmpty()) "nichts zu ändern" else done.joinToString(", ") + " aktualisiert")
     }

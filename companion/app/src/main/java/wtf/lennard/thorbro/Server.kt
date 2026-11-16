@@ -351,6 +351,16 @@ object Server {
                     json(JSONObject().put("ok", ok))
                 }
 
+                get("/api/debug/logs") {
+                    if (denied(ctx)) return@get
+                    val n = q("lines")?.toIntOrNull() ?: 300
+                    json(JSONObject().put("version", BuildConfigVersion.name(ctx)).put("app", Logs.tail(n))
+                        .put("logcat", withContext(Dispatchers.IO) { Logs.logcat(n) }).put("crashes", CrashLog.read(ctx)))
+                }
+                get("/api/debug/crash") {
+                    if (denied(ctx)) return@get
+                    call.respondText(CrashLog.read(ctx), ContentType.Text.Plain)
+                }
                 get("/api/debug/frames") {
                     if (denied(ctx)) return@get
                     json(FrameStats.json())

@@ -27,17 +27,37 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-val Accent = Color(0xFFFF5A3C)
-val Panel = Color(0xFF1B1E24)
-val Bg = Color(0xFF111317)
-val Muted = Color(0xFF9097A5)
-val Ok = Color(0xFF4CC27F)
-val Bad = Color(0xFFFF6B57)
+/** glass look: black background, milky translucent panels, white as the highlight */
+val Accent = Color(0xFFF4F6FA)          // highlight (white)
+val OnAccent = Color(0xFF0B0C0F)        // text/icons on the highlight
+val Panel = Color(0x1AFFFFFF)           // milky glass
+val Bg = Color(0xFF07080A)              // deep black (placeholders)
+val Muted = Color(0xFFA7ADB8)
+val Ok = Color(0xFF7FE0A8)
+val Bad = Color(0xFFFF8A80)
+val GlassLine = Color(0x26FFFFFF)
+
+/** black background with soft milky light, for every page */
+fun Modifier.glassBackground() = this.drawBehind {
+    drawRect(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFF101114), Color(0xFF050506))))
+    drawCircle(androidx.compose.ui.graphics.Brush.radialGradient(listOf(Color(0x22FFFFFF), Color.Transparent),
+        center = androidx.compose.ui.geometry.Offset(size.width * 0.15f, size.height * 0.05f), radius = size.width * 0.55f),
+        radius = size.width * 0.55f, center = androidx.compose.ui.geometry.Offset(size.width * 0.15f, size.height * 0.05f))
+    drawCircle(androidx.compose.ui.graphics.Brush.radialGradient(listOf(Color(0x14DDE6FF), Color.Transparent),
+        center = androidx.compose.ui.geometry.Offset(size.width * 0.9f, size.height * 0.95f), radius = size.width * 0.5f),
+        radius = size.width * 0.5f, center = androidx.compose.ui.geometry.Offset(size.width * 0.9f, size.height * 0.95f))
+}
+
+/** milky glass fill: a little brighter at the top, like light on frosted glass */
+val GlassFill = androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0x24FFFFFF), Color(0x0DFFFFFF)))
 
 @OptIn(androidx.compose.ui.text.ExperimentalTextApi::class)
 private fun nunito(w: Int) = androidx.compose.ui.text.font.Font(
@@ -60,7 +80,7 @@ fun ThorTheme(content: @Composable () -> Unit) {
         labelLarge = base.labelLarge.n().copy(fontWeight = FontWeight.Bold), labelMedium = base.labelMedium.n(), labelSmall = base.labelSmall.n(),
     )
     MaterialTheme(
-        colorScheme = darkColorScheme(primary = Accent, background = Bg, surface = Panel, onPrimary = Color.White,
+        colorScheme = darkColorScheme(primary = Accent, background = Bg, surface = Color(0xFF15171B), onPrimary = OnAccent,
             onBackground = Color.White, onSurface = Color.White),
         typography = type,
     ) {
@@ -82,9 +102,12 @@ fun FocusCard(
 ) {
     val src = remember { MutableInteractionSource() }
     val focused by src.collectIsFocusedAsState()
-    val shape = RoundedCornerShape(14.dp)
-    var m = modifier.clip(shape).background(Panel)
-        .border(BorderStroke(if (focused) 3.dp else 1.dp, if (focused) Accent else Color(0xFF2C3039)), shape)
+    val shape = RoundedCornerShape(20.dp)
+    val scale by androidx.compose.animation.core.animateFloatAsState(if (focused) 1.015f else 1f, label = "card")
+    var m = modifier.scale(scale)
+        .then(if (focused) Modifier.shadow(18.dp, shape, ambientColor = Color.White, spotColor = Color.White) else Modifier)
+        .clip(shape).background(GlassFill)
+        .border(BorderStroke(if (focused) 2.dp else 1.dp, if (focused) Color(0xD9FFFFFF) else GlassLine), shape)
     if (onClick != null) m = m.clickable(interactionSource = src, indication = null, onClick = onClick)
     Column(m.padding(16.dp), content = content)
 }
@@ -103,8 +126,9 @@ fun Line(text: String, color: Color = Color.White) = Text(text, fontSize = 15.sp
 
 @Composable
 fun Act(text: String, primary: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
-    if (primary) Button(onClick, enabled = enabled, colors = ButtonDefaults.buttonColors(containerColor = Accent)) { Text(text) }
-    else OutlinedButton(onClick, enabled = enabled) { Text(text, color = Color.White) }
+    if (primary) Button(onClick, enabled = enabled, colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = OnAccent)) { Text(text) }
+    else OutlinedButton(onClick, enabled = enabled, border = BorderStroke(1.dp, Color(0x40FFFFFF)),
+        colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0x14FFFFFF))) { Text(text, color = Color.White) }
 }
 
 @Composable

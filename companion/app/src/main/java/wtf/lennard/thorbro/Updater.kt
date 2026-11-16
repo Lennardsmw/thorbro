@@ -81,6 +81,7 @@ object Updater {
         try { download(c.getString("url"), apk) } catch (e: Exception) { return c.put("error", "Download fehlgeschlagen: ${e.message}") }
         val info = ctx.packageManager.getPackageArchiveInfo(apk.path, 0)
         if (info?.packageName != ctx.packageName) { apk.delete(); return c.put("error", "Heruntergeladene Datei ist keine ThorBro-APK") }
+        Logs.i("update", "installiere ${c.optString("latest")} (von ${c.optString("current")})")
         val id = Installer.install(ctx, apk)
         return c.put("session", id).put("status", Installer.status[id])
     }

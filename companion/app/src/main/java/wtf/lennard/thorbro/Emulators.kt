@@ -145,10 +145,12 @@ object Emulators {
             if (emu.pass == Pass.DATA) i.data = uri else i.putExtra(emu.extra, uri.toString())
             if (emu.id == "duckstation") i.putExtra("resumeState", false)
         }
+        Logs.i("play", "${emu.name}: ${file.name} (Display $display)")
         return try {
             startOnDisplay(ctx, i)
             JSONObject().put("ok", true).put("emulator", emu.name)
         } catch (e: Exception) {
+            Logs.e("play", "${emu.name} startet nicht", e)
             JSONObject().put("error", "${emu.name} ließ sich nicht starten: ${e.message}")
         }
     }

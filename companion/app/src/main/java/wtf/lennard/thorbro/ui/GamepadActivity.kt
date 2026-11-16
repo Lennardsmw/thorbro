@@ -90,7 +90,7 @@ class GamepadActivity : ComponentActivity() {
     private fun Screen() {
         @Suppress("UNUSED_EXPRESSION") tick
         val st = HidGamepad.state
-        Column(Modifier.fillMaxSize().background(if (dimmed) androidx.compose.ui.graphics.Color.Black else Bg)) {
+        Column(Modifier.fillMaxSize().then(if (dimmed) Modifier.background(androidx.compose.ui.graphics.Color.Black) else Modifier.glassBackground())) {
             StatusBar("Gamepad-Modus")
             Column(Modifier.weight(1f).padding(horizontal = 40.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 val (title, sub, ok) = when (st) {
@@ -114,7 +114,8 @@ class GamepadActivity : ComponentActivity() {
                 val names = listOf("A", "B", "X", "Y", "L1", "R1", "L2", "R2", "Select", "Start", "L3", "R3", "Home")
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     names.forEachIndexed { i, n ->
-                        Box(Modifier.clip(RoundedCornerShape(8.dp)).background(if (HidGamepad.pressed(i)) Accent else Panel).padding(horizontal = 12.dp, vertical = 8.dp)) { Text(n) }
+                        Box(Modifier.clip(RoundedCornerShape(10.dp)).background(if (HidGamepad.pressed(i)) Accent else Panel).padding(horizontal = 12.dp, vertical = 8.dp)) {
+                            Text(n, color = if (HidGamepad.pressed(i)) OnAccent else androidx.compose.ui.graphics.Color.White) }
                     }
                 }
             }
