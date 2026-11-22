@@ -199,7 +199,7 @@ fun GameSaves(sys: String, path: String, title: String, onClose: () -> Unit) {
                         if (shared.isEmpty()) item { Text("Niemand hat für dieses Spiel einen Spielstand geteilt.", color = Muted) }
                         shared.forEach { s ->
                             item {
-                                SaveRow(Icons.Filled.Download, s.optString("user") + (s.optString("slot").takeIf { !s.isNull("slot") && it.isNotEmpty() }?.let { " · $it" } ?: ""),
+                                SaveRow(Icons.Filled.Download, s.optString("user") + (s.optString("slot").takeIf { !s.isNull("slot") && it.isNotEmpty() }?.let { " · $it" } ?: "") + devLabel(s, d),
                                     "${s.optString("name")} · ${day(s.optString("updated"))} · ${fmtBytes(s.optLong("size"))}", if (supported) "Installieren" else null) { installing = s }
                             }
                         }
@@ -208,7 +208,7 @@ fun GameSaves(sys: String, path: String, title: String, onClose: () -> Unit) {
                         own.forEach { s ->
                             item {
                                 val pub = s.optBoolean("public")
-                                SaveRow(if (pub) Icons.Filled.Public else Icons.Filled.PublicOff, s.optString("profile"),
+                                SaveRow(if (pub) Icons.Filled.Public else Icons.Filled.PublicOff, s.optString("profile") + devLabel(s, d),
                                     "${day(s.optString("updated"))} · ${fmtBytes(s.optLong("size"))}" + (if (pub) " · geteilt" else ""),
                                     "Optionen") { ownMenu = s }
                             }
@@ -242,6 +242,16 @@ fun GameSaves(sys: String, path: String, title: String, onClose: () -> Unit) {
                     }
                 }
             }) { installing = null }
+    }
+}
+
+/** " · von MacBook-Pro" / " · von diesem Gerät"; empty for older uploads without a device */
+private fun devLabel(s: JSONObject, d: JSONObject): String {
+    val dev = if (s.isNull("device")) "" else s.optString("device")
+    return when {
+        dev.isEmpty() -> ""
+        dev == d.optString("thisDevice") -> " · von diesem Gerät"
+        else -> " · von $dev"
     }
 }
 

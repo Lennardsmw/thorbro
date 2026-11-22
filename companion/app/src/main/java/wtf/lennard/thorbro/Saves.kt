@@ -148,10 +148,9 @@ object Saves {
                 val e = z.nextEntry ?: break
                 val target = File(l.dir, e.name).canonicalFile
                 if (!target.path.startsWith("$base/")) continue // zip-slip guard
-                if (e.isDirectory) { target.mkdirs(); continue }
-                target.parentFile?.mkdirs()
-                target.outputStream().use { z.copyTo(it) }
-                if (e.time > 0) target.setLastModified(e.time)
+                if (e.isDirectory) { SaveFs.mkdirs(target); continue }
+                SaveFs.write(target, z)
+                SaveFs.touch(target, e.time)
                 n++
             }
         }

@@ -708,6 +708,8 @@ function openRom(path, sysId) {
 
 // ---------- saves of one game: profiles, own RomM saves, shared ones ----------
 let romSavesFor = null;
+/** where a save was uploaded from ("vom Mac …", "von diesem Thor") */
+const devTag = (s, d) => (s.device ? ` · <span class="muted">${s.device === d.thisDevice ? 'von diesem Gerät' : 'von ' + esc(s.device)}</span>` : '');
 const when = (t) => (t ? new Date(t).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) : '');
 async function loadRomSaves(path, sys) {
   romSavesFor = { path, sys };
@@ -728,11 +730,11 @@ async function loadRomSaves(path, sys) {
       : d.inRomm === false ? '<div class="sub">Das Spiel ist nicht in RomM, darum gibt es keine Spielstände dort.</div>'
       : d.error ? `<div class="sub">${esc(d.error)}</div>` : `
     <h4 style="margin:12px 0 4px">Deine Spielstände in RomM</h4>
-    ${d.own.length ? `<table class="savetable">${d.own.map((s) => `<tr><td>${esc(s.profile)}<div class="muted">${when(s.updated)} · ${fmt(s.size)}</div></td>
+    ${d.own.length ? `<table class="savetable">${d.own.map((s) => `<tr><td>${esc(s.profile)}${devTag(s, d)}<div class="muted">${when(s.updated)} · ${fmt(s.size)}</div></td>
       <td><button data-sv-share="${s.id}" data-sv-on="${s.public ? 0 : 1}">${s.public ? '🌐 Geteilt – zurücknehmen' : 'Teilen'}</button> ${installBtn(s.id)}</td></tr>`).join('')}</table>`
       : '<div class="sub">Noch keiner – nach dem ersten Speichern lädt ThorBro ihn hoch.</div>'}
     <h4 style="margin:12px 0 4px">Geteilte Spielstände</h4>
-    ${d.shared.length ? `<table class="savetable">${d.shared.map((s) => `<tr><td>${esc(s.user)}${s.slot ? ' · ' + esc(s.slot) : ''}<div class="muted">${esc(s.name)} · ${when(s.updated)} · ${fmt(s.size)}</div></td>
+    ${d.shared.length ? `<table class="savetable">${d.shared.map((s) => `<tr><td>${esc(s.user)}${s.slot ? ' · ' + esc(s.slot) : ''}${devTag(s, d)}<div class="muted">${esc(s.name)} · ${when(s.updated)} · ${fmt(s.size)}</div></td>
       <td>${installBtn(s.id)}</td></tr>`).join('')}</table>`
       : '<div class="sub">Niemand hat für dieses Spiel einen Spielstand geteilt. In RomM beim Spielstand „öffentlich“ setzen, dann taucht er hier auf.</div>'}`}`;
 }

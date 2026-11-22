@@ -11,6 +11,11 @@ import java.net.Inet4Address
 import java.net.NetworkInterface
 
 object Device {
+    /** this device's name for save uploads ("AYN Thor"), safe inside a file name */
+    fun label(ctx: Context): String =
+        (runCatching { Settings.Global.getString(ctx.contentResolver, "device_name") }.getOrNull()?.takeIf { it.isNotBlank() } ?: Build.MODEL)
+            .replace(Regex("[\\\\/:*?\"<>|()\\[\\]]"), " ").replace(Regex("\\s+"), " ").trim().take(40).ifEmpty { "Thor" }
+
     fun ip(): String? = NetworkInterface.getNetworkInterfaces().toList()
         .filter { it.isUp && !it.isLoopback }
         .flatMap { it.inetAddresses.toList() }

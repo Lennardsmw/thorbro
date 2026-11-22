@@ -1,7 +1,6 @@
 package wtf.lennard.thorbro
 
 import android.content.Context
-import android.content.pm.PackageManager
 import android.hardware.lights.Light
 import android.hardware.lights.LightState
 import android.hardware.lights.LightsManager
@@ -11,7 +10,6 @@ import android.provider.Settings
 import android.view.InputDevice
 import org.json.JSONArray
 import org.json.JSONObject
-import rikka.shizuku.Shizuku
 
 /**
  * Controller LEDs.
@@ -33,25 +31,11 @@ object Leds {
     }
 
     /** "ready", "needs_permission" or "not_running" */
-    fun shizukuState(): String = when {
-        !runCatching { Shizuku.pingBinder() }.getOrDefault(false) -> "not_running"
-        Shizuku.isPreV11() -> "not_running"
-        Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED -> "needs_permission"
-        else -> "ready"
-    }
+    fun shizukuState(): String = Shell.state()
 
-    fun requestShizuku() { runCatching { if (Shizuku.pingBinder()) Shizuku.requestPermission(77) } }
+    fun requestShizuku() = Shell.request()
 
-    /** runs a command with Shizuku's shell rights */
-    private fun shell(vararg cmd: String): Boolean {
-        if (shizukuState() != "ready") return false
-        return runCatching {
-            val m = Shizuku::class.java.getDeclaredMethod("newProcess", Array<String>::class.java, Array<String>::class.java, String::class.java)
-            m.isAccessible = true
-            val p = m.invoke(null, arrayOf(*cmd), null, null) as Process
-            p.waitFor() == 0
-        }.getOrDefault(false)
-    }
+    private fun shell(vararg cmd: String): Boolean = Shell.run(*cmd)
 
     private fun put(key: String, value: String) = shell("settings", "put", "system", key, value)
 

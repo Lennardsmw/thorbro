@@ -214,13 +214,14 @@ object RommSync {
             }
             job?.message = "Spielstand ${s.file.name}"
             try {
-                val payload = if (s.isFolder) File(ctx.cacheDir, s.file.name + ".zip").also { zipFolder(s.file, it) } else s.file
+                // folder saves carry the device in the name ("saves (AYN Thor).zip"), so RomM and ThorBro show where a save comes from
+                val payload = if (s.isFolder) File(ctx.cacheDir, "${s.file.name} (${Device.label(ctx)}).zip").also { zipFolder(s.file, it) } else s.file
                 val res = Romm.uploadSave(ctx, romId, payload, emulator = s.system, contentHash = hash,
                     slot = Profiles.slot(ctx, Profiles.owner(ctx, s.rom.optString("path"))))
                 if (s.isFolder) payload.delete()
                 st.put(key, JSONObject().put("local", hash).put("remote", remoteKey(res))); n++
                 History.add(ctx, "save_up", s.rom.optString("name"), s.system)
-            } catch (e: Exception) { errors.put("${s.file.name}: ${e.message}") }
+            } catch (e: Exception) { errors.put("${s.file.name}: ${e.message}"); Logs.e("romm", "Spielstand hochladen ${s.file.path}", e) }
         }
         stateFile(ctx).writeText(st.toString())
         return JSONObject().put("uploaded", n).put("skippedNoGame", skipped).put("errors", errors)
@@ -262,7 +263,7 @@ object RommSync {
                 History.add(ctx, "save_down", s.rom.optString("name"), s.system)
                 stateFile(ctx).writeText(st2.toString())
                 n++
-            } catch (e: Exception) { errors.put("${s.file.name}: ${e.message}") }
+            } catch (e: Exception) { errors.put("${s.file.name}: ${e.message}"); Logs.e("romm", "Spielstand holen ${s.file.path}", e) }
         }
         uploadedFile(ctx).writeText(up.toString())
         return JSONObject().put("downloaded", n).put("errors", errors)
@@ -278,8 +279,7 @@ object RommSync {
                 if (rel.isEmpty() || e.isDirectory) continue
                 val t = File(dir, rel).canonicalFile
                 if (!t.path.startsWith("$base/")) continue
-                t.parentFile?.mkdirs()
-                t.outputStream().use { z.copyTo(it) }
+                SaveFs.write(t, z)
             }
         }
     }

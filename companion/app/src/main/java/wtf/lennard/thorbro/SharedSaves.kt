@@ -31,11 +31,17 @@ object SharedSaves {
             if (t == null) "id:${s.getInt("id")}" else "${s.optInt("user_id")}|${Romm.slotOf(s)}|$t"
         }.values.sortedByDescending { g -> g.maxOf { time(it) } }
 
+    private val deviceTag = Regex("\\(([^()]+)\\)\\.zip$", RegexOption.IGNORE_CASE)
+
+    /** the device a folder save was uploaded from: "saves (AYN Thor).zip" -> "AYN Thor"; null for older uploads */
+    fun deviceOf(fileName: String): String? = deviceTag.find(cleanName(fileName))?.groupValues?.get(1)?.trim()?.ifEmpty { null }
+
     private fun groupJson(g: List<JSONObject>) = JSONObject()
         .put("ids", JSONArray(g.map { it.getInt("id") })).put("id", g.joinToString(",") { it.getInt("id").toString() })
         .put("name", g.joinToString(" + ") { cleanName(it.optString("file_name")) })
         .put("updated", g.maxOf { time(it) }).put("size", g.sumOf { it.optLong("file_size_bytes") })
         .put("slot", Romm.slotOf(g[0]) ?: JSONObject.NULL)
+        .put("device", deviceOf(g[0].optString("file_name")) ?: JSONObject.NULL)
 
     /** everything about one game's saves: profiles, own saves in RomM, other users' public ones */
     fun forGame(ctx: Context, system: String, romPath: String): JSONObject {
@@ -46,6 +52,7 @@ object SharedSaves {
             ?: return out.put("inRomm", false)
         out.put("inRomm", true).put("romId", id)
         val profiles = Profiles.list(ctx)
+        out.put("thisDevice", Device.label(ctx))
         val own = runCatching { Romm.listSaves(ctx, id) }.getOrElse { return out.put("error", it.message) }
         val ownIds = own.map { it.getInt("id") }.toSet()
         out.put("own", JSONArray(groups(own).map { g ->
@@ -93,16 +100,16 @@ object SharedSaves {
                 // a folder save: the existing one, or for 3DS the title's folder in Azahar
                 val folder = items.singleOrNull()?.takeIf { it.isFolder }?.file ?: if (items.isEmpty() && system == "n3ds") N3ds.saveDir(rom, create = true) else null
                 val into: File = when {
-                    folder != null && zip -> folder.also { d -> d.listFiles()?.forEach { it.deleteRecursively() }; RommSync.unzipStripped(files[0].first, d) }
+                    folder != null && zip -> folder.also { d -> SaveFs.clearDir(d); RommSync.unzipStripped(files[0].first, d) }
                     folder != null -> folder.also { d ->
                         if (system == "n3ds" && !File(d.parentFile, "${d.name}.metadata").exists())
                             return JSONObject().put("error", "Das Spiel einmal in Azahar starten und speichern, dann nochmal installieren.")
-                        d.mkdirs(); files.forEach { (f, n) -> f.copyTo(placeIn(d, File(n).name), overwrite = true) }
+                        SaveFs.mkdirs(d); files.forEach { (f, n) -> SaveFs.copy(f, placeIn(d, File(n).name)) }
                     }
-                    files.size == 1 && !zip && items.singleOrNull()?.isFolder == false -> items[0].file.also { files[0].first.copyTo(it, overwrite = true) }
+                    files.size == 1 && !zip && items.singleOrNull()?.isFolder == false -> items[0].file.also { SaveFs.copy(files[0].first, it) }
                     files.size == 1 && !zip && items.isEmpty() -> (defaultTarget(system, rom, files[0].second) ?: return JSONObject().put("error",
                         "Weiß nicht, wohin der Spielstand gehört. Einmal im Spiel speichern, dann nochmal installieren."))
-                        .also { it.parentFile?.mkdirs(); files[0].first.copyTo(it, overwrite = true) }
+                        .also { SaveFs.copy(files[0].first, it) }
                     else -> return JSONObject().put("error", "Spielstand passt nicht zu den Dateien auf dem Thor (${items.size} Spielstände, ${files.size} Dateien)")
                 }
                 val who = metas[0].optString("username")

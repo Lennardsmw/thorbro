@@ -144,7 +144,8 @@ def sync():
         if rom is None:
             print(it["name"] + ": noch nicht in RomM (ThorBro legt den Eintrag beim ersten Abgleich an)"); continue
         saves = json.loads(api(c, "GET", f"/api/saves?rom_id={rom}"))
-        newest = max(saves, key=lambda s: s.get("updated_at") or "", default=None)
+        # only the default slot: other slots belong to ThorBro profiles on a Thor
+        newest = max((x for x in saves if not x.get("slot")), key=lambda s: s.get("updated_at") or "", default=None)
         local_hash = folder_hash(d)
         state = c.setdefault("state", {}).setdefault(it["name"], {})
         remote_key = f"{newest['id']}@{newest['updated_at']}" if newest else None
@@ -168,7 +169,9 @@ def sync():
             print(it["name"] + ": neuerer Stand aus RomM geholt (alter Stand gesichert)")
         else:
             boundary = "thorbro%d" % time.time()
-            name = os.path.basename(d.rstrip("/")) + ".zip"
+            # the device goes into the name, so RomM and ThorBro show where a save comes from
+            host = "".join(" " if ch in '\\/:*?"<>|()[]' else ch for ch in os.uname().nodename.removesuffix(".local")).strip() or "Computer"
+            name = os.path.basename(d.rstrip("/")) + " (" + " ".join(host.split())[:40] + ").zip"
             body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"saveFile\"; filename=\"{name}\"\r\n"
                     "Content-Type: application/octet-stream\r\n\r\n").encode() + zip_folder(d) + f"\r\n--{boundary}--\r\n".encode()
             # no device_id: RomM would then also require the devices.write scope

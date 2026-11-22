@@ -108,6 +108,15 @@ fn find_rom(c: &Config, it: &SaveItem) -> Result<Option<i64>, String> {
     Ok(None)
 }
 
+/// this computer's name for save uploads, safe inside a file name ("MacBook-Pro")
+fn device_label() -> String {
+    let h = crate::hostname();
+    let h = h.strip_suffix(".local").unwrap_or(&h);
+    let clean: String = h.chars().map(|c| if "\\/:*?\"<>|()[]".contains(c) { ' ' } else { c }).collect();
+    let clean = clean.split_whitespace().collect::<Vec<_>>().join(" ");
+    if clean.is_empty() { "Computer".into() } else { clean.chars().take(40).collect() }
+}
+
 fn time_of(s: &Value) -> f64 {
     let t = s["updated_at"].as_str().unwrap_or("");
     chrono::DateTime::parse_from_rfc3339(t).map(|d| d.timestamp() as f64)
@@ -126,7 +135,10 @@ pub fn run() -> Vec<String> {
         let res = (|| -> Result<String, String> {
             let Some(rom) = find_rom(&c, &it)? else { return Ok("noch nicht in RomM".into()) };
             let saves = get_json(&c, &format!("/api/saves?rom_id={rom}"))?;
-            let newest = saves.as_array().cloned().unwrap_or_default().into_iter().max_by_key(|s| s["updated_at"].as_str().unwrap_or("").to_string());
+            // only the default slot: other slots belong to ThorBro profiles ("Spieler 2" …) on a Thor
+            let newest = saves.as_array().cloned().unwrap_or_default().into_iter()
+                .filter(|s| s["slot"].as_str().map_or(true, |x| x.is_empty()))
+                .max_by_key(|s| s["updated_at"].as_str().unwrap_or("").to_string());
             let local = folder_hash(&dir);
             let st = c.state.get(&it.name).cloned().unwrap_or_default();
             let rkey = newest.as_ref().map(|s| format!("{}@{}", s["id"], s["updated_at"].as_str().unwrap_or("")));
@@ -149,7 +161,9 @@ pub fn run() -> Vec<String> {
                 c.state.insert(it.name.clone(), ItemState { local: folder_hash(&dir), remote: rkey.unwrap() });
                 Ok("neuerer Stand aus RomM geholt (alter Stand gesichert)".into())
             } else {
-                let name = format!("{}.zip", dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or("save".into()));
+                // the device goes into the name ("save (MacBook-Pro).zip"), so RomM and ThorBro show where a save comes from
+                let folder = dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or("save".into());
+                let name = format!("{folder} ({}).zip", device_label());
                 let form = multipart::Form::new().part("saveFile", multipart::Part::bytes(zip_folder(&dir)).file_name(name));
                 // no device_id: RomM would then also require the devices.write scope
                 let r = client().post(api(&c, &format!("/api/saves?rom_id={rom}&emulator={}&overwrite=true", it.platform)))

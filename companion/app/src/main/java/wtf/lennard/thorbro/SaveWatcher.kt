@@ -48,6 +48,10 @@ object SaveWatcher {
                         last = JSONObject().put("at", System.currentTimeMillis()).put("state", "${r.optInt("downloaded")} Spielstand/-stände von RomM geholt")
                         known = runCatching { stamps(ctx) }.getOrDefault(known)
                     }
+                    // errors stay visible in the sync status instead of vanishing
+                    val errs = r?.optJSONArray("errors")
+                    if (errs != null && errs.length() > 0)
+                        last = JSONObject().put("at", System.currentTimeMillis()).put("state", "Fehler beim Holen: ${errs.optString(0)}").put("errors", errs)
                 }
                 val now = runCatching { stamps(ctx) }.getOrNull() ?: continue
                 val changed = now != known

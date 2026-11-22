@@ -282,7 +282,7 @@ fn set_auto(on: bool) {
     config::save(&c);
 }
 
-fn hostname() -> String { sysinfo::System::host_name().unwrap_or_else(|_| "Computer".into()) }
+pub(crate) fn hostname() -> String { sysinfo::System::host_name().unwrap_or_else(|_| "Computer".into()) }
 
 /// syncs every 5 minutes and shortly after a game wrote its save folder
 fn background() {

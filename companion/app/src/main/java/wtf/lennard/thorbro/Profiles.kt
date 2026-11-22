@@ -169,7 +169,7 @@ object Profiles {
 
     /** removes the save files; folders stay, since games and emulators expect their layout (3DS: data/00000001/save_data/) */
     private fun clear(f: File, folder: Boolean) {
-        if (folder) f.walkBottomUp().filter { it.isFile }.forEach { it.delete() } else f.delete()
+        if (folder) SaveFs.clearFiles(f) else SaveFs.delete(f)
     }
 
     /** zip: "manifest.json" = [{i, path, folder}], files as "<i>" or "<i>/<relative path>" */
@@ -210,9 +210,8 @@ object Profiles {
                 val (dir, folder) = targets[e.name.substringBefore('/')] ?: continue
                 val t = if (folder) File(dir, e.name.substringAfter('/')).canonicalFile else dir
                 if (folder && !t.path.startsWith(dir.canonicalPath + "/")) continue // zip-slip guard
-                t.parentFile?.mkdirs()
-                t.outputStream().use { z.copyTo(it) }
-                if (e.time > 0) t.setLastModified(e.time)
+                SaveFs.write(t, z)
+                SaveFs.touch(t, e.time)
                 n++
             }
         }
