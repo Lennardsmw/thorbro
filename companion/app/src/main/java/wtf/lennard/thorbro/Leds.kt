@@ -37,18 +37,8 @@ object Leds {
 
     private fun shell(vararg cmd: String): Boolean = Shell.run(*cmd)
 
-    /** like [shell], but returns stdout (null when Shizuku is not ready or the command failed); [stdin] is fed to the command */
-    fun shellOut(vararg cmd: String, stdin: ByteArray? = null): String? {
-        if (shizukuState() != "ready") return null
-        return runCatching {
-            val m = Shizuku::class.java.getDeclaredMethod("newProcess", Array<String>::class.java, Array<String>::class.java, String::class.java)
-            m.isAccessible = true
-            val p = m.invoke(null, arrayOf(*cmd), null, null) as Process
-            if (stdin != null) p.outputStream.use { it.write(stdin) } else p.outputStream.close()
-            val out = p.inputStream.bufferedReader().readText()
-            if (p.waitFor() == 0) out else null
-        }.getOrNull()
-    }
+    /** like [shell], but returns stdout, see [Shell.out] */
+    fun shellOut(vararg cmd: String, stdin: ByteArray? = null): String? = Shell.out(*cmd, stdin = stdin)
 
     private fun put(key: String, value: String) = shell("settings", "put", "system", key, value)
 
