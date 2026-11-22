@@ -84,7 +84,57 @@ object Netplay {
     @Volatile var joinedRoom: JSONObject? = null
         private set
 
-    fun clearJoined() { joinedRoom = null }
+    /** guest session over: 127.0.0.1 points at this Thor again (own room if the server runs) */
+    fun clearJoined(ctx: Context? = null) {
+        joinedRoom = null
+        if (Relay.active()) {
+            Relay.stop()
+            val c = ctx ?: appCtx
+            if (serverOn && c != null && "azahar" in Emulators.installed(c).map { it.id }) Room.start(c, "")
+        }
+    }
+
+    /** use the 3DS room of the Thor at [address] (its server or lobby): Azahar keeps joining 127.0.0.1 */
+    fun useRoomOf(ctx: Context, address: String, name: String): JSONObject {
+        appCtx = ctx.applicationContext
+        Relay.start(address, name)?.let { return JSONObject().put("error", it) }
+        val hint = Azahar.guestSteps(name)
+        joinedRoom = JSONObject().put("game", "3DS-Raum").put("host", name).put("address", address).put("mode", "azahar")
+            .put("roomIp", "127.0.0.1").put("hint", hint).put("at", System.currentTimeMillis())
+        return JSONObject().put("mode", "azahar").put("host", name).put("hint", hint)
+    }
+
+    /** what /api/netplay/lobby tells another Thor; a friend (by id) also gets the PIN, like the Wi-Fi Direct invite */
+    fun publicInfo(ctx: Context, askerId: String?): JSONObject {
+        val l = lobby
+        return (l?.public() ?: JSONObject().put("open", false))
+            .put("host", model()).put("hostId", Me.id(ctx))
+            .put("server", serverOn).put("room", Room.running() && Room.ready)
+            .apply { if (l != null && Friends.isFriend(ctx, askerId)) put("pin", l.pin) }
+    }
+
+    /**
+     * Invites nearby, from both ways: Thors in the same WLAN (mDNS, no network switch needed, so preferred) and
+     * Thors announcing over Wi-Fi Direct (not in "Nur WLAN"). Only Thors with a lobby or a running server.
+     */
+    fun invites(ctx: Context): List<JSONObject> {
+        val me = Me.id(ctx)
+        val wlan = if (Device.ip() == null) emptyList() else peers(ctx).objs().mapNotNull { p ->
+            val l = p.optJSONObject("lobby") ?: return@mapNotNull null
+            val id = l.optString("hostId")
+            if (!p.optBoolean("reachable") || id == me || !(l.optBoolean("open") || l.optBoolean("server"))) return@mapNotNull null
+            JSONObject().put("device", "wlan:" + p.optString("address")).put("address", p.optString("address")).put("via", "WLAN")
+                .put("id", id).put("friend", Friends.isFriend(ctx, id)).put("name", l.optString("host", "Thor"))
+                .put("game", if (l.optBoolean("open")) l.optString("game") else "Spielserver")
+                .put("mode", if (l.optBoolean("open")) l.optString("mode") else "server").put("pin", l.optString("pin"))
+                .put("room", l.optBoolean("room"))
+        }
+        val direct = if (wlanOnly(ctx) || !Direct.permitted(ctx)) emptyList() else Direct.invites(ctx).objs().map { it.put("via", "Wi-Fi Direct") }
+        val ids = wlan.map { it.optString("id") }.toSet()
+        return wlan + direct.filter { it.optString("id") !in ids }
+    }
+
+    private fun JSONArray?.objs(): List<JSONObject> = if (this == null) emptyList() else (0 until length()).map { getJSONObject(it) }
 
     @Volatile var lobby: Lobby? = null
         private set
@@ -98,6 +148,15 @@ object Netplay {
      */
     @Volatile var serverOn = false
         private set
+
+    /** "Nur WLAN": no Wi-Fi Direct at all; Thors find each other in the same WLAN (mDNS), also via NetBird by address */
+    fun wlanOnly(ctx: Context) = Prefs.of(ctx).getBoolean("netplay.wlanOnly", false)
+
+    fun setWlanOnly(ctx: Context, on: Boolean) {
+        Prefs.of(ctx).edit().putBoolean("netplay.wlanOnly", on).apply()
+        if (on && autoDirect) { autoDirect = false; runCatching { Direct.stop(ctx) } }
+        else if (!on && (serverOn || lobby != null)) ensureDirect(ctx)
+    }
 
     fun startServer(ctx: Context): JSONObject {
         appCtx = ctx.applicationContext
@@ -121,7 +180,7 @@ object Netplay {
         val services = JSONArray()
         fun svc(id: String, name: String, port: Int?, how: String) = services.put(JSONObject().put("id", id).put("name", name).put("port", port).put("how", how))
         if ("azahar" in inst) svc("azahar", "3DS (Azahar)", Azahar.PORT,
-            if (Room.running() && Room.ready) "Raum läuft · Azahar → Mehrspieler → Raum beitreten, hier 127.0.0.1, andere diese Adresse"
+            if (Room.running() && Room.ready) "Raum läuft · auf jedem Thor in Azahar: Mehrspieler → Raum beitreten → 127.0.0.1, ThorBro verbindet"
             else Room.error ?: "Raum ist aus")
         if ("ppsspp" in inst) svc("ppsspp", "PSP (PPSSPP)", 27312, "eingebauter Ad-hoc-Server · im Spiel lokalen Mehrspieler wählen")
         if ("retroarch" in inst) svc("retroarch", "Retro (RetroArch)", RA_NETPLAY_PORT, "hostet, sobald ein Spiel läuft")
@@ -166,9 +225,11 @@ object Netplay {
             .put("auto", Friends.auto(ctx))
             .put("direct", Direct.active())
             .put("server", server(ctx))
+            .put("relay", Relay.status())
+            .put("wlanOnly", wlanOnly(ctx))
             .put("azahar", if ("azahar" in Emulators.installed(ctx).map { it.id }) JSONObject()
                 .put("identity", Azahar.identity(ctx))
-                .put("room", Azahar.roomState())
+                .put("room", if (Relay.active()) (if (Relay.connected()) "connected" else "waiting") else Azahar.roomState())
                 .put("server", Room.status().put("available", Room.available(ctx)))
                 .put("ip", roomIp()) else null)
     }
@@ -294,7 +355,7 @@ object Netplay {
 
     /** Wi-Fi Direct on (if allowed and not already in someone's net), so nearby Thors see the invite */
     private fun ensureDirect(ctx: Context) {
-        if (Direct.active() || Direct.inForeignGroup() || !Direct.permitted(ctx)) return
+        if (wlanOnly(ctx) || Direct.active() || Direct.inForeignGroup() || !Direct.permitted(ctx)) return
         val r = runCatching { Direct.start(ctx) }.getOrNull()
         if (r != null && !r.has("error")) autoDirect = true
         else Logs.i("netplay", "Wi-Fi Direct nicht gestartet: ${r?.optString("error")}")
@@ -398,7 +459,8 @@ object Netplay {
             changed = runCatching { Azahar.makeDistinct(ctx, rom, info.optString("azUser").ifEmpty { null }, info.optString("azConsole").ifEmpty { null }) }
                 .onFailure { Logs.i("azahar", "3DS-Name/ID nicht angepasst: ${it.message}") }.getOrNull()
         }
-        // the room listens on every network of the host: use the address this Thor just reached it at
+        // Azahar joins 127.0.0.1; ThorBro passes it on to the host's room at the address this Thor just reached it at
+        if (mode == "azahar") Relay.start(address, info.optString("host"))?.let { throw IllegalStateException(it) }
         val roomIp = address
         val l = Lobby(system, rom, mode, pin, info.optString("host"), roomIp = roomIp)
         val res = start(ctx, l, hostIp = address)
@@ -412,13 +474,25 @@ object Netplay {
     /** one button for an invite from [Direct.invites]: join the other Thor's net, then its lobby (PIN came with the invite) */
     fun accept(ctx: Context, invite: JSONObject, job: Jobs.Job): JSONObject {
         job.message = "Verbinde mit ${invite.optString("name")}"
-        Direct.join(ctx, invite.getString("ssid"), invite.getString("pass"))
+        appCtx = ctx.applicationContext
+        // same WLAN: straight there; else into the other Thor's Wi-Fi Direct net
+        val addr = invite.optString("address").ifEmpty {
+            Direct.join(ctx, invite.getString("ssid"), invite.getString("pass")); Direct.OWNER_IP
+        }
         Friends.add(ctx, invite.optString("id").ifEmpty { null }, invite.optString("name")) // next time: just a notification
         val pin = invite.optString("pin")
-        if (pin.isEmpty()) return JSONObject().put("hint", "Verbunden mit ${invite.optString("name")}. Dort ist noch keine Lobby offen – „Thors suchen“, sobald sie ein Spiel hosten.")
+        if (pin.isEmpty()) {
+            // a running server without a game: use its 3DS room (Azahar keeps joining 127.0.0.1)
+            if (invite.optString("mode") == "server" && "azahar" in Emulators.installed(ctx).map { it.id }) {
+                val r = useRoomOf(ctx, addr, invite.optString("name"))
+                if (r.has("error")) throw IllegalStateException(r.getString("error"))
+                return r
+            }
+            return JSONObject().put("hint", "Verbunden mit ${invite.optString("name")}. Dort ist noch keine Lobby offen – sobald dort ein Spiel startet, kommt die Einladung.")
+        }
         var last: Throwable? = null
         repeat(5) { // the HTTP server needs a moment after the link comes up
-            runCatching { return join(ctx, Direct.OWNER_IP, pin, job) }.onFailure { last = it }
+            runCatching { return join(ctx, addr, pin, job) }.onFailure { last = it }
             if (last?.message?.contains("PIN") == true) throw last!!
             Thread.sleep(1500)
         }
@@ -499,7 +573,7 @@ object Netplay {
             "azahar" -> {
                 forceStop(Azahar.PKG)
                 Emulators.launch(ctx, l.system, l.rom, "azahar").apply {
-                    put("hint", if (hostIp == null) Azahar.hostSteps() else Azahar.guestSteps(l.roomIp ?: hostIp))
+                    put("hint", if (hostIp == null) Azahar.hostSteps() else Azahar.guestSteps(l.hostName))
                 }
             }
             else -> Emulators.launch(ctx, l.system, l.rom, "eden").apply {
@@ -625,7 +699,7 @@ object Netplay {
     /** one device by IP (also for typing the IP by hand when mDNS is blocked) */
     fun peer(address: String): JSONObject {
         val o = JSONObject().put("address", address)
-        runCatching { JSONObject(httpGet("http://${hostPart(address)}:${ThorService.PORT}/api/netplay/lobby", 2500)) }
+        runCatching { JSONObject(httpGet("http://${hostPart(address)}:${ThorService.PORT}/api/netplay/lobby?id=${appCtx?.let { Me.id(it) } ?: ""}", 2500)) }
             .onSuccess { o.put("reachable", true).put("lobby", it) }
             .onFailure { o.put("reachable", false) }
         return o

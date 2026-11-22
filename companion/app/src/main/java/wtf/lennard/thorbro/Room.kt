@@ -37,6 +37,7 @@ object Room {
     fun start(ctx: Context, gameName: String): String? {
         if (running() && ready) { game = gameName; return null }
         stop()
+        Relay.stop() // this Thor hosts now: 127.0.0.1 is its own room again
         val bin = binary(ctx)
         if (!bin.canExecute()) return "Raumserver fehlt in dieser ThorBro-Version"
         error = null; ready = false; members = emptyList(); game = gameName

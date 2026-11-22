@@ -531,7 +531,7 @@ object Server {
                 // ---- netplay (local multiplayer between two ThorBro devices) ----
                 // public for the other Thor: only the open lobby; data needs the lobby PIN
                 get("/api/netplay/lobby") {
-                    json(Netplay.lobby?.public() ?: JSONObject().put("open", false))
+                    json(Netplay.publicInfo(ctx, q("id")))
                 }
                 post("/api/netplay/join") {
                     val l = Netplay.checkPin(q("pin")) ?: return@post fail("wrong pin or no lobby", HttpStatusCode.Forbidden)
@@ -568,6 +568,19 @@ object Server {
                     val res = withContext(Dispatchers.IO) { if (q("on") == "1") Netplay.startServer(ctx) else { Netplay.stopServer(ctx); Netplay.server(ctx) } }
                     json(res)
                 }
+                post("/api/netplay/wlan") {
+                    if (denied(ctx)) return@post
+                    Netplay.setWlanOnly(ctx, q("on") == "1")
+                    json(JSONObject().put("wlanOnly", Netplay.wlanOnly(ctx)))
+                }
+                post("/api/netplay/relay") {
+                    if (denied(ctx)) return@post
+                    val addr = q("address")?.takeIf { Regex("^[0-9.]{7,15}$").matches(it) }
+                    val res = withContext(Dispatchers.IO) {
+                        if (addr == null) { Netplay.clearJoined(ctx); JSONObject().put("ok", true) } else Netplay.useRoomOf(ctx, addr, q("name") ?: addr)
+                    }
+                    json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
+                }
                 post("/api/netplay/auto") {
                     if (denied(ctx)) return@post
                     Friends.setAuto(ctx, q("on") == "1")
@@ -597,12 +610,12 @@ object Server {
                 // Thors nearby that invite over Wi-Fi Direct (radio scan; works without a shared network)
                 get("/api/netplay/invites") {
                     if (denied(ctx)) return@get
-                    val res = withContext(Dispatchers.IO) { Direct.invites(ctx) }
+                    val res = withContext(Dispatchers.IO) { org.json.JSONArray(Netplay.invites(ctx)) }
                     // the password and PIN stay on this device; the panel answers with the device address
                     lastInvites = res
                     val pub = org.json.JSONArray()
                     for (i in 0 until res.length()) res.getJSONObject(i).let { pub.put(JSONObject(it.toString()).apply { remove("pass"); remove("pin") }.put("lobby", it.optString("pin").isNotEmpty())) }
-                    json(JSONObject().put("invites", pub).put("permission", Direct.permitted(ctx)))
+                    json(JSONObject().put("invites", pub).put("permission", Direct.permitted(ctx) || Netplay.wlanOnly(ctx)))
                 }
                 post("/api/netplay/accept") {
                     if (denied(ctx)) return@post

@@ -1315,11 +1315,12 @@ async function loadNetplay() {
   renderServer(np.server);
   if (np.joined && np.joined.mode === 'azahar' && !l) {
     const st = np.azahar && np.azahar.room;
-    $('#npLobby').innerHTML += `<p>3DS-Raum bei ${esc(np.joined.host)}: ${st === 'connected' ? '<span class="ok">im Raum ✓</span>' : '<span class="err">noch nicht im Raum</span>'}</p><pre>${esc(np.joined.hint || '')}</pre>`;
+    $('#npLobby').innerHTML += `<p>3DS-Raum bei ${esc(np.joined.host)} (Azahar → 127.0.0.1): ${st === 'connected' ? '<span class="ok">im Raum ✓</span>' : '<span class="err">noch nicht im Raum</span>'} <button data-relay-off>Trennen</button></p><pre>${esc(np.joined.hint || '')}</pre>`;
   }
   $('#frList').innerHTML = (np.friends || []).length ? np.friends.map((f) => `<div class="card"><h3>${esc(f.name)}</h3><div class="muted">${esc(f.id)}</div>
     <p><button data-unfriend="${esc(f.id)}">Entfernen</button></p></div>`).join('') : '<p class="muted">Noch keine – einmal eine Einladung annehmen.</p>';
   $('#frAuto').checked = !!np.auto;
+  $('#npWlan').checked = !!np.wlanOnly;
   if ((np.server && np.server.on) || (l && l.mode === 'azahar') || (np.joined && np.joined.mode === 'azahar')) { clearTimeout(loadNetplay.t); loadNetplay.t = setTimeout(() => { if (!$('#netplay').hidden) loadNetplay(); }, 4000); }
 }
 let invites = [];
@@ -1330,8 +1331,8 @@ $('#invScan').onclick = async () => {
     invites = body.invites;
     $('#invInfo').textContent = !body.permission ? 'Am Thor in ThorBro einmal „Geräte in der Nähe“ erlauben (Multiplayer → Erweitert → Wi-Fi Direct).'
       : invites.length ? `${invites.length} gefunden` : 'Keiner gefunden. Der andere Thor muss Wi-Fi Direct an haben.';
-    $('#invList').innerHTML = invites.map((i) => `<div class="card"><h3>${esc(i.name)}</h3><div class="muted">${esc(i.game || 'Wi-Fi Direct offen')}${i.mode ? ' · ' + esc(npModes[i.mode] || i.mode) : ''}</div>
-      ${i.friend ? '<div class="ok">Freund</div>' : ''}<p><button class="primary" data-inv="${esc(i.device)}">${!i.lobby ? 'Verbinden' : i.mode === 'share' ? 'Annehmen' : 'Beitreten'}</button></p></div>`).join('');
+    $('#invList').innerHTML = invites.map((i) => `<div class="card"><h3>${esc(i.name)}</h3><div class="muted">${esc(i.game || 'Wi-Fi Direct offen')}${i.mode ? ' · ' + esc(npModes[i.mode] || i.mode) : ''}${i.via ? ' · ' + esc(i.via) : ''}</div>
+      ${i.friend ? '<div class="ok">Freund</div>' : ''}<p><button class="primary" data-inv="${esc(i.device)}">${i.mode === 'server' ? '3DS-Raum nutzen' : !i.lobby ? 'Verbinden' : i.mode === 'share' ? 'Annehmen' : 'Beitreten'}</button></p></div>`).join('');
   } catch (err) { $('#invInfo').textContent = 'Fehler: ' + err.message; }
 };
 $('#invList').addEventListener('click', async (e) => {
@@ -1384,6 +1385,7 @@ function renderPeers(peers) {
     const body = !p.reachable ? '<div class="err">nicht erreichbar</div>'
       : l && l.open ? `<div><strong>${esc(l.game)}</strong></div><div class="muted">${esc(npModes[l.mode] || l.mode)} · ${fmt(l.size)}</div>
         <p><button class="primary" data-join="${esc(p.address)}">Beitreten</button></p>`
+      : l && l.room ? `<div class="muted">Spielserver läuft</div><p><button class="primary" data-relay="${esc(p.address)}" data-relay-name="${esc(l.host || p.address)}">3DS-Raum nutzen</button></p>`
       : '<div class="muted">keine Lobby offen</div>';
     return `<div class="card"><h3>${esc(l?.host || p.service || p.address)}</h3><div class="muted">${esc(p.address)}</div>${body}</div>`;
   }).join('');
@@ -1401,6 +1403,15 @@ $('#npAddrGo').onclick = async () => {
   try { renderPeers((await api('/api/netplay/peers?' + q({ address: a }))).body.peers); } catch (err) { alert(err.message); }
 };
 $('#npPeers').addEventListener('click', async (e) => {
+  const r = e.target.closest('[data-relay]');
+  if (r) {
+    try {
+      const { body } = await api('/api/netplay/relay?' + q({ address: r.dataset.relay, name: r.dataset.relayName }), { method: 'POST' });
+      if (body.error) throw new Error(body.error);
+      $('#npScanInfo').textContent = body.hint; loadNetplay();
+    } catch (err) { alert(err.message); }
+    return;
+  }
   const b = e.target.closest('[data-join]'); if (!b) return;
   const pin = prompt('PIN vom anderen Thor:'); if (!pin) return;
   b.disabled = true;
@@ -1417,6 +1428,11 @@ $('#npPeers').addEventListener('click', async (e) => {
 $('#frList').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-unfriend]'); if (!b) return;
   await api('/api/netplay/friend/remove?' + q({ id: b.dataset.unfriend }), { method: 'POST' }); loadNetplay();
+});
+$('#npWlan').onchange = async () => { await api('/api/netplay/wlan?' + q({ on: $('#npWlan').checked ? '1' : '0' }), { method: 'POST' }); loadNetplay(); loadDirect(); };
+$('#npLobby').addEventListener('click', async (e) => {
+  if (e.target.dataset.relayOff === undefined) return;
+  await api('/api/netplay/relay', { method: 'POST' }); loadNetplay();
 });
 $('#frAuto').onchange = async () => { await api('/api/netplay/auto?' + q({ on: $('#frAuto').checked ? '1' : '0' }), { method: 'POST' }); loadNetplay(); };
 $('#frPrepare').onclick = async () => {

@@ -44,6 +44,7 @@ class InviteActivity : ComponentActivity() {
         val inv = runCatching { JSONObject(intent.getStringExtra("invite") ?: "") }.getOrNull() ?: return finish()
         getSystemService(NotificationManager::class.java).cancel(intent.getIntExtra("notification", 0))
         val share = inv.optString("mode") == "share"
+        val noGame = share || inv.optString("mode") == "server" // nothing starts: show the result
         val job = Jobs.start("Einladung annehmen") { Netplay.accept(this, inv, it) }
         setContent {
             ThorTheme {
@@ -53,14 +54,14 @@ class InviteActivity : ComponentActivity() {
                 val first = remember { FocusRequester() }
                 LaunchedEffect(Unit) {
                     while (!job.done) { msg = job.message.ifEmpty { msg }; prog = job.progress.toFloat(); delay(250) }
-                    if (job.error == null && !share) { finish(); return@LaunchedEffect } // the game is starting
-                    result = if (job.error != null) "Ging nicht" to job.error!! else "Spiel erhalten" to (job.result?.optString("hint") ?: "")
+                    if (job.error == null && !noGame) { finish(); return@LaunchedEffect } // the game is starting
+                    result = if (job.error != null) "Ging nicht" to job.error!! else (if (share) "Spiel erhalten" else "Verbunden") to (job.result?.optString("hint") ?: "")
                     delay(150); runCatching { first.requestFocus() }
                 }
                 Box(Modifier.fillMaxSize().background(Color(0xCC000000)), contentAlignment = Alignment.Center) {
                     Column(Modifier.width(460.dp).clip(RoundedCornerShape(22.dp)).background(Color(0xF0141519)).padding(24.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(if (share) "${inv.optString("name")} schickt dir ein Spiel" else "${inv.optString("name")} lädt ein",
+                        Text(when { share -> "${inv.optString("name")} schickt dir ein Spiel"; noGame -> "Spielserver von ${inv.optString("name")}"; else -> "${inv.optString("name")} lädt ein" },
                             fontSize = 22.sp, fontWeight = FontWeight.Bold)
                         Text(inv.optString("game"), fontSize = 16.sp, color = Muted)
                         val r = result

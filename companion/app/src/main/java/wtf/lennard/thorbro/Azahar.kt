@@ -145,10 +145,11 @@ object Azahar {
 
     /** the room already runs on this Thor ([Room]); the host only joins it */
     fun hostSteps() =
-        "Der Raum läuft auf diesem Thor.\nIn Azahar: Zurück-Taste → Mehrspieler → Raum beitreten\nIP: 127.0.0.1   Port: $PORT   Passwort: leer\nDanach im Spiel den lokalen Mehrspieler/Drahtlos-Modus wählen."
+        "Der Raum läuft auf diesem Thor.\nIn Azahar: Zurück-Taste → Mehrspieler → Raum beitreten\nIP: 127.0.0.1   Port: $PORT   Passwort: leer (auf jedem Thor gleich, Azahar merkt es sich)\nDanach im Spiel den lokalen Mehrspieler/Drahtlos-Modus wählen."
 
-    fun guestSteps(ip: String, port: Int = PORT) =
-        "In Azahar: Zurück-Taste → Mehrspieler → Raum beitreten\nIP: $ip   Port: $port   Passwort: leer\nDanach im Spiel den lokalen Mehrspieler/Drahtlos-Modus wählen."
+    /** the guest types the same as the host: ThorBro passes 127.0.0.1 on to the friend's room ([Relay]) */
+    fun guestSteps(host: String) =
+        "ThorBro verbindet 127.0.0.1 mit dem Raum von $host.\nIn Azahar: Zurück-Taste → Mehrspieler → Raum beitreten\nIP: 127.0.0.1   Port: $PORT   Passwort: leer (einmal eintippen, Azahar merkt es sich)\nDanach im Spiel den lokalen Mehrspieler/Drahtlos-Modus wählen."
 
     private fun le16(b: ByteArray, o: Int) = (b[o].toInt() and 0xFF) or ((b[o + 1].toInt() and 0xFF) shl 8)
     private fun le32(b: ByteArray, o: Int) = le16(b, o) or (le16(b, o + 2) shl 16)

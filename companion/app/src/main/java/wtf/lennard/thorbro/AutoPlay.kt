@@ -78,18 +78,22 @@ object AutoPlay {
         }
         if (emu == null && lobby == null) lastGame = null
         // guest session over: put the emulator back to hosting settings (PPSSPP keeps the friend's address otherwise)
+        // (waits until the emulator was seen running, or 10 min, so "use a friend's room" survives until Azahar is opened)
         Netplay.joinedRoom?.let { j ->
             val pkg = Emulators.all.firstOrNull { it.id == j.optString("mode") }?.pkg
-            if (pkg != null && emu?.pkg != pkg && !running(pkg)) { Netplay.clearJoined(); runCatching { Netplay.prepare(ctx) } }
+            if (pkg != null && (emu?.pkg == pkg || running(pkg))) j.put("seen", true)
+            else if (pkg != null && (j.optBoolean("seen") || now() - j.optLong("at") > 600_000)) {
+                Netplay.clearJoined(ctx); runCatching { Netplay.prepare(ctx) }
+            }
         }
         hostNotice(ctx)
 
         // ---- guest: invites from friends nearby (radio scan, not while playing) ----
         val now = System.currentTimeMillis()
-        if (Netplay.lobby == null && emu == null && Direct.permitted(ctx) && !Direct.inForeignGroup() && now - lastScan > 25_000) {
+        if (Netplay.lobby == null && emu == null && Netplay.joinedRoom == null && !Direct.inForeignGroup() && now - lastScan > 25_000) {
             lastScan = now
-            val found = Direct.invites(ctx).let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
-                .filter { Friends.isFriend(ctx, it.optString("id")) && it.optString("pin").isNotEmpty() }
+            val found = Netplay.invites(ctx)
+                .filter { Friends.isFriend(ctx, it.optString("id")) && (it.optString("pin").isNotEmpty() || it.optString("mode") == "server") }
             val keys = found.map { it.optString("id") + it.optString("pin") }.toSet()
             val nm = ctx.getSystemService(NotificationManager::class.java)
             notified.keys.filter { it !in keys }.forEach { k -> notified.remove(k)?.let { nm.cancel(it) } }
@@ -100,6 +104,8 @@ object AutoPlay {
         }
         return 6_000L
     }
+
+    private fun now() = System.currentTimeMillis()
 
     private fun running(pkg: String?) = pkg != null && Shell.out("pidof", pkg)?.isNotBlank() == true
 

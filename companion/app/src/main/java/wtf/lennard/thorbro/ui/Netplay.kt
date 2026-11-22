@@ -115,10 +115,10 @@ fun NetplayScreen() {
     // Thors nearby inviting over Wi-Fi Direct: scan while this screen is open and no own lobby runs
     WhileVisible {
         while (true) {
-            if (Direct.permitted(ctx) && st?.optJSONObject("lobby") == null && joinJob?.done != false) {
-                val found = withContext(Dispatchers.IO) { runCatching { Direct.invites(ctx).objs() }.getOrDefault(emptyList()) }
+            if (st?.optJSONObject("lobby") == null && joinJob?.done != false) {
+                val found = withContext(Dispatchers.IO) { runCatching { Netplay.invites(ctx) }.getOrDefault(emptyList()) }
                 invites = found
-                found.firstOrNull { it.optString("pin").isNotEmpty() && seenInvites.add(it.optString("device") + it.optString("pin")) }
+                found.firstOrNull { it.optString("pin").isNotEmpty() && seenInvites.add(it.optString("id") + it.optString("pin")) }
                     ?.let { if (invitePopup == null && pinFor == null) invitePopup = it }
             }
             delay(8000)
@@ -202,7 +202,7 @@ fun NetplayScreen() {
         }
         // guest side of a 3DS room: did it work?
         s.optJSONObject("joined")?.takeIf { it.optString("mode") == "azahar" && lobby == null }?.let { j ->
-            header("3DS-Raum", "${j.optString("game")} · bei ${j.optString("host")}")
+            header("3DS-Raum", "${j.optString("game")} · bei ${j.optString("host")} · Azahar → 127.0.0.1")
             item {
                 val st3 = s.optJSONObject("azahar")?.optString("room")
                 ConsoleTile(when (st3) { "connected" -> "Im Raum ✓"; "unknown" -> "Status unbekannt"; else -> "Noch nicht im Raum" },
@@ -211,6 +211,9 @@ fun NetplayScreen() {
                     info = "3DS-Raum" to j.optString("hint")
                 }
             }
+            item { ConsoleTile("Trennen", "127.0.0.1 wieder dieser Thor", Icons.Filled.Close) {
+                scope.launch { withContext(Dispatchers.IO) { Netplay.clearJoined(ctx) }; tick++ }
+            } }
         }
         joinJob?.let { j ->
             header("Verbinden")
@@ -225,8 +228,8 @@ fun NetplayScreen() {
                 val shareInv = inv.optString("mode") == "share"
                 item {
                     ConsoleTile(inv.optString("name"), inv.optString("game").ifEmpty { "Wi-Fi Direct offen" }.let { g ->
-                        when { inv.optString("pin").isEmpty() -> "$g · verbinden"; shareInv -> "$g · annehmen"; else -> "$g · beitreten" } },
-                        if (inv.optString("pin").isEmpty()) Icons.Filled.BluetoothSearching else Icons.Filled.SportsEsports, accent = inv.optString("pin").isNotEmpty(),
+                        when { inv.optString("mode") == "server" -> "3DS-Raum nutzen · ${inv.optString("via")}"; inv.optString("pin").isEmpty() -> "$g · verbinden"; shareInv -> "$g · annehmen"; else -> "$g · beitreten · ${inv.optString("via")}" } },
+                        if (inv.optString("pin").isEmpty() && inv.optString("mode") != "server") Icons.Filled.BluetoothSearching else Icons.Filled.SportsEsports, accent = inv.optString("pin").isNotEmpty() || inv.optString("mode") == "server",
                         modifier = Modifier.firstFocus(first, lobby == null)) { accept(inv) }
                 }
             }
@@ -287,6 +290,13 @@ fun NetplayScreen() {
         item { ConsoleTile(if (advanced) "Weniger" else "Erweitert", "Suchen, PIN, Wi-Fi Direct, ThorBro weitergeben", Icons.Filled.Tune) { advanced = !advanced } }
         if (advanced) {
             item {
+                val wlan = s.optBoolean("wlanOnly")
+                ConsoleTile(if (wlan) "Verbindung: nur WLAN" else "Verbindung: WLAN + Wi-Fi Direct",
+                    if (wlan) "beide Thors im selben WLAN (oder NetBird)" else "WLAN, sonst eigenes Funknetz", Icons.Filled.WifiTethering, accent = wlan) {
+                    scope.launch { withContext(Dispatchers.IO) { runCatching { Netplay.setWlanOnly(ctx, !wlan) } }; tick++ }
+                }
+            }
+            item {
                 ConsoleTile(if (searching) "Sucht …" else "Thors suchen", peers?.let { "${it.size} gefunden" } ?: "im selben WLAN", Icons.Filled.Search) { search() }
             }
             peers.orEmpty().forEach { p ->
@@ -294,8 +304,18 @@ fun NetplayScreen() {
                 val open = l?.optBoolean("open") == true
                 item {
                     ConsoleTile(if (open) l!!.optString("game") else p.optString("service").removePrefix("ThorBro ").ifEmpty { p.optString("address") },
-                        when { !p.optBoolean("reachable") -> "nicht erreichbar"; open -> "von ${l!!.optString("host")} · PIN eingeben"; else -> "keine Lobby offen" },
-                        Icons.Filled.Groups, accent = open) { if (open) pinFor = p else search() }
+                        when { !p.optBoolean("reachable") -> "nicht erreichbar"; open -> "von ${l!!.optString("host")} · PIN eingeben"
+                            l?.optBoolean("room") == true -> "3DS-Raum nutzen"; else -> "keine Lobby offen" },
+                        Icons.Filled.Groups, accent = open || l?.optBoolean("room") == true) {
+                        when {
+                            open -> pinFor = p
+                            l?.optBoolean("room") == true -> scope.launch {
+                                val r = withContext(Dispatchers.IO) { Netplay.useRoomOf(ctx, p.optString("address"), l.optString("host")) }
+                                info = (if (r.has("error")) "Ging nicht" else "3DS-Raum von ${l.optString("host")}") to (r.optString("error").ifEmpty { r.optString("hint") }); tick++
+                            }
+                            else -> search()
+                        }
+                    }
                 }
             }
             item {
