@@ -96,6 +96,7 @@ fun NetplayScreen() {
     val seenInvites = remember { mutableSetOf<String>() }
     var sharePick by remember { mutableStateOf(false) } // next tapped game is handed over instead of played
     var advanced by remember { mutableStateOf(false) }
+    var friendMenu by remember { mutableStateOf<JSONObject?>(null) }
 
     LaunchedEffect(tick) {
         withContext(Dispatchers.IO) {
@@ -244,6 +245,33 @@ fun NetplayScreen() {
             }
         }
 
+        val friends = s.optJSONArray("friends").objs()
+        header("Freunde", if (friends.isEmpty()) "Einmal eine Einladung annehmen – danach kommt sie als Benachrichtigung, auch in ES-DE & Co."
+            else "Einladungen kommen als Benachrichtigung · ein Spiel aus jedem Frontend lädt sie ein")
+        friends.forEach { f ->
+            item {
+                ConsoleTile(f.optString("name"), "Freund · ${f.optString("id")}", Icons.Filled.Groups) { friendMenu = f }
+            }
+        }
+        if (friends.isNotEmpty()) {
+            item {
+                val auto = s.optBoolean("auto")
+                ConsoleTile(if (auto) "Automatisch einladen: an" else "Automatisch einladen: aus",
+                    when { !auto -> "nur über „Mit Freund spielen“"; s.optString("shizuku") != "ready" -> "braucht Shizuku, um das Spiel zu erkennen"; else -> "beim Spielstart aus jedem Frontend" },
+                    Icons.Filled.WifiTethering, accent = auto) {
+                    wtf.lennard.thorbro.Friends.setAuto(ctx, !auto); tick++
+                }
+            }
+            item {
+                ConsoleTile("Emulatoren einrichten", "RetroArch & PPSSPP fürs Hosten vorbereiten", Icons.Filled.Tune) {
+                    scope.launch {
+                        val r = withContext(Dispatchers.IO) { runCatching { Netplay.prepare(ctx) }.getOrElse { JSONObject().put("Fehler", it.message) } }
+                        info = "Emulatoren" to r.keys().asSequence().joinToString("\n") { "${modeNames[it] ?: it}: ${r.optString(it)}" }.ifEmpty { "Nichts zu tun" }
+                    }
+                }
+            }
+        }
+
         header("Ein Bildschirm, zwei Spieler", "Dolphin, melonDS & Co. haben am Thor keinen Mehrspieler übers Netz")
         item {
             ConsoleTile("Thor als Controller", "dieser Thor wird Bluetooth-Gamepad für den anderen Thor oder den Fernseher",
@@ -288,6 +316,10 @@ fun NetplayScreen() {
             if (shareInv) "${inv.optString("game")}\n\nThorBro verbindet sich per Wi-Fi Direct und speichert das Spiel bei deinen ROMs."
             else "${inv.optString("game")} (${modeNames[inv.optString("mode")] ?: ""})\n\nThorBro verbindet sich per Wi-Fi Direct, holt das Spiel falls nötig und startet es.",
             options = listOf((if (shareInv) "Annehmen" else "Beitreten") to { invitePopup = null; accept(inv) })) { invitePopup = null }
+    }
+    friendMenu?.let { f ->
+        ConsoleMenu(f.optString("name"), "Einladungen von diesem Thor kommen als Benachrichtigung.",
+            options = listOf("Entfernen" to { wtf.lennard.thorbro.Friends.remove(ctx, f.optString("id")); friendMenu = null; tick++ })) { friendMenu = null }
     }
     info?.let { (t, x) -> ConsoleMenu(t, x, options = emptyList()) { info = null } }
     DirectDialog(direct)

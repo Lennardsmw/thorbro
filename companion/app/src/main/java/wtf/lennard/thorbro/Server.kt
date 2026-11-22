@@ -536,6 +536,7 @@ object Server {
                 post("/api/netplay/join") {
                     val l = Netplay.checkPin(q("pin")) ?: return@post fail("wrong pin or no lobby", HttpStatusCode.Forbidden)
                     Netplay.joined(l, q("name") ?: "")
+                    Friends.add(ctx, q("id"), q("name"))
                     json(l.public().put("ok", true))
                 }
                 get("/api/netplay/rom") {
@@ -561,6 +562,20 @@ object Server {
                         if (q("share") == "1") Netplay.share(ctx, q("system") ?: "", rom) else Netplay.host(ctx, q("system") ?: "", rom)
                     }
                     json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
+                }
+                post("/api/netplay/auto") {
+                    if (denied(ctx)) return@post
+                    Friends.setAuto(ctx, q("on") == "1")
+                    json(JSONObject().put("auto", Friends.auto(ctx)))
+                }
+                post("/api/netplay/friend/remove") {
+                    if (denied(ctx)) return@post
+                    Friends.remove(ctx, q("id") ?: "")
+                    json(JSONObject().put("ok", true))
+                }
+                post("/api/netplay/prepare") {
+                    if (denied(ctx)) return@post
+                    json(withContext(Dispatchers.IO) { Netplay.prepare(ctx) })
                 }
                 post("/api/netplay/close") {
                     if (denied(ctx)) return@post

@@ -68,11 +68,14 @@ object Netplay {
         val guests: MutableList<String> = java.util.Collections.synchronizedList(mutableListOf())
         @Volatile var wrongPins = 0
         @Volatile var hostState = "starting"
+        /** opened by [AutoPlay] for a game started in another frontend; closes when [pkg] is gone */
+        @Volatile var auto = false
+        @Volatile var pkg: String? = null
         fun public(): JSONObject = JSONObject()
             .put("open", true).put("host", hostName).put("system", system)
             .put("game", if (rom.isDirectory) rom.name else rom.name.substringBeforeLast('.'))
             .put("file", rom.name).put("size", size(rom)).put("mode", mode).put("dir", rom.isDirectory)
-            .put("guests", guests.size).put("since", startedAt)
+            .put("guests", guests.size).put("since", startedAt).put("hostId", appCtx?.let { Me.id(it) })
             .put("roomIp", roomIp).put("roomPort", Azahar.PORT)
             .put("azUser", az?.optString("user")).put("azConsole", az?.optString("console"))
     }
@@ -80,6 +83,8 @@ object Netplay {
     /** what this device joined last (guest side), for the status line */
     @Volatile var joinedRoom: JSONObject? = null
         private set
+
+    fun clearJoined() { joinedRoom = null }
 
     @Volatile var lobby: Lobby? = null
         private set
@@ -89,7 +94,7 @@ object Netplay {
 
     private fun size(f: File) = if (f.isDirectory) f.walkTopDown().filter { it.isFile }.sumOf { it.length() } else f.length()
 
-    private fun model() = android.os.Build.MODEL ?: "Thor"
+    private fun model() = appCtx?.let { Me.name(it) } ?: (android.os.Build.MODEL ?: "Thor")
 
     /** "retroarch" | "ppsspp" | "eden" | "azahar" | null for a console, given what is installed */
     fun mode(ctx: Context, system: String): String? {
@@ -104,6 +109,7 @@ object Netplay {
     }
 
     fun status(ctx: Context): JSONObject {
+        appCtx = ctx.applicationContext
         val supported = JSONArray()
         Roms.systems.forEach { s -> mode(ctx, s.id)?.let { m ->
             supported.put(JSONObject().put("id", s.id).put("name", s.name).put("mode", m).put("shaky", s.id in shaky))
@@ -116,6 +122,9 @@ object Netplay {
             .put("lobby", lobby?.let { it.public().put("pin", it.pin).put("hostState", it.hostState).put("guestNames", JSONArray(it.guests.toList())) })
             .put("joined", joinedRoom)
             .put("addresses", Room.addresses())
+            .put("me", JSONObject().put("id", Me.id(ctx)).put("name", Me.name(ctx)))
+            .put("friends", JSONArray(Friends.list(ctx)))
+            .put("auto", Friends.auto(ctx))
             .put("direct", Direct.active())
             .put("azahar", if ("azahar" in Emulators.installed(ctx).map { it.id }) JSONObject()
                 .put("identity", Azahar.identity(ctx))
@@ -144,6 +153,74 @@ object Netplay {
             "azahar" -> thread(name = "netplay-azahar") { watchRoom(l) }
         }
         return res.put("pin", l.pin).put("ip", l.roomIp).put("mode", mode).put("direct", Direct.active())
+    }
+
+    /** a game already running (started from another frontend, seen by [AutoPlay]): open the lobby around it */
+    fun hostRunning(ctx: Context, system: String, rom: File, pkg: String): JSONObject {
+        val mode = mode(ctx, system) ?: return JSONObject().put("error", "kein Netplay für $system")
+        appCtx = ctx.applicationContext
+        if (mode == "azahar") Room.start(ctx, rom.name.substringBeforeLast('.'))?.let { return JSONObject().put("error", it) }
+        val l = open(ctx, system, rom, mode)
+        l.auto = true; l.pkg = pkg
+        when (mode) {
+            "retroarch" -> { l.hostState = "starting"; thread(name = "netplay-host") { enableRetroArchHost(l, wait = 0) } }
+            "azahar" -> thread(name = "netplay-azahar") { watchRoom(l) }
+            else -> l.hostState = "hosting" // PPSSPP: built-in server is on (prepare); Eden: room in Eden
+        }
+        Logs.i("netplay", "Automatisch eingeladen: ${rom.name}")
+        return JSONObject().put("pin", l.pin).put("mode", mode)
+    }
+
+    /**
+     * Once, when the first friend is added (and after each guest session): emulators ready to host from any frontend.
+     * RetroArch: network commands on (ThorBro switches hosting on through them). PPSSPP: WLAN + built-in ad-hoc server on.
+     * Only touches an emulator that is not running (they write their settings back on exit). Backups in ThorBro/netplay.
+     */
+    fun prepare(ctx: Context): JSONObject {
+        appCtx = ctx.applicationContext
+        val out = JSONObject()
+        val inst = Emulators.installed(ctx).map { it.id }.toSet()
+        fun running(pkg: String) = Leds.shellOut("pidof", pkg)?.isNotBlank() == true
+        if ("retroarch" in inst) out.put("retroarch", when {
+            running(Emulators.RA) -> "läuft gerade – später"
+            else -> {
+                val cur = Leds.shellOut("cat", Emulators.RA_CONFIG)
+                when {
+                    cur == null -> "ohne Shizuku nicht möglich"
+                    Regex("(?m)^\\s*network_cmd_enable\\s*=\\s*\"true\"").containsMatchIn(cur) -> "bereit"
+                    else -> {
+                        dir.mkdirs(); File(dir, "retroarch.cfg.bak").writeText(cur)
+                        val keys = mapOf("network_cmd_enable" to "true", "network_cmd_port" to "$RA_CMD_PORT")
+                        val text = cur.lineSequence().filter { l -> keys.keys.none { k -> l.trimStart().startsWith("$k ") || l.trimStart().startsWith("$k=") } }
+                            .joinToString("\n").trimEnd() + "\n" + keys.entries.joinToString("") { (k, v) -> "$k = \"$v\"\n" }
+                        if (Leds.shellOut("sh", "-c", "cat > ${Shell.q(Emulators.RA_CONFIG)}", stdin = text.toByteArray()) != null) "eingerichtet" else "Schreiben ging nicht"
+                    }
+                }
+            }
+        })
+        if ("ppsspp" in inst) out.put("ppsspp", if (running(PPSSPP)) "läuft gerade – später" else if (ppssppConfig(null)) "eingerichtet" else "ppsspp.ini nicht gefunden")
+        Logs.i("netplay", "Vorbereitet: $out")
+        return out
+    }
+
+    /** (console, ROM) by path or by name (RetroArch only tells the name) */
+    fun findRom(ctx: Context, path: String? = null, name: String? = null): Pair<String, File>? {
+        fun norm(x: String) = x.substringBeforeLast('.').lowercase().filter { it.isLetterOrDigit() }
+        val want = name?.let(::norm)
+        val canon = path?.let { runCatching { File(it).canonicalPath }.getOrDefault(it) }
+        val systems = Roms.scan(ctx, false).optJSONArray("systems") ?: return null
+        for (i in 0 until systems.length()) {
+            val sys = systems.getJSONObject(i)
+            val roms = sys.optJSONArray("roms") ?: continue
+            for (j in 0 until roms.length()) {
+                val r = roms.getJSONObject(j)
+                val p = r.optString("path")
+                val hit = (canon != null && (p == path || runCatching { File(p).canonicalPath }.getOrDefault(p) == canon)) ||
+                    (want != null && want.isNotEmpty() && (norm(r.optString("file")) == want || norm(r.optString("name")) == want))
+                if (hit && !r.optBoolean("dir")) return sys.getString("id") to File(p)
+            }
+        }
+        return null
     }
 
     /** "Spiel weitergeben": offers the file only; a Thor nearby gets the invite and keeps the game */
@@ -193,8 +270,8 @@ object Netplay {
     }
 
     /** RetroArch takes a few seconds to load the core and content; then switch hosting on (once, it is a toggle) */
-    private fun enableRetroArchHost(l: Lobby) {
-        Thread.sleep(6000)
+    private fun enableRetroArchHost(l: Lobby, wait: Long = 6000) {
+        Thread.sleep(wait)
         repeat(4) { attempt ->
             if (lobby !== l) return
             if (listening(RA_NETPLAY_PORT)) { l.hostState = "hosting"; Logs.i("netplay", "RetroArch hostet"); return }
@@ -233,6 +310,7 @@ object Netplay {
 
     /** Joins the lobby on [address] with [pin]: fetch ROM if needed, configure, start. Runs as a job. */
     fun join(ctx: Context, address: String, pin: String, job: Jobs.Job): JSONObject {
+        appCtx = ctx.applicationContext
         val base = "http://${hostPart(address)}:${ThorService.PORT}"
         job.message = "Verbinde mit $address"
         val info = JSONObject(httpGet("$base/api/netplay/lobby"))
@@ -245,10 +323,11 @@ object Netplay {
             "azahar" -> "Azahar fehlt auf diesem Thor"
             else -> "Eden fehlt auf diesem Thor"
         })
-        val joinRes = httpPost("$base/api/netplay/join?pin=${enc(pin)}&name=${enc(model())}")
+        val joinRes = httpPost("$base/api/netplay/join?pin=${enc(pin)}&name=${enc(model())}&id=${enc(Me.id(ctx))}")
         if (joinRes.first == 403) throw IllegalStateException("PIN falsch")
         if (joinRes.first != 200) throw IllegalStateException("Host antwortet nicht (HTTP ${joinRes.first})")
 
+        Friends.add(ctx, info.optString("hostId").ifEmpty { null }, info.optString("host"))
         val file = info.getString("file")
         val size = info.getLong("size")
         val rom = findLocal(ctx, system, file, size) ?: run {
@@ -284,6 +363,7 @@ object Netplay {
     fun accept(ctx: Context, invite: JSONObject, job: Jobs.Job): JSONObject {
         job.message = "Verbinde mit ${invite.optString("name")}"
         Direct.join(ctx, invite.getString("ssid"), invite.getString("pass"))
+        Friends.add(ctx, invite.optString("id").ifEmpty { null }, invite.optString("name")) // next time: just a notification
         val pin = invite.optString("pin")
         if (pin.isEmpty()) return JSONObject().put("hint", "Verbunden mit ${invite.optString("name")}. Dort ist noch keine Lobby offen – „Thors suchen“, sobald sie ein Spiel hosten.")
         var last: Throwable? = null

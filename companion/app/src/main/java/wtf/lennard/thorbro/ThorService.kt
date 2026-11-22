@@ -41,6 +41,7 @@ class ThorService : Service() {
             Updater.startSchedule(applicationContext)
             SaveWatcher.start(applicationContext)
             Players.watch(applicationContext)
+            AutoPlay.start(applicationContext)
             running = true
         }
         return START_STICKY
@@ -52,6 +53,7 @@ class ThorService : Service() {
         SaveWatcher.stop()
         Players.unwatch(applicationContext)
         Room.stop()
+        AutoPlay.stop()
         nsdListener?.let { runCatching { getSystemService(NsdManager::class.java).unregisterService(it) } }
         nsdListener = null
         val s = server

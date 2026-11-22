@@ -1307,6 +1307,9 @@ async function loadNetplay() {
     const st = np.azahar && np.azahar.room;
     $('#npLobby').innerHTML += `<p>3DS-Raum bei ${esc(np.joined.host)}: ${st === 'connected' ? '<span class="ok">im Raum ✓</span>' : '<span class="err">noch nicht im Raum</span>'}</p><pre>${esc(np.joined.hint || '')}</pre>`;
   }
+  $('#frList').innerHTML = (np.friends || []).length ? np.friends.map((f) => `<div class="card"><h3>${esc(f.name)}</h3><div class="muted">${esc(f.id)}</div>
+    <p><button data-unfriend="${esc(f.id)}">Entfernen</button></p></div>`).join('') : '<p class="muted">Noch keine – einmal eine Einladung annehmen.</p>';
+  $('#frAuto').checked = !!np.auto;
   if (!romData) { try { romData = (await api('/api/roms')).body; } catch {} }
   renderNetplayGames();
   if ((l && l.mode === 'azahar') || (np.joined && np.joined.mode === 'azahar')) { clearTimeout(loadNetplay.t); loadNetplay.t = setTimeout(() => { if (!$('#netplay').hidden) loadNetplay(); }, 4000); }
@@ -1320,7 +1323,7 @@ $('#invScan').onclick = async () => {
     $('#invInfo').textContent = !body.permission ? 'Am Thor in ThorBro einmal „Geräte in der Nähe“ erlauben (Multiplayer → Erweitert → Wi-Fi Direct).'
       : invites.length ? `${invites.length} gefunden` : 'Keiner gefunden. Der andere Thor muss Wi-Fi Direct an haben.';
     $('#invList').innerHTML = invites.map((i) => `<div class="card"><h3>${esc(i.name)}</h3><div class="muted">${esc(i.game || 'Wi-Fi Direct offen')}${i.mode ? ' · ' + esc(npModes[i.mode] || i.mode) : ''}</div>
-      <p><button class="primary" data-inv="${esc(i.device)}">${!i.lobby ? 'Verbinden' : i.mode === 'share' ? 'Annehmen' : 'Beitreten'}</button></p></div>`).join('');
+      ${i.friend ? '<div class="ok">Freund</div>' : ''}<p><button class="primary" data-inv="${esc(i.device)}">${!i.lobby ? 'Verbinden' : i.mode === 'share' ? 'Annehmen' : 'Beitreten'}</button></p></div>`).join('');
   } catch (err) { $('#invInfo').textContent = 'Fehler: ' + err.message; }
 };
 $('#invList').addEventListener('click', async (e) => {
@@ -1396,6 +1399,17 @@ $('#npPeers').addEventListener('click', async (e) => {
   } catch (err) { alert(err.message); $('#npScanInfo').textContent = ''; }
   b.disabled = false;
 });
+
+$('#frList').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-unfriend]'); if (!b) return;
+  await api('/api/netplay/friend/remove?' + q({ id: b.dataset.unfriend }), { method: 'POST' }); loadNetplay();
+});
+$('#frAuto').onchange = async () => { await api('/api/netplay/auto?' + q({ on: $('#frAuto').checked ? '1' : '0' }), { method: 'POST' }); loadNetplay(); };
+$('#frPrepare').onclick = async () => {
+  $('#frInfo').textContent = 'Richte ein …';
+  try { const { body } = await api('/api/netplay/prepare', { method: 'POST' }); $('#frInfo').textContent = Object.entries(body).map(([k, v]) => `${npModes[k] || k}: ${v}`).join(' · ') || 'Nichts zu tun'; }
+  catch (err) { $('#frInfo').textContent = 'Fehler: ' + err.message; }
+};
 
 // ---------- Wi-Fi Direct ----------
 function showDirect(d) {
