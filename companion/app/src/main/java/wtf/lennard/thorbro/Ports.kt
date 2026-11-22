@@ -29,6 +29,14 @@ object Ports {
         if (!exists()) { parentFile?.mkdirs(); writeText(JSONObject().put("thorbroPort", p.id).put("package", p.pkg).put("name", p.name).toString()) }
     }
 
+    /** a port's placeholder path sent by a client (web panel), or null if it is not one */
+    fun resolve(ctx: Context, raw: String?): File? {
+        if (raw.isNullOrBlank()) return null
+        val f = File(raw).canonicalFile
+        val dir = File(ctx.filesDir, "ports").canonicalFile
+        return f.takeIf { it.parentFile == dir && it.name.endsWith(".port") && it.isFile }
+    }
+
     /** ROM-like entries for the library */
     fun entries(ctx: Context): List<JSONObject> = installed(ctx).map { p ->
         val f = placeholder(ctx, p)

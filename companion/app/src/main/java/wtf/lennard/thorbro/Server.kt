@@ -209,19 +209,19 @@ object Server {
                 }
                 get("/api/saves/game") {
                     if (denied(ctx)) return@get
-                    val rom = Storage.resolve(q("path")) ?: return@get fail("path not allowed")
+                    val rom = (Storage.resolve(q("path")) ?: Ports.resolve(ctx, q("path"))) ?: return@get fail("path not allowed")
                     json(withContext(Dispatchers.IO) { SharedSaves.forGame(ctx, q("system") ?: "", rom.path) })
                 }
                 post("/api/saves/profile") {
                     if (denied(ctx)) return@post
-                    val rom = Storage.resolve(q("path")) ?: return@post fail("path not allowed")
+                    val rom = (Storage.resolve(q("path")) ?: Ports.resolve(ctx, q("path"))) ?: return@post fail("path not allowed")
                     if (!Profiles.supports(q("system") ?: "")) return@post fail("Switch-Spielstände verwaltet Eden selbst", HttpStatusCode.Conflict)
                     val res = withContext(Dispatchers.IO) { Profiles.activate(ctx, rom.path, q("id") ?: "") }
                     json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
                 }
                 post("/api/saves/install") {
                     if (denied(ctx)) return@post
-                    val rom = Storage.resolve(q("path")) ?: return@post fail("path not allowed")
+                    val rom = (Storage.resolve(q("path")) ?: Ports.resolve(ctx, q("path"))) ?: return@post fail("path not allowed")
                     val ids = (q("save") ?: "").split(',').mapNotNull { it.trim().toIntOrNull() }
                     if (ids.isEmpty()) return@post fail("save missing")
                     val res = withContext(Dispatchers.IO) { SharedSaves.install(ctx, q("system") ?: "", rom.path, ids, q("profile") ?: Profiles.MAIN) }
