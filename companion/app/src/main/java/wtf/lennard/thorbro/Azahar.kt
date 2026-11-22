@@ -9,8 +9,8 @@ import java.security.MessageDigest
 /**
  * 3DS multiplayer with Azahar (Citra's room system: a virtual LAN, the game's own local wireless mode works over it).
  *
- * Azahar's Android app creates and joins rooms only in its own in-game menu (Mehrspieler → Raum erstellen / beitreten);
- * no intent or file sets that. So ThorBro does everything around it:
+ * The room itself runs on the host Thor ([Room]). Azahar's Android app joins rooms only in its own in-game menu
+ * (Mehrspieler → Raum beitreten); no intent or file sets that. So ThorBro does everything around it:
  *  - tells both players exactly what to type (room IP + port; the IP is the one the other Thor can reach),
  *  - fixes the two things that silently break joining between two Thors: the same 3DS user name
  *    (every fresh Azahar is called "AZAHAR" → "Name schon vergeben") and the same console ID (copied nand),
@@ -143,9 +143,9 @@ object Azahar {
 
     // ---------- what to type ----------
 
-    fun hostSteps(ip: String, online: String?) = if (online != null)
-        "In Azahar: Zurück-Taste → Mehrspieler → Raum beitreten\nIP/Port: $online\n(der Online-Raum läuft auf dem Server, beide treten bei)"
-    else "In Azahar: Zurück-Taste → Mehrspieler → Raum erstellen\nIP: $ip   Port: $PORT\nRaumname: Thor   Passwort: leer lassen\nDanach im Spiel den lokalen Mehrspieler/Drahtlos-Modus wählen."
+    /** the room already runs on this Thor ([Room]); the host only joins it */
+    fun hostSteps() =
+        "Der Raum läuft auf diesem Thor.\nIn Azahar: Zurück-Taste → Mehrspieler → Raum beitreten\nIP: 127.0.0.1   Port: $PORT   Passwort: leer\nDanach im Spiel den lokalen Mehrspieler/Drahtlos-Modus wählen."
 
     fun guestSteps(ip: String, port: Int = PORT) =
         "In Azahar: Zurück-Taste → Mehrspieler → Raum beitreten\nIP: $ip   Port: $port   Passwort: leer\nDanach im Spiel den lokalen Mehrspieler/Drahtlos-Modus wählen."

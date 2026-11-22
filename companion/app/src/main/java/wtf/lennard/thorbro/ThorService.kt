@@ -51,6 +51,7 @@ class ThorService : Service() {
         Updater.stopSchedule()
         SaveWatcher.stop()
         Players.unwatch(applicationContext)
+        Room.stop()
         nsdListener?.let { runCatching { getSystemService(NsdManager::class.java).unregisterService(it) } }
         nsdListener = null
         val s = server

@@ -154,41 +154,37 @@
 
   <section id="netplay" class="tab" hidden>
     <div class="panel">
-      <h3>Zusammen spielen (Netplay)</h3>
-      <div class="sub">Zwei Thors im selben WLAN – unterwegs: ein Thor macht einen Hotspot, der andere verbindet sich. Beide Thors spielen selbst, nur die Eingaben gehen übers Netz (kein Bildverzug).</div>
-      <div class="row"><span id="npStatus" class="muted grow">Lade …</span><button id="npClose" hidden>Lobby schließen</button></div>
+      <h3>Zusammen spielen</h3>
+      <div class="sub">Spiel wählen → „Spielen“. ThorBro öffnet die Lobby und Wi-Fi Direct; ein Thor in der Nähe bekommt eine Einladung und tritt mit einem Druck bei – ohne Router, ohne Internet. Beide Thors spielen selbst, nur die Eingaben gehen übers Netz. Für 3DS läuft der Azahar-Raum auf diesem Thor.</div>
+      <div class="row"><span id="npStatus" class="muted grow">Lade …</span><button id="npClose" hidden>Beenden</button></div>
       <div id="npLobby"></div>
-    </div>
-    <div class="panel" id="azPanel" hidden>
-      <h3>3DS · Azahar-Raum</h3>
-      <div class="sub">Raum <strong>lokal</strong>: dieser Thor ist der Raum (selbes WLAN, Hotspot oder Wi-Fi Direct). Raum <strong>online</strong>: beide treten einem Raum auf einem Server bei. Den Raum selbst erstellst du in Azahar (Zurück-Taste → Mehrspieler) – ThorBro sagt, was einzutragen ist, sorgt für verschiedene 3DS-Namen und zeigt, ob es geklappt hat.</div>
-      <div class="row"><span id="azInfo" class="muted grow"></span></div>
-      <div class="row"><label class="grow">Online-Server <input id="azServer" placeholder="host:24872" size="24"></label><button id="azServerSave">Speichern</button></div>
-      <div class="row"><select id="azVariant"><option value="0">Raum lokal</option><option value="1">Raum online</option></select><input id="azFilter" placeholder="3DS-Spiel suchen" class="grow"></div>
-      <div id="azGames"></div>
     </div>
     <div class="panel">
       <h3>Einladungen in der Nähe</h3>
-      <div class="sub">Thors mit ThorBro, die Wi-Fi Direct an haben, laden per Funk ein – ohne gemeinsames WLAN. Beitreten verbindet automatisch und startet das Spiel.</div>
+      <div class="sub">Thors mit ThorBro laden per Funk ein (Wi-Fi Direct). Beitreten verbindet automatisch, holt das Spiel und startet es.</div>
       <div class="row"><button id="invScan" class="primary">In der Nähe suchen</button><span id="invInfo" class="muted grow"></span></div>
       <div id="invList" class="cards"></div>
     </div>
     <div class="panel">
-      <h3>Spiel hosten</h3>
+      <h3>Mit Freund spielen</h3>
       <div class="sub" id="npSupported"></div>
-      <div class="row"><input id="npFilter" placeholder="Spiel suchen" class="grow"></div>
+      <div class="row"><select id="npKind"><option value="play">Spielen</option><option value="share">Weitergeben (nur schicken)</option></select><input id="npFilter" placeholder="Spiel suchen" class="grow"></div>
       <div id="npGames"></div>
     </div>
     <div class="panel">
-      <h3>Ohne WLAN: Wi-Fi Direct</h3>
-      <div class="sub">Der Thor macht ein eigenes kleines Netz. Der andere Thor (oder ein Handy) verbindet sich damit in den normalen WLAN-Einstellungen – dort kann er auch ThorBro herunterladen, falls er es noch nicht hat.</div>
-      <div class="row"><button id="dxStart" class="primary">Wi-Fi Direct starten</button><button id="dxStop" hidden>Beenden</button><span id="dxInfo" class="muted grow"></span></div>
+      <h3>Ein Bildschirm, zwei Spieler</h3>
+      <div class="sub">Dolphin und melonDS haben am Thor keinen Mehrspieler übers Netz. Stattdessen: am zweiten Thor ThorBro → Multiplayer → „Thor als Controller“ – er wird zum Bluetooth-Gamepad für diesen Thor (oder einen Fernseher), beide spielen auf einem Bildschirm.</div>
     </div>
-    <div class="panel">
+    <details class="panel">
+      <summary><h3 style="display:inline">Erweitert</h3> <span class="muted">gleiches WLAN, PIN, Wi-Fi Direct von Hand, NetBird</span></summary>
+      <p class="muted" id="npAddrs"></p>
       <h3>Einem Thor beitreten</h3>
-      <div class="row"><button id="npScan" class="primary">Thors suchen</button><input id="npAddr" placeholder="oder IP, z. B. 192.168.43.1" size="18"><button id="npAddrGo">Prüfen</button><span id="npScanInfo" class="muted grow"></span></div>
+      <div class="row"><button id="npScan" class="primary">Thors suchen</button><input id="npAddr" placeholder="oder IP, z. B. 100.116.x.x (NetBird)" size="24"><button id="npAddrGo">Prüfen</button><span id="npScanInfo" class="muted grow"></span></div>
       <div id="npPeers" class="cards"></div>
-    </div>
+      <h3>Wi-Fi Direct von Hand</h3>
+      <div class="sub">Startet sonst automatisch beim Spielen. Andere Geräte (auch ohne ThorBro) verbinden sich in den normalen WLAN-Einstellungen und können dort ThorBro herunterladen.</div>
+      <div class="row"><button id="dxStart">Wi-Fi Direct starten</button><button id="dxStop" hidden>Beenden</button><span id="dxInfo" class="muted grow"></span></div>
+    </details>
   </section>
 
   <section id="drivers" class="tab" hidden>

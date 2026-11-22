@@ -557,7 +557,9 @@ object Server {
                 post("/api/netplay/host") {
                     if (denied(ctx)) return@post
                     val rom = Storage.resolve(q("path")) ?: return@post fail("path not allowed")
-                    val res = withContext(Dispatchers.IO) { Netplay.host(ctx, q("system") ?: "", rom, online = q("online") == "1") }
+                    val res = withContext(Dispatchers.IO) {
+                        if (q("share") == "1") Netplay.share(ctx, q("system") ?: "", rom) else Netplay.host(ctx, q("system") ?: "", rom)
+                    }
                     json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
                 }
                 post("/api/netplay/close") {
@@ -572,11 +574,6 @@ object Server {
                     json(Jobs.start("Netplay beitreten") { Netplay.join(ctx, addr, pin, it) }.json())
                 }
 
-                post("/api/netplay/azahar-server") {
-                    if (denied(ctx)) return@post
-                    runCatching { Netplay.setOnlineServer(ctx, q("address")) }.onFailure { return@post fail(it.message ?: "bad address") }
-                    json(JSONObject().put("server", Netplay.onlineServer(ctx)))
-                }
                 // Thors nearby that invite over Wi-Fi Direct (radio scan; works without a shared network)
                 get("/api/netplay/invites") {
                     if (denied(ctx)) return@get

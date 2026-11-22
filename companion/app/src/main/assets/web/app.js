@@ -1274,77 +1274,53 @@ $('#mlScan').onclick = async () => {
 
 // ---------- netplay (local multiplayer) ----------
 let np = null;
-const npModes = { retroarch: 'RetroArch', ppsspp: 'PPSSPP', eden: 'Eden', azahar: 'Azahar' };
+const npModes = { retroarch: 'RetroArch', ppsspp: 'PPSSPP', eden: 'Eden', azahar: 'Azahar', share: 'Weitergeben' };
+const npAddrs = (a) => (a || []).map((x) => `${x.kind}: ${x.ip}`).join(' · ') || 'kein Netz';
 async function loadNetplay() {
   try { np = (await api('/api/netplay')).body; } catch (err) { $('#npStatus').textContent = 'Fehler: ' + err.message; return; }
   const l = np.lobby;
+  const room = np.azahar && np.azahar.server;
   $('#npClose').hidden = !l;
   if (l) {
     const az = l.mode === 'azahar';
+    const members = room && room.members ? room.members : [];
     const state = { starting: 'startet …',
-      hosting: `<span class="ok">${az ? 'Raum läuft ✓' : 'wartet auf Mitspieler'}</span>`,
-      manual: `<span class="err">${az ? (l.online ? 'in Azahar dem Online-Raum beitreten' : 'in Azahar: Zurück-Taste → Mehrspieler → Raum erstellen') : 'RetroArch hostet nicht von selbst: im RetroArch-Menü Netplay → Host starten'}</span>`,
-      unknown: '<span class="muted">Raum-Status unbekannt (Shizuku fehlt)</span>' }[l.hostState] || '';
-    $('#npStatus').innerHTML = `Lobby offen: <strong>${esc(l.game)}</strong> (${esc(npModes[l.mode] || l.mode)}) ${state}`;
+      hosting: `<span class="ok">${az ? 'Raum läuft · ' + (members.length ? members.length + ' im Raum' : 'in Azahar beitreten') : 'wartet auf Mitspieler'}</span>`,
+      sharing: '<span class="ok">wird angeboten</span>',
+      error: '<span class="err">3DS-Raum ist aus – beenden und neu starten</span>',
+      manual: '<span class="err">RetroArch hostet nicht von selbst: im RetroArch-Menü Netplay → Host starten</span>' }[l.hostState] || '';
+    $('#npStatus').innerHTML = `${l.mode === 'share' ? 'Du gibst weiter' : 'Du spielst'}: <strong>${esc(l.game)}</strong> (${esc(npModes[l.mode] || l.mode)}) ${state}`;
     $('#npLobby').innerHTML = `<p style="font-size:2em;letter-spacing:.2em" class="ok">PIN ${esc(l.pin)}</p>
-      <p class="muted">IP dieses Thors: ${esc(l.roomIp || np.ip || '?')} · Mitspieler: ${l.guestNames.length ? l.guestNames.map(esc).join(', ') : 'noch keiner'}</p>`
-      + (az ? `<pre>${esc(l.online ? 'In Azahar: Zurück-Taste → Mehrspieler → Raum beitreten\nIP/Port: ' + l.online
-        : 'In Azahar: Zurück-Taste → Mehrspieler → Raum erstellen\nIP: ' + (l.roomIp || np.ip) + '   Port: ' + l.roomPort + '\nRaumname: Thor   Passwort: leer lassen')}</pre>` : '');
+      <p class="muted">${np.direct ? 'Wi-Fi Direct an – Thors in der Nähe sehen die Einladung.' : 'Wi-Fi Direct aus – der andere Thor braucht dasselbe WLAN (Erweitert → Thors suchen).'}
+      Beigetreten: ${l.guestNames.length ? l.guestNames.map(esc).join(', ') : 'noch keiner'}</p>`
+      + (az ? `<p>Im 3DS-Raum: ${members.length ? members.map(esc).join(', ') : 'niemand'}</p><pre>${esc('In Azahar (dieser Thor): Zurück-Taste → Mehrspieler → Raum beitreten\nIP: 127.0.0.1   Port: ' + l.roomPort + '   Passwort: leer\n\nErreichbar für andere (Port ' + l.roomPort + '): ' + npAddrs(np.addresses))}</pre>` : '');
   } else {
-    $('#npStatus').textContent = `Keine Lobby offen. Dieser Thor: ${np.ip || 'kein WLAN'}`;
+    $('#npStatus').textContent = 'Nichts offen.';
     $('#npLobby').innerHTML = '';
   }
+  $('#npAddrs').textContent = 'Dieser Thor: ' + npAddrs(np.addresses) + '. Von unterwegs: beide Thors in NetBird, dann hier die NetBird-Adresse des anderen eintippen.';
   if (np.shizuku !== 'ready') $('#npLobby').innerHTML += '<p class="muted">Tipp: Mit Shizuku übernimmt ThorBro deine RetroArch-Einstellungen 1:1 und kann PPSSPP einstellen.</p>';
   $('#npSupported').textContent = np.supported.length
-    ? 'Geht mit: ' + np.supported.map((s) => s.name + (s.shaky ? ' (wackelig)' : '')).join(', ')
-    : 'Kein passender Emulator installiert (RetroArch, PPSSPP oder Eden).';
+    ? 'Spielen geht mit: ' + np.supported.map((s) => s.name + (s.shaky ? ' (wackelig)' : '')).join(', ') + '. Weitergeben geht mit jedem Spiel.'
+    : 'Kein passender Emulator installiert (RetroArch, PPSSPP, Azahar oder Eden). Weitergeben geht trotzdem.';
   if (np.joined && np.joined.mode === 'azahar' && !l) {
-    const room = np.azahar && np.azahar.room;
-    $('#npLobby').innerHTML += `<p>Azahar-Raum bei ${esc(np.joined.host)}: ${room === 'connected' ? '<span class="ok">im Raum ✓</span>' : '<span class="err">noch nicht im Raum</span>'}</p><pre>${esc(np.joined.hint || '')}</pre>`;
-  }
-  const a = np.azahar;
-  $('#azPanel').hidden = !a;
-  if (a) {
-    $('#azInfo').innerHTML = `3DS-Name: <strong>${esc(a.identity?.user || '?')}</strong> · Raum: ${esc({ hosting: 'läuft auf diesem Thor', connected: 'verbunden', off: 'keiner', unknown: 'unbekannt (Shizuku fehlt)' }[a.room] || a.room)} · IP: ${esc(a.ip || 'kein Netz')}`;
-    if (document.activeElement !== $('#azServer')) $('#azServer').value = a.server || '';
+    const st = np.azahar && np.azahar.room;
+    $('#npLobby').innerHTML += `<p>3DS-Raum bei ${esc(np.joined.host)}: ${st === 'connected' ? '<span class="ok">im Raum ✓</span>' : '<span class="err">noch nicht im Raum</span>'}</p><pre>${esc(np.joined.hint || '')}</pre>`;
   }
   if (!romData) { try { romData = (await api('/api/roms')).body; } catch {} }
   renderNetplayGames();
-  renderAzGames();
   if ((l && l.mode === 'azahar') || (np.joined && np.joined.mode === 'azahar')) { clearTimeout(loadNetplay.t); loadNetplay.t = setTimeout(() => { if (!$('#netplay').hidden) loadNetplay(); }, 4000); }
 }
-function renderAzGames() {
-  if (!np || !romData || !np.azahar) return;
-  const f = $('#azFilter').value.trim().toLowerCase();
-  const sys = romData.systems.find((s) => s.id === 'n3ds');
-  const rows = (sys ? sys.roms : []).filter((r) => !r.dir && (!f || r.name.toLowerCase().includes(f)))
-    .map((r) => `<tr><td>${esc(r.name)}<div class="muted">${fmt(r.size)}</div></td><td><button data-az="${esc(r.path)}">Raum öffnen</button></td></tr>`);
-  $('#azGames').innerHTML = rows.length ? `<table class="files"><tbody>${rows.slice(0, 200).join('')}</tbody></table>` : '<p class="muted">Keine 3DS-Spiele.</p>';
-}
-$('#azFilter').oninput = renderAzGames;
-$('#azServerSave').onclick = async () => {
-  try { const { body } = await api('/api/netplay/azahar-server?' + q({ address: $('#azServer').value.trim() }), { method: 'POST' }); if (body.error) throw new Error(body.error); toast(body.server ? 'Online-Server gespeichert' : 'Online-Server entfernt'); loadNetplay(); } catch (err) { alert(err.message); }
-};
-$('#azGames').addEventListener('click', async (e) => {
-  const b = e.target.closest('[data-az]'); if (!b) return;
-  b.disabled = true;
-  try {
-    const { body } = await api('/api/netplay/host?' + q({ system: 'n3ds', path: b.dataset.az, online: $('#azVariant').value }), { method: 'POST' });
-    if (body.error) throw new Error(body.error);
-    toast(`Raum vorbereitet – PIN ${body.pin}`);
-  } catch (err) { alert(err.message); }
-  b.disabled = false; loadNetplay();
-});
 let invites = [];
 $('#invScan').onclick = async () => {
   $('#invInfo').textContent = 'Suche per Funk (ca. 6 s) …'; $('#invList').innerHTML = '';
   try {
     const { body } = await api('/api/netplay/invites');
     invites = body.invites;
-    $('#invInfo').textContent = !body.permission ? 'Am Thor unter Multiplayer → Wi-Fi Direct einmal „Geräte in der Nähe“ erlauben.'
+    $('#invInfo').textContent = !body.permission ? 'Am Thor in ThorBro einmal „Geräte in der Nähe“ erlauben (Multiplayer → Erweitert → Wi-Fi Direct).'
       : invites.length ? `${invites.length} gefunden` : 'Keiner gefunden. Der andere Thor muss Wi-Fi Direct an haben.';
     $('#invList').innerHTML = invites.map((i) => `<div class="card"><h3>${esc(i.name)}</h3><div class="muted">${esc(i.game || 'Wi-Fi Direct offen')}${i.mode ? ' · ' + esc(npModes[i.mode] || i.mode) : ''}</div>
-      <p><button class="primary" data-inv="${esc(i.device)}">${i.lobby ? 'Beitreten' : 'Verbinden'}</button></p></div>`).join('');
+      <p><button class="primary" data-inv="${esc(i.device)}">${!i.lobby ? 'Verbinden' : i.mode === 'share' ? 'Annehmen' : 'Beitreten'}</button></p></div>`).join('');
   } catch (err) { $('#invInfo').textContent = 'Fehler: ' + err.message; }
 };
 $('#invList').addEventListener('click', async (e) => {
@@ -1361,25 +1337,28 @@ $('#invList').addEventListener('click', async (e) => {
 });
 function renderNetplayGames() {
   if (!np || !romData) return;
+  const share = $('#npKind').value === 'share';
   const ids = new Set(np.supported.map((s) => s.id));
   const f = $('#npFilter').value.trim().toLowerCase();
   const rows = [];
-  romData.systems.filter((s) => ids.has(s.id)).forEach((s) => s.roms.filter((r) => !r.dir && (!f || r.name.toLowerCase().includes(f)))
+  romData.systems.filter((s) => share || ids.has(s.id)).forEach((s) => s.roms.filter((r) => !r.dir && (!f || r.name.toLowerCase().includes(f)))
     .forEach((r) => rows.push(`<tr><td>${esc(r.name)}<div class="muted">${esc(s.name)} · ${fmt(r.size)}</div></td>
-      <td><button data-host="${esc(r.path)}" data-sys="${esc(s.id)}">Hosten</button></td></tr>`)));
+      <td><button data-host="${esc(r.path)}" data-sys="${esc(s.id)}">${share ? 'Weitergeben' : 'Spielen'}</button></td></tr>`)));
   $('#npGames').innerHTML = rows.length ? `<table class="files"><tbody>${rows.slice(0, 200).join('')}</tbody></table>` : '<p class="muted">Keine passenden Spiele.</p>';
 }
 $('#npFilter').oninput = renderNetplayGames;
-$('#npClose').onclick = async () => { await api('/api/netplay/close', { method: 'POST' }); loadNetplay(); };
+$('#npKind').onchange = renderNetplayGames;
+$('#npClose').onclick = async () => { await api('/api/netplay/close', { method: 'POST' }); loadNetplay(); loadDirect(); };
 $('#npGames').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-host]'); if (!b) return;
+  const share = $('#npKind').value === 'share';
   b.disabled = true;
   try {
-    const { body } = await api('/api/netplay/host?' + q({ system: b.dataset.sys, path: b.dataset.host }), { method: 'POST' });
+    const { body } = await api('/api/netplay/host?' + q({ system: b.dataset.sys, path: b.dataset.host, share: share ? '1' : '' }), { method: 'POST' });
     if (body.error) throw new Error(body.error);
-    toast(`Lobby offen – PIN ${body.pin}`); if (body.hint) toast(body.hint);
+    toast(share ? 'Wird angeboten' : `Läuft – PIN ${body.pin}`);
   } catch (err) { alert(err.message); }
-  b.disabled = false; loadNetplay();
+  b.disabled = false; loadNetplay(); loadDirect();
   setTimeout(loadNetplay, 12000);
 });
 function renderPeers(peers) {

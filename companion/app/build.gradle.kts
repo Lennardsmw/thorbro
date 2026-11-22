@@ -56,6 +56,8 @@ android {
         resources {
             excludes += setOf("META-INF/INDEX.LIST", "META-INF/io.netty.versions.properties", "META-INF/DEPENDENCIES")
         }
+        // the 3DS room server (scripts/build-room.sh) is an executable: it must be extracted to the lib folder to run
+        jniLibs { useLegacyPackaging = true }
     }
 }
 
