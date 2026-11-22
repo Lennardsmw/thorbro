@@ -8,7 +8,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
 static LAST: Mutex<Option<(u64, Vec<String>)>> = Mutex::new(None);
@@ -143,6 +143,14 @@ mod tests {
         println!("mdns: {:?}", super::discover_mdns());
         println!("scan: {:?}", super::scan_subnets());
     }
+    #[test]
+    fn thor_bar_script() {
+        let js = super::thor_bar(&Some(serde_json::json!({"available": true, "latest": "0.4.0"})));
+        std::fs::write(std::env::temp_dir().join("thor_bar.js"), &js).unwrap();
+        assert!(js.contains("Update 0.4.0 installieren") && js.contains("#update"));
+        let js = super::thor_bar(&None);
+        assert!(js.contains("Nach Updates suchen"));
+    }
 }
 
 /// checks the pairing code shown on the handheld and remembers this Thor
@@ -195,18 +203,70 @@ fn reachable_address(address: &str) -> Result<String, String> {
     Err(format!("{} ist unter {} nicht erreichbar. Ist der Thor an, ThorBro dort geöffnet und im selben WLAN (oder mit NetBird verbunden)?", t.name, t.address))
 }
 
-/// opens ThorBro's own interface from the handheld in a window
+/// opens ThorBro's own interface from the handheld right in the main window
 #[tauri::command]
 async fn open_thor(app: AppHandle, address: String) -> Result<String, String> {
     let address = tauri::async_runtime::spawn_blocking(move || reachable_address(&address)).await.map_err(|e| e.to_string())??;
     let c = config::load();
     let t = c.thors.iter().find(|t| t.address == address).ok_or("unbekannter Thor")?;
     let url = format!("http://{}/?token={}", t.address, t.token);
-    let label = format!("thor-{}", address.replace(['.', ':'], "-"));
-    if let Some(w) = app.get_webview_window(&label) { let _ = w.show(); let _ = w.set_focus(); return Ok(address); }
-    WebviewWindowBuilder::new(&app, label, WebviewUrl::External(url.parse().map_err(|e| format!("{e}"))?))
-        .title(format!("ThorBro – {}", t.name)).inner_size(1180.0, 800.0).build().map_err(|e| e.to_string())?;
+    let w = app.get_webview_window("main").ok_or("Hauptfenster fehlt")?;
+    let _ = w.set_title(&format!("ThorBro – {}", t.name));
+    w.navigate(url.parse().map_err(|e| format!("{e}"))?).map_err(|e| e.to_string())?;
+    let _ = w.show(); let _ = w.set_focus();
     Ok(address)
+}
+
+/// where the app's own page lives (differs per platform)
+const HOME: &str = if cfg!(windows) { "http://tauri.localhost/" } else { "tauri://localhost/" };
+static ENLARGED: Mutex<bool> = Mutex::new(false);
+
+/// a small bar on top of the Thor's page: back to the device list and the update button.
+/// It only navigates (no IPC), so the Thor's page gets no access to the app's commands.
+fn thor_bar(update: &Option<Value>) -> String {
+    let label = match update {
+        Some(u) if u["available"].as_bool().unwrap_or(false) => format!("Update {} installieren", u["latest"].as_str().unwrap_or("")),
+        _ => "Nach Updates suchen".to_string(),
+    };
+    let hot = update.as_ref().and_then(|u| u["available"].as_bool()).unwrap_or(false);
+    format!(r#"(() => {{
+  if (document.getElementById('thorbro-desktop-bar')) return;
+  const home = {home};
+  const bar = document.createElement('div');
+  bar.id = 'thorbro-desktop-bar';
+  bar.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;display:flex;gap:6px;font:13px -apple-system,system-ui,sans-serif';
+  const btn = (text, hash, hot) => {{
+    const b = document.createElement('button');
+    b.textContent = text;
+    b.style.cssText = 'padding:6px 12px;border-radius:8px;cursor:pointer;color:#fff;border:1px solid ' + (hot ? '#ff5a3c;background:#ff5a3c' : '#2c3039;background:#1b1e24ee');
+    b.onclick = () => {{ location.href = home + hash; }};
+    return b;
+  }};
+  bar.append(btn('← Geräte', '', false), btn({label}, '#update', {hot}));
+  document.body.appendChild(bar);
+}})();"#, home = serde_json::to_string(HOME).unwrap(), label = serde_json::to_string(&label).unwrap())
+}
+
+fn on_page_load(w: &tauri::Webview, p: &tauri::webview::PageLoadPayload<'_>) {
+    if w.label() != "main" || p.event() != tauri::webview::PageLoadEvent::Finished { return; }
+    let Some(win) = w.app_handle().get_webview_window("main") else { return };
+    let remote = matches!(p.url().scheme(), "http" | "https") && p.url().host_str() != Some("tauri.localhost");
+    let mut big = ENLARGED.lock().unwrap();
+    if remote {
+        let _ = w.eval(&thor_bar(&UPDATE.lock().unwrap().clone()));
+        let scale = win.scale_factor().unwrap_or(1.0);
+        if let Ok(s) = win.inner_size() {
+            let s = s.to_logical::<f64>(scale);
+            if s.width < 1180.0 || s.height < 800.0 {
+                let _ = win.set_size(tauri::LogicalSize::new(s.width.max(1180.0), s.height.max(800.0)));
+                let _ = win.center();
+                *big = true;
+            }
+        }
+    } else {
+        let _ = win.set_title("ThorBro");
+        if *big { let _ = win.set_size(tauri::LogicalSize::new(520.0, 680.0)); *big = false; }
+    }
 }
 
 /// RomM device sign-in: returns the code to approve in RomM, then waits for it in the background
@@ -317,6 +377,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
+        .on_page_load(on_page_load)
         .invoke_handler(tauri::generate_handler![status, discover, pair, forget_thor, open_thor, romm_login, sync_now, set_auto, pads, pad_color, thor_leds, check_update, install_update])
         .setup(|app| {
             // start with the computer, once; the user can turn it off in the system settings

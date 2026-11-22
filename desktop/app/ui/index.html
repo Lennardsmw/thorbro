@@ -8,7 +8,8 @@
   :root { --bg:#111317; --panel:#1b1e24; --line:#2c3039; --text:#e8eaee; --muted:#9097a5; --accent:#ff5a3c; --ok:#4cc27f; --err:#ff6b57; }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; padding:18px; }
-  h1 { font-size:20px; margin:0 0 14px; color:var(--accent); }
+  h1 { font-size:20px; margin:0; color:var(--accent); }
+  .top { display:flex; align-items:center; gap:10px; margin:0 0 14px; }
   h2 { font-size:15px; margin:0 0 8px; }
   .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:12px; }
   .muted { color:var(--muted); font-size:13px; }
@@ -27,7 +28,8 @@
 </style>
 </head>
 <body>
-<h1>ThorBro</h1>
+<header class="top"><h1>ThorBro</h1><span id="ver" class="muted"></span><span class="grow"></span><button id="updBtn">Nach Updates suchen</button></header>
+<div id="updInfo" class="muted" style="margin:-6px 0 12px"></div>
 
 <div class="panel">
   <h2>Deine Thors</h2>
@@ -47,12 +49,6 @@
 <div class="panel">
   <h2>RomM</h2>
   <div id="romm"></div>
-</div>
-
-<div class="panel">
-  <h2>Version</h2>
-  <div class="row"><span id="ver" class="grow"></span><button id="updBtn">Nach Updates suchen</button></div>
-  <div id="updInfo" class="muted"></div>
 </div>
 
 <div class="panel">
@@ -81,7 +77,7 @@ async function refresh() {
       : `<div class="row"><input id="rommUrl" class="grow" placeholder="https://games.example.org" value="${esc(r.url)}"><button id="rommLogin" class="primary">Anmelden</button></div>`;
   $('#items').innerHTML = s.items.map((i) => `<div><span class="dot ${i.exists ? 'ok' : ''}"></span> ${esc(i.name)}<div class="muted">${esc(i.dir)}${i.exists ? '' : ' (nicht gefunden)'}</div></div>`).join('');
   $('#auto').checked = s.auto;
-  $('#ver').textContent = 'ThorBro Desktop ' + s.version;
+  $('#ver').textContent = 'Desktop ' + s.version;
   const u = s.update;
   if (u && u.available) { $('#updBtn').textContent = `Update ${u.latest} installieren`; $('#updBtn').classList.add('primary'); }
   else { $('#updBtn').textContent = 'Nach Updates suchen'; $('#updBtn').classList.remove('primary'); }
@@ -139,7 +135,7 @@ document.addEventListener('click', async (e) => {
   } catch (err) { alert(err); }
 });
 $('#padsReload').onclick = loadLeds;
-$('#updBtn').onclick = async () => {
+async function runUpdate() {
   const s = await invoke('status');
   if (s.update && s.update.available) {
     $('#updInfo').textContent = `Lade ${s.update.latest} … ThorBro startet danach neu.`;
@@ -150,7 +146,10 @@ $('#updBtn').onclick = async () => {
     $('#updInfo').textContent = u.error ? u.error : u.available ? `Version ${u.latest} ist verfügbar.` : 'Du hast die neueste Version.';
     refresh();
   }
-};
+}
+$('#updBtn').onclick = runUpdate;
+// the update button on the Thor's page comes back here with #update
+if (location.hash === '#update') { history.replaceState(null, '', location.pathname); runUpdate(); }
 refresh(); loadLeds(); setInterval(refresh, 5000);
 </script>
 </body>
