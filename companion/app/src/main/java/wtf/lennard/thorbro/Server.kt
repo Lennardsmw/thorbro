@@ -39,6 +39,8 @@ import java.io.FileOutputStream
  * The web UI in assets/web is served from / without a code; it asks for the code itself.
  */
 object Server {
+    /** last radio scan for invites (holds the nets' passwords; the panel only gets device addresses) */
+    @Volatile private var lastInvites: org.json.JSONArray? = null
     private const val PART = ".thorbro-part"
     private const val CHUNKS = ".thorbro-part.chunks"
 
@@ -555,12 +557,12 @@ object Server {
                 post("/api/netplay/host") {
                     if (denied(ctx)) return@post
                     val rom = Storage.resolve(q("path")) ?: return@post fail("path not allowed")
-                    val res = withContext(Dispatchers.IO) { Netplay.host(ctx, q("system") ?: "", rom) }
+                    val res = withContext(Dispatchers.IO) { Netplay.host(ctx, q("system") ?: "", rom, online = q("online") == "1") }
                     json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
                 }
                 post("/api/netplay/close") {
                     if (denied(ctx)) return@post
-                    Netplay.close()
+                    Netplay.close(ctx)
                     json(JSONObject().put("ok", true))
                 }
                 post("/api/netplay/connect") {
@@ -568,6 +570,28 @@ object Server {
                     val addr = q("address")?.takeIf { Regex("^[0-9.]{7,15}$").matches(it) } ?: return@post fail("address missing")
                     val pin = q("pin") ?: return@post fail("pin missing")
                     json(Jobs.start("Netplay beitreten") { Netplay.join(ctx, addr, pin, it) }.json())
+                }
+
+                post("/api/netplay/azahar-server") {
+                    if (denied(ctx)) return@post
+                    runCatching { Netplay.setOnlineServer(ctx, q("address")) }.onFailure { return@post fail(it.message ?: "bad address") }
+                    json(JSONObject().put("server", Netplay.onlineServer(ctx)))
+                }
+                // Thors nearby that invite over Wi-Fi Direct (radio scan; works without a shared network)
+                get("/api/netplay/invites") {
+                    if (denied(ctx)) return@get
+                    val res = withContext(Dispatchers.IO) { Direct.invites(ctx) }
+                    // the password and PIN stay on this device; the panel answers with the device address
+                    lastInvites = res
+                    val pub = org.json.JSONArray()
+                    for (i in 0 until res.length()) res.getJSONObject(i).let { pub.put(JSONObject(it.toString()).apply { remove("pass"); remove("pin") }.put("lobby", it.optString("pin").isNotEmpty())) }
+                    json(JSONObject().put("invites", pub).put("permission", Direct.permitted(ctx)))
+                }
+                post("/api/netplay/accept") {
+                    if (denied(ctx)) return@post
+                    val inv = lastInvites?.let { a -> (0 until a.length()).map { a.getJSONObject(it) }.firstOrNull { it.optString("device") == q("device") } }
+                        ?: return@post fail("Einladung nicht mehr da – nochmal suchen", HttpStatusCode.NotFound)
+                    json(Jobs.start("Einladung annehmen") { Netplay.accept(ctx, inv, it) }.json())
                 }
 
                 get("/api/direct") {

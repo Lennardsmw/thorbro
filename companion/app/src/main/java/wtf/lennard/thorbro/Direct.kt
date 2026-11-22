@@ -7,6 +7,9 @@ import android.content.pm.PackageManager
 import android.net.wifi.p2p.WifiP2pConfig
 import android.net.wifi.p2p.WifiP2pGroup
 import android.net.wifi.p2p.WifiP2pManager
+import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceInfo
+import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceRequest
+import org.json.JSONArray
 import android.os.Build
 import android.os.Looper
 import org.json.JSONObject
@@ -23,6 +26,14 @@ import java.util.concurrent.TimeUnit
  * Over it:
  *  - ThorBro itself: http://192.168.49.1:7330/get offers the APK (for a Thor that has no ThorBro yet),
  *  - games: the Multiplayer lobby works as in a normal WLAN (the guest also probes the group owner).
+ *
+ * Easy to type: the password is "thor" + 4 digits and stays the same on this Thor, so a device that joined once
+ * reconnects by itself.
+ *
+ * Invites without any shared network: while the net runs, ThorBro announces itself over Wi-Fi Direct service discovery
+ * (radio, like Bluetooth, ~10–30 m) with network name, password and the open lobby (game + PIN). Another Thor with
+ * ThorBro sees "X lädt ein" in Multiplayer and joins with one button: it connects to the net (no Android dialog,
+ * API 29+) and enters the lobby. Anyone nearby with a Wi-Fi Direct scanner could read that — fine for a game lobby.
  */
 object Direct {
     const val OWNER_IP = "192.168.49.1"
@@ -30,6 +41,10 @@ object Direct {
     @Volatile private var manager: WifiP2pManager? = null
     @Volatile private var channel: WifiP2pManager.Channel? = null
     @Volatile private var group: JSONObject? = null
+    @Volatile private var advertising = false
+    private const val SERVICE = "_thorbro._tcp"
+
+    fun active() = group != null
 
     fun permissionName() = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.NEARBY_WIFI_DEVICES else Manifest.permission.ACCESS_FINE_LOCATION
 
@@ -76,7 +91,7 @@ object Direct {
         val (m, c) = init(ctx)
         groupInfo(m, c)?.let { call { l -> m.removeGroup(c, l) }; Thread.sleep(500) }
         val name = "DIRECT-TB-" + (Build.MODEL ?: "Thor").filter { it.isLetterOrDigit() }.take(12)
-        val pass = (1..8).map { "abcdefghjkmnpqrstuvwxyz23456789".random() }.joinToString("")
+        val pass = easyPass(ctx)
         val cfg = WifiP2pConfig.Builder().setNetworkName(name).setPassphrase(pass)
             .setGroupOperatingBand(WifiP2pConfig.GROUP_OWNER_BAND_AUTO).enablePersistentMode(false).build()
         call { l -> m.createGroup(c, cfg, l) }?.let { return status(ctx).put("error", it) }
@@ -85,11 +100,21 @@ object Direct {
         val info = g ?: return status(ctx).put("error", "Netz wurde nicht aufgebaut")
         group = JSONObject().put("ssid", info.networkName).put("pass", info.passphrase).put("iface", info.`interface`)
         Logs.i("direct", "Wi-Fi Direct an: ${info.networkName}")
+        refreshInvite(ctx)
         return status(ctx)
+    }
+
+    /** "thor" + 4 digits, kept per device (WPA2 needs at least 8 characters) */
+    private fun easyPass(ctx: Context): String {
+        val p = Prefs.of(ctx)
+        p.getString("direct.pass", null)?.let { return it }
+        return ("thor" + (1000..9999).random()).also { p.edit().putString("direct.pass", it).apply() }
     }
 
     fun stop(ctx: Context): JSONObject {
         val (m, c) = runCatching { init(ctx) }.getOrNull() ?: return status(ctx)
+        advertising = false
+        call { l -> m.clearLocalServices(c, l) }
         call { l -> m.removeGroup(c, l) }
         group = null
         Logs.i("direct", "Wi-Fi Direct aus")
@@ -103,7 +128,77 @@ object Direct {
     }.getOrNull()
 
     /** true when this device sits in someone else's Wi-Fi Direct network */
-    fun inForeignGroup(): Boolean = group == null && Device.ip()?.startsWith("192.168.49.") == true
+    fun inForeignGroup(): Boolean = group == null && (ownIp() ?: Device.ip())?.startsWith("192.168.49.") == true
+
+    // ---------- invites over the air ----------
+
+    /** (re)announces this Thor with the current net + lobby; call when the net or the lobby changes */
+    @Suppress("MissingPermission")
+    fun refreshInvite(ctx: Context) {
+        val g = group ?: return
+        if (!permitted(ctx)) return
+        val (m, c) = runCatching { init(ctx) }.getOrNull() ?: return
+        val l = Netplay.lobby
+        val txt = mapOf(
+            "n" to (Build.MODEL ?: "Thor").take(24),
+            "s" to g.optString("ssid"), "p" to g.optString("pass"),
+            "g" to (l?.public()?.optString("game")?.take(40) ?: ""), "m" to (l?.mode ?: ""), "k" to (l?.pin ?: ""),
+        )
+        call { cb -> m.clearLocalServices(c, cb) }
+        call { cb -> m.addLocalService(c, WifiP2pDnsSdServiceInfo.newInstance("ThorBro", SERVICE, txt), cb) }
+        if (!advertising) {
+            advertising = true
+            // others only see the service while this device is in "find" mode: keep it there while the net runs
+            Thread({
+                while (advertising && group != null) {
+                    runCatching { m.discoverPeers(c, null) }
+                    Thread.sleep(25_000)
+                }
+            }, "direct-announce").apply { isDaemon = true }.start()
+        }
+    }
+
+    /** Thors nearby that announce a ThorBro net (radio scan, a few seconds; call off the main thread) */
+    @Suppress("MissingPermission")
+    fun invites(ctx: Context, ms: Long = 6000): JSONArray {
+        val out = JSONArray()
+        if (!permitted(ctx)) return out
+        val (m, c) = runCatching { init(ctx) }.getOrNull() ?: return out
+        val found = java.util.concurrent.ConcurrentHashMap<String, Map<String, String>>()
+        m.setDnsSdResponseListeners(c, null) { full, rec, dev ->
+            if (full.contains(SERVICE.removePrefix("_").substringBefore('.'), true) && rec.isNotEmpty()) found[dev.deviceAddress] = HashMap(rec)
+        }
+        val req = WifiP2pDnsSdServiceRequest.newInstance(SERVICE)
+        call { l -> m.clearServiceRequests(c, l) }
+        call { l -> m.addServiceRequest(c, req, l) }
+        val err = call { l -> m.discoverServices(c, l) }
+        if (err != null) Logs.i("direct", "Suche: $err")
+        Thread.sleep(ms)
+        call { l -> m.removeServiceRequest(c, req, l) }
+        val mine = group?.optString("ssid")
+        found.forEach { (addr, r) ->
+            if (r["s"].isNullOrEmpty() || r["s"] == mine) return@forEach
+            out.put(JSONObject().put("device", addr).put("name", r["n"] ?: "Thor").put("ssid", r["s"]).put("pass", r["p"])
+                .put("game", r["g"].orEmpty()).put("mode", r["m"].orEmpty()).put("pin", r["k"].orEmpty()))
+        }
+        return out
+    }
+
+    /** joins another Thor's net without the Android dialog and waits for an address in it */
+    @Suppress("MissingPermission")
+    fun join(ctx: Context, ssid: String, pass: String): String {
+        if (!permitted(ctx)) throw IllegalStateException("Berechtigung „Geräte in der Nähe“ fehlt")
+        if (inForeignGroup()) return ownIp()!!
+        val (m, c) = init(ctx)
+        if (group != null) stop(ctx)
+        val cfg = WifiP2pConfig.Builder().setNetworkName(ssid).setPassphrase(pass).build()
+        call { l -> m.connect(c, cfg, l) }?.let { throw IllegalStateException(it) }
+        repeat(40) {
+            ownIp()?.takeIf { it.startsWith("192.168.49.") }?.let { Logs.i("direct", "Mit $ssid verbunden ($it)"); return it }
+            Thread.sleep(500)
+        }
+        throw IllegalStateException("Verbindung mit $ssid kam nicht zustande")
+    }
 
     fun status(ctx: Context): JSONObject {
         val g = group

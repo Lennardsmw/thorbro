@@ -159,6 +159,20 @@
       <div class="row"><span id="npStatus" class="muted grow">Lade …</span><button id="npClose" hidden>Lobby schließen</button></div>
       <div id="npLobby"></div>
     </div>
+    <div class="panel" id="azPanel" hidden>
+      <h3>3DS · Azahar-Raum</h3>
+      <div class="sub">Raum <strong>lokal</strong>: dieser Thor ist der Raum (selbes WLAN, Hotspot oder Wi-Fi Direct). Raum <strong>online</strong>: beide treten einem Raum auf einem Server bei. Den Raum selbst erstellst du in Azahar (Zurück-Taste → Mehrspieler) – ThorBro sagt, was einzutragen ist, sorgt für verschiedene 3DS-Namen und zeigt, ob es geklappt hat.</div>
+      <div class="row"><span id="azInfo" class="muted grow"></span></div>
+      <div class="row"><label class="grow">Online-Server <input id="azServer" placeholder="host:24872" size="24"></label><button id="azServerSave">Speichern</button></div>
+      <div class="row"><select id="azVariant"><option value="0">Raum lokal</option><option value="1">Raum online</option></select><input id="azFilter" placeholder="3DS-Spiel suchen" class="grow"></div>
+      <div id="azGames"></div>
+    </div>
+    <div class="panel">
+      <h3>Einladungen in der Nähe</h3>
+      <div class="sub">Thors mit ThorBro, die Wi-Fi Direct an haben, laden per Funk ein – ohne gemeinsames WLAN. Beitreten verbindet automatisch und startet das Spiel.</div>
+      <div class="row"><button id="invScan" class="primary">In der Nähe suchen</button><span id="invInfo" class="muted grow"></span></div>
+      <div id="invList" class="cards"></div>
+    </div>
     <div class="panel">
       <h3>Spiel hosten</h3>
       <div class="sub" id="npSupported"></div>
