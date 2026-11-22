@@ -92,6 +92,45 @@ object Netplay {
     /** Wi-Fi Direct was switched on by hosting (and goes off again with the lobby) */
     @Volatile private var autoDirect = false
 
+    /**
+     * "Spielserver": on until switched off, no game picked. The 3DS room runs, Wi-Fi Direct announces this Thor, and any
+     * game started from any frontend gets its lobby by itself ([AutoPlay]). Lobbies come and go, the server stays.
+     */
+    @Volatile var serverOn = false
+        private set
+
+    fun startServer(ctx: Context): JSONObject {
+        appCtx = ctx.applicationContext
+        serverOn = true
+        ensureDirect(ctx)
+        val roomErr = if ("azahar" in Emulators.installed(ctx).map { it.id }) Room.start(ctx, lobby?.public()?.optString("game") ?: "") else null
+        Direct.refreshInvite(ctx)
+        Logs.i("netplay", "Spielserver an" + (roomErr?.let { " (3DS-Raum: $it)" } ?: ""))
+        return server(ctx).also { if (roomErr != null) it.put("roomError", roomErr) }
+    }
+
+    fun stopServer(ctx: Context) {
+        serverOn = false
+        close(ctx)
+        Logs.i("netplay", "Spielserver aus")
+    }
+
+    /** what the server offers and how others get in, per emulator */
+    fun server(ctx: Context): JSONObject {
+        val inst = Emulators.installed(ctx).map { it.id }.toSet()
+        val services = JSONArray()
+        fun svc(id: String, name: String, port: Int?, how: String) = services.put(JSONObject().put("id", id).put("name", name).put("port", port).put("how", how))
+        if ("azahar" in inst) svc("azahar", "3DS (Azahar)", Azahar.PORT,
+            if (Room.running() && Room.ready) "Raum läuft · Azahar → Mehrspieler → Raum beitreten, hier 127.0.0.1, andere diese Adresse"
+            else Room.error ?: "Raum ist aus")
+        if ("ppsspp" in inst) svc("ppsspp", "PSP (PPSSPP)", 27312, "eingebauter Ad-hoc-Server · im Spiel lokalen Mehrspieler wählen")
+        if ("retroarch" in inst) svc("retroarch", "Retro (RetroArch)", RA_NETPLAY_PORT, "hostet, sobald ein Spiel läuft")
+        if ("eden" in inst) svc("eden", "Switch (Eden)", null, "Raum im Eden-Menü öffnen")
+        return JSONObject().put("on", serverOn).put("name", model()).put("direct", Direct.active())
+            .put("ssid", Direct.status(ctx).optString("ssid")).put("addresses", Room.addresses())
+            .put("room", Room.status()).put("services", services)
+    }
+
     private fun size(f: File) = if (f.isDirectory) f.walkTopDown().filter { it.isFile }.sumOf { it.length() } else f.length()
 
     private fun model() = appCtx?.let { Me.name(it) } ?: (android.os.Build.MODEL ?: "Thor")
@@ -126,6 +165,7 @@ object Netplay {
             .put("friends", JSONArray(Friends.list(ctx)))
             .put("auto", Friends.auto(ctx))
             .put("direct", Direct.active())
+            .put("server", server(ctx))
             .put("azahar", if ("azahar" in Emulators.installed(ctx).map { it.id }) JSONObject()
                 .put("identity", Azahar.identity(ctx))
                 .put("room", Azahar.roomState())
@@ -144,7 +184,7 @@ object Netplay {
         if (rom.isDirectory) return JSONObject().put("error", "Ordner-Spiele werden noch nicht unterstützt")
         appCtx = ctx.applicationContext
         if (mode == "azahar") Room.start(ctx, rom.name.substringBeforeLast('.'))?.let { return JSONObject().put("error", it) }
-        else Room.stop()
+        else if (!serverOn) Room.stop()
         val l = open(ctx, system, rom, mode)
         val res = start(ctx, l, hostIp = null)
         if (res.has("error")) { close(ctx); return res }
@@ -203,6 +243,15 @@ object Netplay {
         return out
     }
 
+    /** the game's picture (Cocoon icon, else the box art), for tiles and notifications; may download, call off the main thread */
+    fun art(ctx: Context, system: String, rom: File): File? = runCatching {
+        Cocoon.media(ctx, system, rom.path, "icon") ?: run {
+            val r = JSONObject().put("path", rom.path).put("file", rom.name).put("dir", rom.isDirectory)
+            Media.metaFor(ctx, system, listOf(r)).optJSONObject(rom.path)?.optString("cover")?.takeIf { it.isNotEmpty() }
+                ?.let { Media.cover(ctx, system, it) }
+        }
+    }.getOrNull()
+
     /** (console, ROM) by path or by name (RetroArch only tells the name) */
     fun findRom(ctx: Context, path: String? = null, name: String? = null): Pair<String, File>? {
         fun norm(x: String) = x.substringBeforeLast('.').lowercase().filter { it.isLetterOrDigit() }
@@ -227,7 +276,7 @@ object Netplay {
     fun share(ctx: Context, system: String, rom: File): JSONObject {
         if (!rom.isFile) return JSONObject().put("error", "Nur einzelne Spieldateien lassen sich weitergeben")
         appCtx = ctx.applicationContext
-        Room.stop()
+        if (!serverOn) Room.stop()
         val l = open(ctx, system, rom, "share")
         l.hostState = "sharing"
         return JSONObject().put("pin", l.pin).put("ip", l.roomIp).put("mode", "share").put("direct", Direct.active())
@@ -254,8 +303,9 @@ object Netplay {
     fun close(ctx: Context? = null) {
         lobby?.let { Logs.i("netplay", "Lobby geschlossen: ${it.rom.name}") }
         lobby = null
-        Room.stop()
         val c = ctx ?: appCtx
+        if (serverOn) { c?.let { Direct.refreshInvite(it) }; return } // the server keeps room and Wi-Fi Direct up
+        Room.stop()
         if (c != null) {
             if (autoDirect) { autoDirect = false; runCatching { Direct.stop(c) } } else Direct.refreshInvite(c)
         }

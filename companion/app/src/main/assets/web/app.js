@@ -692,6 +692,7 @@ function openRom(path, sysId) {
           `<tr><td class="muted">${x.switchKind === 'base' ? 'Spiel' : x.switchKind === 'update' ? 'Update ' + esc(x.versionLabel) : 'DLC'}${r.group.oldUpdates.includes(x) ? ' <span class="badge warnbadge">veraltet</span>' : ''}</td><td>${esc(x.file)} <span class="muted">${fmt(x.size)}</span></td><td><button data-romdel="${esc(x.path)}">Löschen</button></td></tr>`).join('')}</table>` : ''}
         <div class="row">
           ${emus && emus.systems[sysId] && (!r.group || r.group.base) ? `<button class="primary" data-play="${esc(r.path)}" data-play-sys="${esc(sysId)}">▶ Auf dem Thor spielen</button>` : ''}
+          ${r.dir || sysId === 'ports' ? '' : `<button data-share-rom="${esc(r.path)}" data-share-sys="${esc(sysId)}">Weitergeben</button>`}
           <button data-dir-roms="${esc(folder)}">Im Datei-Tab öffnen</button>
           ${r.dir ? '' : `<a class="btn" href="/api/files/raw?${q({ path: r.path, token })}">Herunterladen</a>`}
           <button data-romdel="${esc(r.path)}">Löschen</button>
@@ -931,6 +932,14 @@ $('#romDetail').onclick = async (e) => {
   const t = e.target, dlg = $('#romDetail');
   if (t === dlg || t.dataset.close !== undefined) return dlg.close();
   if (t.dataset.play) return play(t.dataset.play, t.dataset.playSys);
+  if (t.dataset.shareRom) {
+    try {
+      const { body } = await api('/api/netplay/host?' + q({ system: t.dataset.shareSys, path: t.dataset.shareRom, share: '1' }), { method: 'POST' });
+      if (body.error) throw new Error(body.error);
+      toast(body.direct ? 'Wird angeboten – der Thor in der Nähe bekommt eine Einladung' : `Wird angeboten · PIN ${body.pin}`);
+    } catch (err) { alert(err.message); }
+    return;
+  }
   try {
     if (t.dataset.dirRoms) { dlg.close(); showTab('files'); await loadFiles(t.dataset.dirRoms); }
     if (t.dataset.romdel && confirm(`${t.dataset.romdel} löschen?`)) {
@@ -1274,7 +1283,7 @@ $('#mlScan').onclick = async () => {
 
 // ---------- netplay (local multiplayer) ----------
 let np = null;
-const npModes = { retroarch: 'RetroArch', ppsspp: 'PPSSPP', eden: 'Eden', azahar: 'Azahar', share: 'Weitergeben' };
+const npModes = { retroarch: 'RetroArch', ppsspp: 'PPSSPP', eden: 'Eden', azahar: 'Azahar', share: 'Weitergeben', server: 'Spielserver' };
 const npAddrs = (a) => (a || []).map((x) => `${x.kind}: ${x.ip}`).join(' · ') || 'kein Netz';
 async function loadNetplay() {
   try { np = (await api('/api/netplay')).body; } catch (err) { $('#npStatus').textContent = 'Fehler: ' + err.message; return; }
@@ -1300,9 +1309,10 @@ async function loadNetplay() {
   }
   $('#npAddrs').textContent = 'Dieser Thor: ' + npAddrs(np.addresses) + '. Von unterwegs: beide Thors in NetBird, dann hier die NetBird-Adresse des anderen eintippen.';
   if (np.shizuku !== 'ready') $('#npLobby').innerHTML += '<p class="muted">Tipp: Mit Shizuku übernimmt ThorBro deine RetroArch-Einstellungen 1:1 und kann PPSSPP einstellen.</p>';
-  $('#npSupported').textContent = np.supported.length
-    ? 'Spielen geht mit: ' + np.supported.map((s) => s.name + (s.shaky ? ' (wackelig)' : '')).join(', ') + '. Weitergeben geht mit jedem Spiel.'
-    : 'Kein passender Emulator installiert (RetroArch, PPSSPP, Azahar oder Eden). Weitergeben geht trotzdem.';
+  $('#npSupported').textContent = (np.supported.length
+    ? 'Ein Knopf, keine Spielauswahl: 3DS-Raum, Wi-Fi Direct und Einladungen. Dann ein Spiel aus einem beliebigen Frontend starten. Geht mit: ' + np.supported.map((s) => s.name + (s.shaky ? ' (wackelig)' : '')).join(', ') + '.'
+    : 'Kein passender Emulator installiert (RetroArch, PPSSPP, Azahar oder Eden).') + ' Ein Spiel weitergeben: im Spiele-Tab beim Spiel „Weitergeben“.';
+  renderServer(np.server);
   if (np.joined && np.joined.mode === 'azahar' && !l) {
     const st = np.azahar && np.azahar.room;
     $('#npLobby').innerHTML += `<p>3DS-Raum bei ${esc(np.joined.host)}: ${st === 'connected' ? '<span class="ok">im Raum ✓</span>' : '<span class="err">noch nicht im Raum</span>'}</p><pre>${esc(np.joined.hint || '')}</pre>`;
@@ -1310,9 +1320,7 @@ async function loadNetplay() {
   $('#frList').innerHTML = (np.friends || []).length ? np.friends.map((f) => `<div class="card"><h3>${esc(f.name)}</h3><div class="muted">${esc(f.id)}</div>
     <p><button data-unfriend="${esc(f.id)}">Entfernen</button></p></div>`).join('') : '<p class="muted">Noch keine – einmal eine Einladung annehmen.</p>';
   $('#frAuto').checked = !!np.auto;
-  if (!romData) { try { romData = (await api('/api/roms')).body; } catch {} }
-  renderNetplayGames();
-  if ((l && l.mode === 'azahar') || (np.joined && np.joined.mode === 'azahar')) { clearTimeout(loadNetplay.t); loadNetplay.t = setTimeout(() => { if (!$('#netplay').hidden) loadNetplay(); }, 4000); }
+  if ((np.server && np.server.on) || (l && l.mode === 'azahar') || (np.joined && np.joined.mode === 'azahar')) { clearTimeout(loadNetplay.t); loadNetplay.t = setTimeout(() => { if (!$('#netplay').hidden) loadNetplay(); }, 4000); }
 }
 let invites = [];
 $('#invScan').onclick = async () => {
@@ -1338,32 +1346,38 @@ $('#invList').addEventListener('click', async (e) => {
   } catch (err) { alert(err.message); $('#invInfo').textContent = ''; }
   b.disabled = false;
 });
-function renderNetplayGames() {
-  if (!np || !romData) return;
-  const share = $('#npKind').value === 'share';
-  const ids = new Set(np.supported.map((s) => s.id));
-  const f = $('#npFilter').value.trim().toLowerCase();
-  const rows = [];
-  romData.systems.filter((s) => share || ids.has(s.id)).forEach((s) => s.roms.filter((r) => !r.dir && (!f || r.name.toLowerCase().includes(f)))
-    .forEach((r) => rows.push(`<tr><td>${esc(r.name)}<div class="muted">${esc(s.name)} · ${fmt(r.size)}</div></td>
-      <td><button data-host="${esc(r.path)}" data-sys="${esc(s.id)}">${share ? 'Weitergeben' : 'Spielen'}</button></td></tr>`)));
-  $('#npGames').innerHTML = rows.length ? `<table class="files"><tbody>${rows.slice(0, 200).join('')}</tbody></table>` : '<p class="muted">Keine passenden Spiele.</p>';
+function serverText(sv) {
+  const lines = [`Name: ${sv.name}`];
+  if (sv.direct) lines.push(`Wi-Fi Direct: ${sv.ssid} (Thors in der Nähe sehen ihn von selbst)`);
+  lines.push('', 'Adressen:', ...(sv.addresses || []).map((x) => `${x.kind}: ${x.ip}`));
+  if ((sv.services || []).length) {
+    lines.push('', 'Läuft hier:');
+    sv.services.forEach((x) => lines.push(`• ${x.name}${x.port ? ' · Port ' + x.port : ''}`, `   ${x.how}`));
+  }
+  const m = (sv.room && sv.room.members) || [];
+  if (m.length) lines.push('', 'Im 3DS-Raum: ' + m.join(', '));
+  lines.push('', 'Spiel aus einem beliebigen Frontend starten – Freunde in der Nähe bekommen die Einladung. Von unterwegs: über NetBird.');
+  return lines.join('\n');
 }
-$('#npFilter').oninput = renderNetplayGames;
-$('#npKind').onchange = renderNetplayGames;
-$('#npClose').onclick = async () => { await api('/api/netplay/close', { method: 'POST' }); loadNetplay(); loadDirect(); };
-$('#npGames').addEventListener('click', async (e) => {
-  const b = e.target.closest('[data-host]'); if (!b) return;
-  const share = $('#npKind').value === 'share';
-  b.disabled = true;
+function renderServer(sv) {
+  if (!sv) return;
+  $('#svToggle').textContent = sv.on ? 'Server stoppen' : 'Spielserver starten';
+  $('#svToggle').classList.toggle('primary', !sv.on);
+  $('#svState').innerHTML = sv.on ? '<span class="ok">läuft</span>' : 'aus';
+  $('#svInfo').hidden = !sv.on;
+  $('#svInfo').textContent = sv.on ? serverText(sv) : '';
+}
+$('#svToggle').onclick = async () => {
+  const on = !(np && np.server && np.server.on);
+  $('#svToggle').disabled = true; $('#svState').textContent = on ? 'startet …' : 'stoppt …';
   try {
-    const { body } = await api('/api/netplay/host?' + q({ system: b.dataset.sys, path: b.dataset.host, share: share ? '1' : '' }), { method: 'POST' });
-    if (body.error) throw new Error(body.error);
-    toast(share ? 'Wird angeboten' : `Läuft – PIN ${body.pin}`);
+    const { body } = await api('/api/netplay/server?' + q({ on: on ? '1' : '0' }), { method: 'POST' });
+    if (body.roomError) toast('3DS-Raum: ' + body.roomError);
   } catch (err) { alert(err.message); }
-  b.disabled = false; loadNetplay(); loadDirect();
-  setTimeout(loadNetplay, 12000);
-});
+  $('#svToggle').disabled = false; loadNetplay(); loadDirect();
+};
+$('#npClose').onclick = async () => { await api('/api/netplay/close', { method: 'POST' }); loadNetplay(); loadDirect(); };
+
 function renderPeers(peers) {
   $('#npPeers').innerHTML = peers.map((p) => {
     const l = p.lobby;

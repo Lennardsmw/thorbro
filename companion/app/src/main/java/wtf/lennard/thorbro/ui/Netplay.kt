@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.WifiTethering
@@ -50,10 +51,9 @@ import wtf.lennard.thorbro.Azahar
 import wtf.lennard.thorbro.Direct
 import wtf.lennard.thorbro.Jobs
 import wtf.lennard.thorbro.Netplay
-import wtf.lennard.thorbro.Roms
 import java.io.File
 
-private val modeNames = mapOf("retroarch" to "RetroArch", "ppsspp" to "PPSSPP", "eden" to "Eden", "azahar" to "Azahar", "share" to "Weitergeben")
+private val modeNames = mapOf("retroarch" to "RetroArch", "ppsspp" to "PPSSPP", "eden" to "Eden", "azahar" to "Azahar", "share" to "Weitergeben", "server" to "Spielserver")
 
 /** status line of the own lobby */
 private fun hostStateText(l: JSONObject, room: JSONObject?) = when (l.optString("hostState")) {
@@ -71,9 +71,10 @@ private fun hostStateText(l: JSONObject, room: JSONObject?) = when (l.optString(
 private fun addressText(a: org.json.JSONArray?) = a.objs().joinToString("\n") { "${it.optString("kind")}: ${it.optString("ip")}" }.ifEmpty { "kein Netz" }
 
 /**
- * Multiplayer, one main way: pick a game → "Mit Freund spielen". ThorBro opens the lobby, Wi-Fi Direct (so a Thor nearby
- * gets the invite over the air) and for 3DS its own room. The friend's Thor shows "X lädt ein" → one button.
- * "Spiel weitergeben" hands a game over the same way. Everything manual (search, PIN, Wi-Fi Direct by hand) is under "Erweitert".
+ * Multiplayer, one main way: "Spielserver starten" (no game to pick). ThorBro runs the 3DS room, Wi-Fi Direct (so a Thor
+ * nearby gets the invite over the air) and invites friends to whatever game is started next, from any frontend.
+ * The friend's Thor shows "X lädt ein" → one button. Handing a game over lives in the game's own page ("Weitergeben").
+ * Everything manual (search, PIN, Wi-Fi Direct by hand) is under "Erweitert".
  */
 @Composable
 fun NetplayScreen() {
@@ -82,8 +83,7 @@ fun NetplayScreen() {
     val first = remember { FocusRequester() }
     var tick by remember { mutableIntStateOf(0) }
     var st by remember { mutableStateOf<JSONObject?>(null) }
-    var games by remember { mutableStateOf<List<Pair<String, JSONObject>>>(emptyList()) }
-    var allGames by remember { mutableStateOf<List<Pair<String, JSONObject>>>(emptyList()) }
+    var lobbyArt by remember { mutableStateOf<File?>(null) }
     var peers by remember { mutableStateOf<List<JSONObject>?>(null) }
     var searching by remember { mutableStateOf(false) }
     var pinFor by remember { mutableStateOf<JSONObject?>(null) }
@@ -94,19 +94,14 @@ fun NetplayScreen() {
     var invites by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
     var invitePopup by remember { mutableStateOf<JSONObject?>(null) }
     val seenInvites = remember { mutableSetOf<String>() }
-    var sharePick by remember { mutableStateOf(false) } // next tapped game is handed over instead of played
+    var serverBusy by remember { mutableStateOf(false) }
     var advanced by remember { mutableStateOf(false) }
     var friendMenu by remember { mutableStateOf<JSONObject?>(null) }
 
     LaunchedEffect(tick) {
         withContext(Dispatchers.IO) {
-            val s = runCatching { Netplay.status(ctx) }.getOrNull()
-            val ok = s?.optJSONArray("supported").objs().associateBy { it.optString("id") }
-            val all = runCatching {
-                Roms.scan(ctx, false).optJSONArray("systems").objs()
-                    .flatMap { sys -> sys.optJSONArray("roms").objs().filter { !it.optBoolean("dir") }.map { sys.optString("id") to it } }
-            }.getOrDefault(emptyList())
-            st = s; allGames = all; games = all.filter { it.first in ok }
+            st = runCatching { Netplay.status(ctx) }.getOrNull()
+            lobbyArt = Netplay.lobby?.let { Netplay.art(ctx, it.system, it.rom) }?.takeIf { it.extension.lowercase() != "svg" }
         }
     }
     // follow the host state (RetroArch hosting switches on a few seconds after start)
@@ -114,7 +109,8 @@ fun NetplayScreen() {
         if (st?.optJSONObject("lobby")?.optString("hostState") == "starting") { delay(4000); tick++ }
     }
     // 3DS room: who is in it, live
-    val azLive = st?.optJSONObject("lobby")?.optString("mode") == "azahar" || st?.optJSONObject("joined")?.optString("mode") == "azahar"
+    val azLive = st?.optJSONObject("lobby")?.optString("mode") == "azahar" || st?.optJSONObject("joined")?.optString("mode") == "azahar" ||
+        st?.optJSONObject("server")?.optBoolean("on") == true
     WhileVisible(azLive, tick) { if (azLive) { delay(3000); tick++ } }
     // Thors nearby inviting over Wi-Fi Direct: scan while this screen is open and no own lobby runs
     WhileVisible {
@@ -151,20 +147,32 @@ fun NetplayScreen() {
         searching = true
         scope.launch { peers = withContext(Dispatchers.IO) { runCatching { Netplay.peers(ctx).objs() }.getOrDefault(emptyList()) }; searching = false }
     }
-    fun go(sys: String, r: JSONObject, share: Boolean) {
-        if (!canDirect) (ctx as? android.app.Activity)?.requestPermissions(arrayOf(Direct.permissionName()), 7)
+    val server = s.optJSONObject("server") ?: JSONObject()
+    val serverOn = server.optBoolean("on")
+    fun serverInfo(sv: JSONObject) = buildString {
+        append("Name: ${sv.optString("name")}\n")
+        if (sv.optBoolean("direct")) append("Wi-Fi Direct: ${sv.optString("ssid")} (Thors in der Nähe sehen ihn von selbst)\n")
+        append("\nAdressen:\n${addressText(sv.optJSONArray("addresses"))}\n")
+        val svc = sv.optJSONArray("services").objs()
+        if (svc.isEmpty()) append("\nKein passender Emulator installiert (Azahar, PPSSPP, RetroArch, Eden).")
+        else {
+            append("\nLäuft hier:\n")
+            svc.forEach { append("• ${it.optString("name")}${if (it.has("port") && !it.isNull("port")) " · Port ${it.optInt("port")}" else ""}\n   ${it.optString("how")}\n") }
+        }
+        val members = sv.optJSONObject("room")?.optJSONArray("members").objs().size
+        if (members > 0) append("\nIm 3DS-Raum: ${sv.optJSONObject("room")!!.optJSONArray("members").let { a -> (0 until a!!.length()).joinToString(", ") { a.optString(it) } }}\n")
+        append("\nSpiel aus einem beliebigen Frontend starten – Freunde in der Nähe bekommen die Einladung. Von unterwegs: über NetBird.")
+    }
+    fun toggleServer() {
+        if (serverBusy) return
+        if (!serverOn && !canDirect) (ctx as? android.app.Activity)?.requestPermissions(arrayOf(Direct.permissionName()), 7)
+        serverBusy = true
         scope.launch {
             val res = withContext(Dispatchers.IO) {
-                runCatching { if (share) Netplay.share(ctx, sys, File(r.optString("path"))) else Netplay.host(ctx, sys, File(r.optString("path"))) }
-                    .getOrElse { JSONObject().put("error", it.message) }
+                runCatching { if (serverOn) { Netplay.stopServer(ctx); null } else Netplay.startServer(ctx) }.getOrElse { JSONObject().put("roomError", it.message) }
             }
-            val reach = if (res.optBoolean("direct")) "Ein Thor in der Nähe bekommt jetzt eine Einladung – dort „Beitreten“ drücken."
-                else "Wi-Fi Direct ist aus (Berechtigung „Geräte in der Nähe“ fehlt?): der andere Thor muss im selben WLAN sein → Erweitert → Thors suchen, PIN ${res.optString("pin")}."
-            info = when {
-                res.has("error") -> "Geht nicht" to res.optString("error")
-                share -> "Wird weitergegeben" to "${r.optString("name")}\n\n$reach"
-                else -> "Läuft · PIN ${res.optString("pin")}" to "$reach\n\n${res.optString("hint")}"
-            }
+            serverBusy = false
+            if (res != null) info = "Spielserver läuft" to (res.optString("roomError").takeIf { it.isNotEmpty() }?.let { "3DS-Raum: $it\n\n" } ?: "") + serverInfo(res)
             tick++
         }
     }
@@ -175,7 +183,7 @@ fun NetplayScreen() {
             header(if (share) "Du gibst weiter" else "Du spielst", "${lobby.optString("game")} · ${modeNames[lobby.optString("mode")]}")
             item {
                 ConsoleTile(hostStateText(lobby, room), "PIN ${lobby.optString("pin")} · Details",
-                    if (lobby.optString("hostState") in setOf("hosting", "sharing")) Icons.Filled.CheckCircle else Icons.Filled.Lock, accent = true,
+                    if (lobby.optString("hostState") in setOf("hosting", "sharing")) Icons.Filled.CheckCircle else Icons.Filled.Lock, image = lobbyArt, accent = true,
                     modifier = Modifier.firstFocus(first, true)) {
                     val guests = lobby.optJSONArray("guestNames").let { a -> (0 until (a?.length() ?: 0)).joinToString(", ") { a!!.optString(it) } }.ifEmpty { "noch keiner" }
                     val inRoom = room?.optJSONArray("members").let { a -> (0 until (a?.length() ?: 0)).joinToString(", ") { a!!.optString(it) } }
@@ -218,31 +226,28 @@ fun NetplayScreen() {
                 item {
                     ConsoleTile(inv.optString("name"), inv.optString("game").ifEmpty { "Wi-Fi Direct offen" }.let { g ->
                         when { inv.optString("pin").isEmpty() -> "$g · verbinden"; shareInv -> "$g · annehmen"; else -> "$g · beitreten" } },
-                        if (shareInv) Icons.Filled.Share else Icons.Filled.BluetoothSearching, accent = inv.optString("pin").isNotEmpty(),
+                        if (inv.optString("pin").isEmpty()) Icons.Filled.BluetoothSearching else Icons.Filled.SportsEsports, accent = inv.optString("pin").isNotEmpty(),
                         modifier = Modifier.firstFocus(first, lobby == null)) { accept(inv) }
                 }
             }
         }
 
-        if (lobby == null) {
-            header(if (sharePick) "Welches Spiel weitergeben?" else "Mit Freund spielen",
-                when {
-                    sharePick -> "der Thor in der Nähe bekommt es geschickt"
-                    supported.isEmpty() -> "RetroArch, PPSSPP, Azahar oder Eden installieren"
-                    else -> "Spiel wählen – der andere Thor bekommt eine Einladung · " + supported.values.joinToString(", ") { it.optString("name") + if (it.optBoolean("shaky")) " (wackelig)" else "" }
-                })
-            item {
-                ConsoleTile(if (sharePick) "Abbrechen" else "Spiel weitergeben", if (sharePick) "zurück zum Spielen" else "nur schicken, nicht spielen",
-                    if (sharePick) Icons.Filled.Close else Icons.Filled.Share, accent = sharePick,
-                    modifier = Modifier.firstFocus(first, invites.isEmpty())) { sharePick = !sharePick }
+        header("Spielserver", when {
+            serverOn -> "läuft – Spiel aus einem beliebigen Frontend starten"
+            supported.isEmpty() -> "Azahar, PPSSPP, RetroArch oder Eden installieren"
+            else -> "ein Knopf: 3DS-Raum, Wi-Fi Direct und Einladungen · " + supported.values.map { modeNames[it.optString("mode")] }.distinct().joinToString(", ")
+        })
+        item {
+            ConsoleTile(when { serverBusy -> if (serverOn) "Stoppt …" else "Startet …"; serverOn -> "Server läuft"; else -> "Spielserver starten" },
+                if (serverOn) addressText(server.optJSONArray("addresses")).lineSequence().firstOrNull()?.substringAfter(": ") ?: "" else "keine Spielauswahl nötig",
+                if (serverOn) Icons.Filled.CheckCircle else Icons.Filled.WifiTethering, accent = serverOn,
+                modifier = Modifier.firstFocus(first, invites.isEmpty() && lobby == null)) {
+                if (serverOn) info = "Spielserver" to serverInfo(server) else toggleServer()
             }
-            (if (sharePick) allGames else games).take(150).forEach { (sys, r) ->
-                item {
-                    val name = supported[sys]?.optString("name") ?: sys
-                    ConsoleTile(r.optString("name"), if (sharePick) "$name · weitergeben" else name,
-                        if (sharePick) Icons.Filled.Share else Icons.Filled.WifiTethering) { val share = sharePick; sharePick = false; go(sys, r, share) }
-                }
-            }
+        }
+        if (serverOn) {
+            item { ConsoleTile("Infos", "Adressen, Ports, wer drin ist", Icons.Filled.Info) { info = "Spielserver" to serverInfo(server) } }
+            item { ConsoleTile("Server stoppen", "Raum und Wi-Fi Direct aus", Icons.Filled.Close) { toggleServer() } }
         }
 
         val friends = s.optJSONArray("friends").objs()
@@ -257,7 +262,7 @@ fun NetplayScreen() {
             item {
                 val auto = s.optBoolean("auto")
                 ConsoleTile(if (auto) "Automatisch einladen: an" else "Automatisch einladen: aus",
-                    when { !auto -> "nur über „Mit Freund spielen“"; s.optString("shizuku") != "ready" -> "braucht Shizuku, um das Spiel zu erkennen"; else -> "beim Spielstart aus jedem Frontend" },
+                    when { !auto -> "nur bei laufendem Spielserver"; s.optString("shizuku") != "ready" -> "braucht Shizuku, um das Spiel zu erkennen"; else -> "beim Spielstart aus jedem Frontend" },
                     Icons.Filled.WifiTethering, accent = auto) {
                     wtf.lennard.thorbro.Friends.setAuto(ctx, !auto); tick++
                 }

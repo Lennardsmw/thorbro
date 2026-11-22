@@ -71,7 +71,7 @@ class ThorService : Service() {
             this, 0, Intent(this, wtf.lennard.thorbro.ui.ThorActivity::class.java), PendingIntent.FLAG_IMMUTABLE
         )
         val n = Notification.Builder(this, CHANNEL)
-            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+            .setSmallIcon(R.drawable.ic_stat_game)
             .setContentTitle("ThorBro läuft")
             .setContentText("http://${Device.ip() ?: "?"}:$PORT")
             .setContentIntent(open)

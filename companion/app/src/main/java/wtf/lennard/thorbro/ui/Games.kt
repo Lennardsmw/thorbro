@@ -62,6 +62,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.runtime.mutableIntStateOf
 import wtf.lennard.thorbro.Media
 import wtf.lennard.thorbro.Roms
@@ -207,6 +208,19 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
         val list = buildList<Triple<String, androidx.compose.ui.graphics.vector.ImageVector, () -> Unit>> {
             play?.let { add(Triple("Spielen", Icons.Filled.PlayArrow, it)) }
             if (sys != "ports" || lib != null) add(Triple("Spielstände", Icons.Filled.Save, { savesOpen = true }))
+            if (sys != "ports" && !r.optBoolean("dir")) add(Triple("Weitergeben", Icons.Filled.SportsEsports, {
+                // hand this game to a Thor nearby: it gets an invite (Wi-Fi Direct) and keeps the file
+                scope.launch {
+                    val res = withContext(Dispatchers.IO) {
+                        runCatching { wtf.lennard.thorbro.Netplay.share(ctx, sys, File(r.getString("path"))) }.getOrElse { JSONObject().put("error", it.message) }
+                    }
+                    msg = when {
+                        res.has("error") -> res.optString("error")
+                        res.optBoolean("direct") -> "Wird angeboten – der Thor in der Nähe bekommt eine Einladung. Beenden unter Multiplayer."
+                        else -> "Wird angeboten · PIN ${res.optString("pin")} – Wi-Fi Direct ist aus, der andere Thor braucht dasselbe WLAN."
+                    }
+                }
+            }))
             add(Triple(if (fav) "Favorit ✓" else "Favorit", if (fav) Icons.Filled.Star else Icons.Filled.StarBorder, { Favorites.toggle(ctx, r.getString("path")) }))
             val queued = Background.isQueued(r.getString("path"))
             if (sys != "ports" && lib != null && !queued) add(Triple(if (lib.optBoolean("inRomm")) "Auslagern" else "Hochladen + auslagern", Icons.Filled.CloudUpload, { confirm = true }))

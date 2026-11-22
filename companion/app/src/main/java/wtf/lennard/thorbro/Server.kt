@@ -563,6 +563,11 @@ object Server {
                     }
                     json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
                 }
+                post("/api/netplay/server") {
+                    if (denied(ctx)) return@post
+                    val res = withContext(Dispatchers.IO) { if (q("on") == "1") Netplay.startServer(ctx) else { Netplay.stopServer(ctx); Netplay.server(ctx) } }
+                    json(res)
+                }
                 post("/api/netplay/auto") {
                     if (denied(ctx)) return@post
                     Friends.setAuto(ctx, q("on") == "1")
