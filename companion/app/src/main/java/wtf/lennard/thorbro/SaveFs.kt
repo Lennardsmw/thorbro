@@ -43,7 +43,10 @@ object SaveFs {
                 super.close()
                 try {
                     val p = f.parentFile?.path ?: "/"
-                    sh("mkdir -p ${Shell.q(p)} && cat ${Shell.q(tmp.path)} > ${Shell.q(f.path)}", f.name)
+                    val (P, T, F) = Triple(Shell.q(p), Shell.q(tmp.path), Shell.q(f.path))
+                    // overwrite in place; if the file itself is locked, replace it; on failure report owner/modes
+                    sh("mkdir -p $P && { cat $T > $F 2>/dev/null || { rm -f $F && cat $T > $F; } || " +
+                        "{ echo \"id=\$(id) dir=\$(ls -lnd $P) file=\$(ls -ln $F 2>&1)\" >&2; exit 1; }; }", f.name)
                 } finally { tmp.delete() }
             }
         }
