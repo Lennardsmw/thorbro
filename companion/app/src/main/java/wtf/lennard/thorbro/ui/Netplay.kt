@@ -101,9 +101,9 @@ fun NetplayScreen() {
     }
     // Azahar: the room is made by hand, follow it live
     val azLive = st?.optJSONObject("lobby")?.optString("mode") == "azahar" || st?.optJSONObject("joined")?.optString("mode") == "azahar"
-    LaunchedEffect(azLive, tick) { if (azLive) { delay(3000); tick++ } }
+    WhileVisible(azLive, tick) { if (azLive) { delay(3000); tick++ } }
     // Thors nearby inviting over Wi-Fi Direct: scan while this screen is open and no own lobby runs
-    LaunchedEffect(Unit) {
+    WhileVisible {
         while (true) {
             if (Direct.permitted(ctx) && st?.optJSONObject("lobby") == null && joinJob?.done != false) {
                 val found = withContext(Dispatchers.IO) { runCatching { Direct.invites(ctx).objs() }.getOrDefault(emptyList()) }
@@ -311,7 +311,7 @@ class DirectUi {
 fun rememberDirect(): DirectUi {
     val ctx = LocalContext.current
     val d = remember { DirectUi() }
-    LaunchedEffect(Unit) { while (true) { d.st = withContext(Dispatchers.IO) { wtf.lennard.thorbro.Direct.status(ctx) }; delay(3000) } }
+    WhileVisible { while (true) { d.st = withContext(Dispatchers.IO) { wtf.lennard.thorbro.Direct.status(ctx) }; delay(3000) } }
     return d
 }
 
