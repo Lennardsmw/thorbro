@@ -28,7 +28,15 @@ object RommSync {
     }
 
     /** RomM platforms by fs_slug, and the file names RomM has per platform */
-    internal fun remote(ctx: Context): Pair<Map<String, Int>, Map<Int, Map<String, Int>>> {
+    internal fun remote(ctx: Context, maxAgeMs: Long = 0): Pair<Map<String, Int>, Map<Int, Map<String, Int>>> {
+        remoteCache?.let { (at, v) -> if (maxAgeMs > 0 && System.currentTimeMillis() - at < maxAgeMs) return v }
+        return fetchRemote(ctx).also { remoteCache = System.currentTimeMillis() to it }
+    }
+
+    /** the full platform + ROM list is big; the periodic pull reuses it for half an hour */
+    @Volatile private var remoteCache: Pair<Long, Pair<Map<String, Int>, Map<Int, Map<String, Int>>>>? = null
+
+    private fun fetchRemote(ctx: Context): Pair<Map<String, Int>, Map<Int, Map<String, Int>>> {
         val plats = Romm.rawPlatforms(ctx)
         val bySlug = plats.associate { it.optString("fs_slug") to it.getInt("id") }
         val files = bySlug.values.associateWith { pid -> Romm.rawRoms(ctx, pid).associate { it.optString("fs_name") to it.getInt("id") } }
@@ -234,7 +242,7 @@ object RommSync {
      */
     @Synchronized
     fun pullSaves(ctx: Context): JSONObject {
-        val (bySlug, remoteFiles) = remote(ctx)
+        val (bySlug, remoteFiles) = remote(ctx, maxAgeMs = 30 * 60_000L)
         val up = uploaded(ctx)
         var n = 0; val errors = JSONArray()
         for (s in localSaves(ctx).filter { it.isFolder }) {
@@ -244,10 +252,10 @@ object RommSync {
                 val st = state(ctx)
                 val key = stateKey(ctx, s)
                 val prev = st.optJSONObject(key)
-                val localHash = md5(s.file)
                 val remoteChanged = !sameRemote(prev?.optString("remote"), newest)
-                val localChanged = localHash != prev?.optString("local")
                 if (!remoteChanged) continue
+                // hashing a whole save folder is expensive: only when RomM actually has something new
+                val localChanged = md5(s.file) != prev?.optString("local")
                 if (localChanged) { // both changed (or first sync): the newer one wins
                     val localTime = s.file.walkTopDown().filter { it.isFile }.maxOfOrNull { it.lastModified() } ?: 0L
                     if (remoteTime(newest) <= localTime + 30_000) continue // local is newer: syncSaves uploads it

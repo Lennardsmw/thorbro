@@ -133,7 +133,7 @@ enum class Screen(val label: String, val icon: ImageVector) {
 fun StatusBar(title: String) {
     val ctx = LocalContext.current
     var tick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) { while (true) { delay(20_000); tick++ } }
+    WhileVisible { while (true) { delay(20_000); tick++ } }
     val time = remember(tick) { SimpleDateFormat("HH:mm", Locale.GERMANY).format(Date()) }
     val battery = remember(tick) { ctx.getSystemService(BatteryManager::class.java).getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) }
     val wifi = remember(tick) {

@@ -34,6 +34,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.CoroutineScope
 
 /** glass look: black background, milky translucent panels, white as the highlight */
 val Accent = Color(0xFFF4F6FA)          // highlight (white)
@@ -143,4 +148,14 @@ fun fmtBytes(n: Long): String {
     val u = listOf("KB", "MB", "GB", "TB"); var v = n.toDouble(); var i = -1
     do { v /= 1024; i++ } while (v >= 1024 && i < u.size - 1)
     return (if (v < 10) "%.1f" else "%.0f").format(v) + " " + u[i]
+}
+
+/**
+ * Like LaunchedEffect, but only while ThorBro is on screen: polling loops pause when a game runs
+ * or the display is off (they used to keep ticking in the background and cost battery).
+ */
+@Composable
+fun WhileVisible(vararg keys: Any?, block: suspend CoroutineScope.() -> Unit) {
+    val owner = LocalLifecycleOwner.current
+    LaunchedEffect(owner, *keys) { owner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { block() } }
 }

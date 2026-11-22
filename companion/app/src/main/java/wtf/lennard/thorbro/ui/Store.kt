@@ -38,7 +38,7 @@ fun StoreScreen() {
         refresh = false
     }
     // redraw progress twice a second while something downloads
-    LaunchedEffect(Unit) { while (true) { delay(500); if (Library.downloads.values.any { !it.done }) frame++ } }
+    WhileVisible { while (true) { delay(500); if (Library.downloads.values.any { !it.done }) frame++ } }
     val free = remember(frame / 20, tick) { runCatching { Storage.free(Library.romsRoot(ctx)) }.getOrDefault(-1L) }
 
     val d = data

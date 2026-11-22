@@ -53,7 +53,7 @@ fun StreamScreen() {
     // the stream state lives in the service; follow it so only one button shows
     var live by remember { mutableStateOf(wtf.lennard.thorbro.Screen.running) }
     var starting by remember { mutableStateOf(wtf.lennard.thorbro.Screen.starting) }
-    LaunchedEffect(Unit) { while (true) { live = wtf.lennard.thorbro.Screen.running; starting = wtf.lennard.thorbro.Screen.starting; delay(500) } }
+    WhileVisible { while (true) { live = wtf.lennard.thorbro.Screen.running; starting = wtf.lennard.thorbro.Screen.starting; delay(500) } }
     val s = st
     val installed = s?.optBoolean("installed") == true
     val update = s?.optBoolean("updateAvailable") == true

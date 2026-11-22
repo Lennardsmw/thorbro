@@ -31,6 +31,11 @@ object Screen {
         get() = startingAt > 0 && System.currentTimeMillis() - startingAt < 30_000
         set(v) { startingAt = if (v) System.currentTimeMillis() else 0L }
     @Volatile var width = 0
+    /** last time a browser fetched a frame; no viewer → no encoding, and capture ends after [IDLE_STOP_MS] */
+    @Volatile private var viewedAt = 0L
+    private const val IDLE_SKIP_MS = 3_000L
+    private const val IDLE_STOP_MS = 60_000L
+    fun viewed() { viewedAt = System.currentTimeMillis() }
     @Volatile var height = 0
 
     private var projection: MediaProjection? = null
@@ -58,11 +63,19 @@ object Screen {
         val h = (m.heightPixels / 2) and 0xFFFE
         val r = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 2)
         var last = 0L
+        viewed() // grace period until the browser connects
         r.setOnImageAvailableListener({ ir ->
             val img = ir.acquireLatestImage() ?: return@setOnImageAvailableListener
             try {
                 val now = System.currentTimeMillis()
                 if (now - last < 80) return@setOnImageAvailableListener // ~12 fps
+                val idle = now - viewedAt
+                if (idle > IDLE_STOP_MS) {
+                    Logs.i("screen", "kein Zuschauer seit 60 s, Bildschirmübertragung beendet")
+                    Thread { stop() }.start()
+                    return@setOnImageAvailableListener
+                }
+                if (idle > IDLE_SKIP_MS) return@setOnImageAvailableListener // nobody watching: don't encode
                 last = now
                 val plane = img.planes[0]
                 val rowPad = plane.rowStride - plane.pixelStride * w

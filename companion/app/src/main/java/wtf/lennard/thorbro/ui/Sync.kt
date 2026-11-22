@@ -95,7 +95,7 @@ fun SyncScreen() {
     val scope = rememberCoroutineScope()
     val first = remember { FocusRequester() }
     var tick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) { while (true) { delay(4000); tick++ } }
+    WhileVisible { while (true) { delay(4000); tick++ } }
     var auto by remember { mutableStateOf(RommSync.auto(ctx)) }
     var busy by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }

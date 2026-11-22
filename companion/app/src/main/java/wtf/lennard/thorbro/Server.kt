@@ -265,6 +265,7 @@ object Server {
                 }
                 get("/api/screen/frame.jpg") {
                     if (denied(ctx)) return@get
+                    Screen.viewed()
                     val f = Screen.frame ?: return@get fail("kein Bild", HttpStatusCode.NotFound)
                     call.response.header(HttpHeaders.CacheControl, "no-store")
                     call.respondBytes(f, ContentType.Image.JPEG)
@@ -275,6 +276,7 @@ object Server {
                     call.respondBytesWriter(ContentType.parse("multipart/x-mixed-replace; boundary=thorbroframe")) {
                         var sent = 0L
                         while (Screen.running && !isClosedForWrite) {
+                            Screen.viewed()
                             val f = Screen.frame
                             if (f != null && Screen.frameAt != sent) {
                                 sent = Screen.frameAt

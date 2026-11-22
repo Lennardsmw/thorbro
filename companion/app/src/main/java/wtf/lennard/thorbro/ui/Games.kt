@@ -85,7 +85,8 @@ private fun entries(s: Sys): List<JSONObject> {
 fun GamesScreen() {
     val ctx = LocalContext.current
     var reload by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) { var seen = Background.changes; while (true) { kotlinx.coroutines.delay(1000); if (Background.changes != seen) { seen = Background.changes; Roms.invalidate(); reload++ } } }
+    val seen = remember { intArrayOf(Background.changes) }
+    WhileVisible { while (true) { if (Background.changes != seen[0]) { seen[0] = Background.changes; Roms.invalidate(); reload++ }; kotlinx.coroutines.delay(1000) } }
     val lib by produceState<JSONObject?>(null, reload) { value = withContext(Dispatchers.IO) { runCatching { Library.status(ctx) }.getOrNull() } }
     val systems by produceState<List<Sys>?>(null, reload) {
         value = withContext(Dispatchers.IO) {

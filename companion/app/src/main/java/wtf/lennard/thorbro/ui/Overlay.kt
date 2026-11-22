@@ -47,7 +47,7 @@ import wtf.lennard.thorbro.Background
 @Composable
 fun BackgroundOverlay(modifier: Modifier = Modifier) {
     var items by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
-    LaunchedEffect(Unit) { while (true) { items = Background.list().objs(); delay(500) } }
+    WhileVisible { while (true) { items = Background.list().objs(); delay(500) } }
     AnimatedVisibility(items.isNotEmpty(), modifier, enter = fadeIn() + slideInHorizontally { it / 2 }, exit = fadeOut() + slideOutHorizontally { it / 2 }) {
         Column(Modifier.padding(top = 58.dp, end = 24.dp).width(320.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items.forEach { ActivityCard(it) }

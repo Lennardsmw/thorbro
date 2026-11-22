@@ -191,7 +191,7 @@ private fun SettingsScreen() {
     val scope = rememberCoroutineScope()
     val first = remember { androidx.compose.ui.focus.FocusRequester() }
     var tick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) { while (true) { delay(3000); tick++ } }
+    WhileVisible { while (true) { delay(3000); tick++ } }
     val p = remember(tick) { Device.permissions(ctx) }
     val grants = remember(tick) { wtf.lennard.thorbro.Emulators.trees(ctx).size }
     var autoUpdate by remember { mutableStateOf(Updater.auto(ctx)) }

@@ -1340,8 +1340,10 @@ async function pollActivity() {
   // something finished: refresh what changed
   if (actWasBusy && !busy) { if (romData) loadRoms(true); if (storeData && !$('#store').hidden) loadStore(true); }
   actWasBusy = busy;
-  actTimer = setTimeout(pollActivity, list.length ? 1000 : 5000);
+  // hidden tab / app in the background: stop polling until it is visible again (saves battery on the Thor)
+  if (!document.hidden) actTimer = setTimeout(pollActivity, list.length ? 1000 : 5000);
 }
+document.addEventListener('visibilitychange', () => { if (!document.hidden && token) pollActivity(); });
 
 async function start() {
   if (!token) return showLogin();

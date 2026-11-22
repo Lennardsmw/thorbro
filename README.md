@@ -66,3 +66,7 @@ Pfade sind auf den internen Speicher und SD-Karten beschränkt.
 - Selbst-Update aus GitHub-Releases, optional automatisch
 
 Schrift in der App: [Nunito](https://github.com/googlefonts/nunito) (SIL Open Font License 1.1).
+
+## Lizenz
+
+[MIT](LICENSE). Beiträge sind willkommen, siehe [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -60,6 +60,10 @@ class AppActivity : Activity() {
 
     private fun load() = web.loadUrl("http://127.0.0.1:${ThorService.PORT}/?app=1&token=${Prefs.token(this)}")
 
+    // stop the page's timers while ThorBro Web is in the background (e.g. a game is running)
+    override fun onPause() { web.onPause(); web.pauseTimers(); super.onPause() }
+    override fun onResume() { super.onResume(); web.resumeTimers(); web.onResume() }
+
     @Deprecated("plain Activity, no androidx")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)

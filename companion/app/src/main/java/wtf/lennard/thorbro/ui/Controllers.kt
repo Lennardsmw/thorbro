@@ -146,7 +146,7 @@ private val buttons = listOf(
 fun ControllerPanels(panel: String) {
     val ctx = LocalContext.current
     var tick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) { while (true) { Pads.refresh(ctx); delay(2000); tick++ } }
+    WhileVisible { while (true) { Pads.refresh(ctx); delay(2000); tick++ } }
 
     val bt = remember { ctx.getSystemService(BluetoothManager::class.java)?.adapter }
     val needPerms = Build.VERSION.SDK_INT >= 31 &&
@@ -441,7 +441,7 @@ fun ControllerScreen() {
     val ctx = LocalContext.current
     Pads.appCtx = ctx.applicationContext
     var tick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) { while (true) { delay(800); tick++ } }
+    WhileVisible { while (true) { delay(800); tick++ } }
     val panel = ControllerNav.panel.value
     DisposableEffect(Unit) { onDispose { Pads.lrMode = false; ControllerNav.panel.value = null } }
     if (panel != null) { ControllerPanels(panel); return }
