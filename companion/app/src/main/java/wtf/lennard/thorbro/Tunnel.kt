@@ -303,13 +303,21 @@ object Tunnel {
             runCatching { sock.send(DatagramPacket(out, out.size, to)) }
         }
 
-        /** opens this side's router for a guest's candidates (needed when both are behind NAT) */
-        fun punch(candidates: List<String>, times: Int = 10) = thread(name = "tunnel-punch", isDaemon = true) {
-            val to = candidates.mapNotNull { parse(it) }
-            repeat(times) {
+        /**
+         * Opens this side's router for a guest's candidates (needed when both are behind NAT). Mobile networks often
+         * give every destination its own port (counting up from the one STUN saw), so for public IPv4 candidates the
+         * ports just above it are tried too — a few hundred tiny packets, once per knock.
+         */
+        fun punch(candidates: List<String>, times: Int = 6) = thread(name = "tunnel-punch", isDaemon = true) {
+            val exact = candidates.mapNotNull { parse(it) }
+            val spray = exact.filter { a -> a.address is Inet4Address && !a.address.isSiteLocalAddress && !a.address.isLoopbackAddress &&
+                !(a.address.address[0].toInt() == 100 && (a.address.address[1].toInt() and 0xC0) == 64) }
+                .flatMap { a -> (-8..400).map { d -> a.port + d }.filter { it in 1024..65535 && it != a.port }.map { InetSocketAddress(a.address, it) } }
+            repeat(times) { round ->
                 // a session id of 0 and its own counter range: guests ignore PUNCH, it only has to leave the router
-                to.forEach { send(it, PUNCH, 0, punchTx++, ByteArray(0)) }
-                Thread.sleep(200)
+                exact.forEach { send(it, PUNCH, 0, punchTx++, ByteArray(0)) }
+                if (round < 3) spray.forEach { send(it, PUNCH, 0, punchTx++, ByteArray(0)) }
+                Thread.sleep(300)
             }
         }
 

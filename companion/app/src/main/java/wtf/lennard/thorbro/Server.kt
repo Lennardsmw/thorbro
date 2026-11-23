@@ -593,7 +593,8 @@ object Server {
                 // online (internet) 3DS room: see Online.kt
                 get("/api/online") {
                     if (denied(ctx)) return@get
-                    json(Online.hostStatus(ctx).put("relay", Relay.status()))
+                    val addrs = runCatching { java.net.NetworkInterface.getNetworkInterfaces().toList().flatMap { n -> n.inetAddresses.toList().map { "${n.name} ${it.hostAddress}" } } }.getOrDefault(emptyList())
+                    json(Online.hostStatus(ctx).put("relay", Relay.status()).put("interfaces", org.json.JSONArray(addrs)))
                 }
                 post("/api/online/host") {
                     if (denied(ctx)) return@post
