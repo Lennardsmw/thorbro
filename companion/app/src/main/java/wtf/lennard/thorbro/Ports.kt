@@ -13,8 +13,12 @@ object Ports {
     class Port(val id: String, val name: String, val pkg: String, val saveDirs: List<String>)
 
     private const val DATA = "/storage/emulated/0/Android/data"
+    /** placeholder for every storage volume (internal + SD cards) */
+    private const val VOL = "{vol}"
     val known = listOf(
-        Port("oot-bananative", "Ocarina of Time (Banana Native)", "dev.bananative.android", listOf("$DATA/dev.bananative.android/files/saves")),
+        // Banana Native's save folder ("ocarina of time" + its ".work" twin) sits on the SD card under saves/switch2
+        Port("oot-bananative", "Ocarina of Time (Banana Native)", "dev.bananative.android",
+            listOf("$VOL/saves/switch2/ocarina of time", "$DATA/dev.bananative.android/files/saves")),
         Port("soh", "Ship of Harkinian", "com.dishii.soh", listOf("/storage/emulated/0/SOH/Save", "$DATA/com.dishii.soh/files/Save")),
         Port("2s2h", "2 Ship 2 Harkinian", "com.dishii.twoship", listOf("/storage/emulated/0/2S2H/Save")),
         Port("dusklight", "Dusklight", "dev.twilitrealm.dusk", listOf("$DATA/dev.twilitrealm.dusk/files/saves")),
@@ -44,8 +48,20 @@ object Ports {
             .put("size", 0L).put("mtime", 0L).put("volume", ctx.filesDir.path).put("package", p.pkg).put("portId", p.id)
     }
 
-    fun saveDirs(ctx: Context): List<Pair<Port, File>> = installed(ctx).flatMap { p ->
-        p.saveDirs.map { File(it) }.filter { it.isDirectory && it.canRead() && (it.listFiles()?.isNotEmpty() == true) }.map { p to it }
+    private fun volumeRoots(ctx: Context): List<String> =
+        listOf(Storage.primary.path) + (ctx.getExternalFilesDirs(null).mapNotNull { it?.path?.substringBefore("/Android/data/") }
+            .filter { it != Storage.primary.path })
+
+    /**
+     * the save folder each installed port really uses: the first candidate that exists and has files.
+     * Only one per port, since all of them would attach to the same RomM entry.
+     */
+    fun saveDirs(ctx: Context): List<Pair<Port, File>> {
+        val roots = volumeRoots(ctx)
+        return installed(ctx).mapNotNull { p ->
+            p.saveDirs.flatMap { c -> if (c.startsWith(VOL)) roots.map { File(it + c.removePrefix(VOL)) } else listOf(File(c)) }
+                .firstOrNull { it.isDirectory && it.canRead() && (it.listFiles()?.isNotEmpty() == true) }?.let { p to it }
+        }
     }
 
     fun icon(ctx: Context, pkg: String): File? = runCatching {
