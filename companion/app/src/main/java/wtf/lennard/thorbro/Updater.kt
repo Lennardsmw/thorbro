@@ -12,24 +12,33 @@ import kotlin.concurrent.thread
 /**
  * Updates ThorBro from an update feed. The feed is either
  *  - a GitHub/Forgejo "latest release" API URL (tag_name + an .apk asset), or
- *  - a plain JSON file: {"versionName": "0.4.0", "url": "https://.../thorbro.apk"}.
+ *  - a plain JSON file: {"versionName": "0.4.0", "url": "https://.../thorbro.apk"} (with "versionCode": compared by code,
+ *    so builds of a branch, "0.23.3-lanplay+abc1234", update each other).
+ * Release builds use GitHub; test builds (version with "+commit") the dev channel in the home network, filled by
+ * scripts/publish-dev.sh — what is being tested is not released.
  * With auto-update on, the server checks every 6 hours and installs newer versions by itself.
  */
 object Updater {
     const val DEFAULT_FEED = "https://api.github.com/repos/Lennardsmw/thorbro/releases"
+    /** dev channel on LXC 107 (apps), home network only */
+    const val DEV_FEED = "http://192.168.178.97:8097/feed.json"
     private const val EVERY = 6L * 3600 * 1000
 
-    fun feed(ctx: Context): String = Prefs.of(ctx).getString("updateFeed", null) ?: DEFAULT_FEED
+    fun dev(ctx: Context) = current(ctx).contains('+')
+    fun defaultFeed(ctx: Context) = if (dev(ctx)) DEV_FEED else DEFAULT_FEED
+    fun feed(ctx: Context): String = Prefs.of(ctx).getString("updateFeed", null)
+        ?.takeUnless { dev(ctx) && it == DEFAULT_FEED } ?: defaultFeed(ctx)
     fun auto(ctx: Context): Boolean = Prefs.of(ctx).getBoolean("autoUpdate", true)
 
     fun configure(ctx: Context, feed: String?, auto: Boolean?) {
         val e = Prefs.of(ctx).edit()
-        if (feed != null) e.putString("updateFeed", feed.trim().ifEmpty { DEFAULT_FEED })
+        if (feed != null) e.putString("updateFeed", feed.trim().ifEmpty { defaultFeed(ctx) })
         if (auto != null) e.putBoolean("autoUpdate", auto)
         e.apply()
     }
 
     fun current(ctx: Context): String = ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "0"
+    fun currentCode(ctx: Context): Long = ctx.packageManager.getPackageInfo(ctx.packageName, 0).longVersionCode
 
     /** {current, latest, url, available, feed, auto} or {error} */
     fun check(ctx: Context): JSONObject {
@@ -61,7 +70,9 @@ object Updater {
             url = j.optString("url").ifEmpty { null }
         }
         if (latest.isEmpty() || url == null) return out.put("error", "Kein APK im neuesten Release gefunden")
-        return out.put("latest", latest).put("url", url).put("available", newer(latest, current(ctx)))
+        val available = if (j.has("versionCode")) j.optLong("versionCode") > currentCode(ctx) && latest != current(ctx)
+            else newer(latest, current(ctx))
+        return out.put("latest", latest).put("url", url).put("available", available)
     }
 
     private fun fromAtom(ctx: Context, out: JSONObject): JSONObject? = runCatching {

@@ -14,4 +14,6 @@ curl -sS --fail-with-body -X POST -H "Authorization: Bearer $CODE" \
   -H "Content-Type: application/vnd.android.package-archive" --data-binary "@$APK" "http://$THOR:7330/api/self-update"
 echo
 write_lock
+# the same build into the dev update channel (other Thors/phones at home); DEV_PUBLISH=0 skips it
+[ "${DEV_PUBLISH:-1}" = 1 ] && { NOBUILD=1 "$ROOT/scripts/publish-dev.sh" || echo "Dev-Kanal nicht aktualisiert (siehe oben)"; }
 echo "Auf dem Thor bestätigen, falls Android fragt. ThorBro startet danach neu."
