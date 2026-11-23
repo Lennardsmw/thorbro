@@ -73,7 +73,7 @@ object Online {
     }.onFailure { Logs.i("online", "ntfy nicht erreichbar: ${it.message}") }
 
     /** streams the topic until [alive] says stop; calls [on] with every message we can decrypt */
-    private fun subscribe(secret: ByteArray, alive: () -> Boolean, on: (JSONObject) -> Unit) = thread(name = "online-signal", isDaemon = true) {
+    internal fun subscribe(secret: ByteArray, alive: () -> Boolean, on: (JSONObject) -> Unit) = thread(name = "online-signal", isDaemon = true) {
         val key = signalKey(secret)
         while (alive()) {
             runCatching {
@@ -101,10 +101,10 @@ object Online {
     /** opens the room to the internet and returns the invite link (the same link while it stays open) */
     @Synchronized
     fun startHost(ctx: Context): JSONObject {
-        if (!Room.running()) {
-            val err = if (Netplay.serverOn) Room.start(ctx, "") else Netplay.startServer(ctx).optString("roomError").ifEmpty { null }
-            if (err != null) return JSONObject().put("error", err)
-        }
+        // the online room lives as long as the game server: a closing lobby must not take the room with it
+        val err = if (!Netplay.serverOn) Netplay.startServer(ctx).optString("roomError").ifEmpty { null }
+            else if (!Room.running()) Room.start(ctx, "") else null
+        if (err != null) return JSONObject().put("error", err)
         host?.let { return hostStatus(ctx) }
         val s = Tunnel.newSecret()
         val h = runCatching { Tunnel.Host(s, Azahar.PORT, TUNNEL_PORT) }.getOrElse { runCatching { Tunnel.Host(s, Azahar.PORT) }.getOrNull() }
@@ -118,7 +118,8 @@ object Online {
             val cands = (0 until minOf(c.length(), 12)).map { c.getString(it) }
             Logs.i("online", "${m.optString("n", "Gast").take(32)} klopft an, öffne den Weg")
             h.punch(cands)
-            publish(s, JSONObject().put("t", "host").put("c", JSONArray(h.candidates))) // fresh addresses, in case the invite is old
+            h.refreshPublic(); Thread.sleep(600) // the router may have re-mapped the port since the invite
+            publish(s, JSONObject().put("t", "host").put("c", JSONArray(h.candidates)))
         }
         return hostStatus(ctx)
     }
@@ -154,6 +155,9 @@ object Online {
         thread(name = "online-knock", isDaemon = true) {
             var i = 0
             while (!done && i++ < 8) { publish(inv.secret, hello); Thread.sleep(3000) }
+        }
+        subscribe(inv.secret, { !done }) { m -> // the host answers with its current addresses
+            if (m.optString("t") == "host") m.optJSONArray("c")?.let { c -> g.addTargets((0 until minOf(c.length(), 12)).map { c.getString(it) }) }
         }
         val ok = try { g.await(25_000) } finally { done = true }
         if (!ok) {

@@ -141,7 +141,23 @@ object Tunnel {
         } finally { runCatching { sock.soTimeout = old } }
     }
 
-    private fun parseStun(b: ByteArray, len: Int, id: ByteArray): InetSocketAddress? {
+    /** sends one binding request from [sock] without waiting; the receive loop picks the answer up. Returns its id. */
+    fun stunAsync(sock: DatagramSocket, servers: List<String> = STUN): ByteArray? {
+        for (server in servers) {
+            val addr = runCatching {
+                InetSocketAddress(InetAddress.getAllByName(server.substringBeforeLast(':')).first { it is Inet4Address }, server.substringAfterLast(':').toInt())
+            }.getOrNull() ?: continue
+            val id = ByteArray(12).also { rnd.nextBytes(it) }
+            val req = ByteBuffer.allocate(20).putShort(0x0001).putShort(0).putInt(0x2112A442).put(id).array()
+            if (runCatching { sock.send(DatagramPacket(req, req.size, addr)) }.isSuccess) return id
+        }
+        return null
+    }
+
+    internal fun isStun(b: ByteArray, len: Int) = len >= 20 && b[0].toInt() == 0x01 && b[1].toInt() == 0x01 &&
+        b[4].toInt() == 0x21 && b[5].toInt() == 0x12 && (b[6].toInt() and 0xFF) == 0xA4 && b[7].toInt() == 0x42
+
+    internal fun parseStun(b: ByteArray, len: Int, id: ByteArray): InetSocketAddress? {
         if (len < 20) return null
         val bb = ByteBuffer.wrap(b, 0, len)
         if (bb.short.toInt() != 0x0101) return null
@@ -200,8 +216,19 @@ object Tunnel {
     class Host(secret: ByteArray, val roomPort: Int, port: Int = 0, val maxGuests: Int = 7) {
         private val keys = Keys(secret)
         val sock: DatagramSocket = bind(port)
-        /** where guests can reach this host; worked out before the receive loop takes the socket */
-        val candidates: List<String> = Tunnel.candidates(sock)
+        private val local: List<String> = Tunnel.candidates(sock, withStun = false)
+        /**
+         * The public address as the router maps this port right now. Home routers re-map an idle UDP port after
+         * a while (and need not keep the port number), so it is asked again every 20 s — which also keeps it open.
+         */
+        @Volatile var public: InetSocketAddress? = stun(sock)
+            private set
+        @Volatile private var stunId: ByteArray? = null
+        /** where guests can reach this host, freshest first */
+        val candidates: List<String> get() = (listOfNotNull(public?.let { "${it.address.hostAddress}:${it.port}" }) + local).distinct()
+
+        /** asks STUN again now (the answer arrives in the receive loop within a moment) */
+        fun refreshPublic() { stunId = stunAsync(sock) }
         private class Peer(val session: Long, @Volatile var addr: SocketAddress, val local: DatagramSocket) {
             val replay = Replay(); @Volatile var tx = 0L; @Volatile var last = System.currentTimeMillis()
         }
@@ -217,6 +244,10 @@ object Tunnel {
                 while (!sock.isClosed) {
                     val p = DatagramPacket(buf, buf.size)
                     if (runCatching { sock.receive(p) }.isFailure) { if (sock.isClosed) break else continue }
+                    if (isStun(buf, p.length)) {
+                        stunId?.let { parseStun(buf, p.length, it) }?.let { if (it != public) log("öffentliche Adresse jetzt ${it.address.hostAddress}:${it.port}"); public = it }
+                        continue
+                    }
                     val m = open(keys.toHost, buf, p.offset, p.length) ?: continue
                     val peer = peers[m.session]
                     if (peer != null && !peer.replay.fresh(m.counter)) continue
@@ -242,8 +273,10 @@ object Tunnel {
                 }
             }
             thread(name = "tunnel-host-reap", isDaemon = true) {
+                var n = 0
                 while (!sock.isClosed) {
                     Thread.sleep(10_000)
+                    if (n++ % 2 == 0) refreshPublic()
                     val old = System.currentTimeMillis() - 45_000
                     peers.values.filter { it.last < old }.forEach { drop(it, "keine Antwort") }
                 }
@@ -319,7 +352,13 @@ object Tunnel {
             }
         }
         private val sessions = ConcurrentHashMap<Long, Session>()
-        private val targets = hostCandidates.mapNotNull { parse(it) }
+        @Volatile private var targets: List<InetSocketAddress> = hostCandidates.mapNotNull { parse(it) }
+
+        /** fresher host addresses (the host sends them through the signalling when a guest knocks) */
+        fun addTargets(c: List<String>) {
+            val add = c.mapNotNull { parse(it) }.filter { it !in targets }
+            if (add.isNotEmpty()) { targets = add + targets; log("neue Host-Adressen: ${add.joinToString()}") }
+        }
 
         init {
             thread(name = "tunnel-guest", isDaemon = true) {

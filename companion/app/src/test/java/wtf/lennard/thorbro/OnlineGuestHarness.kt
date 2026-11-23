@@ -32,7 +32,11 @@ class OnlineGuestHarness {
             var i = 0
             while (!done && i++ < 8) { println("ntfy: ${Online.publish(inv.secret, hello).getOrNull()}"); Thread.sleep(3000) }
         }
-        val ok = g.await(25_000); done = true
+        Online.subscribe(inv.secret, { !done }) { m ->
+            println("signal: ${m.optString("t")} ${m.optJSONArray("c")}")
+            if (m.optString("t") == "host") m.optJSONArray("c")?.let { c -> g.addTargets((0 until c.length()).map { c.getString(it) }) }
+        }
+        val ok = g.await(30_000); done = true
         println("connected: $ok via ${g.host}")
         if (!ok) return
         val s = DatagramSocket(null).apply { reuseAddress = true; bind(InetSocketAddress(InetAddress.getLoopbackAddress(), 24872)) }
