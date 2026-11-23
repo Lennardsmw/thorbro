@@ -45,6 +45,7 @@ object Online {
     @Volatile private var listening: ByteArray? = null
     @Volatile private var code: String? = null
     @Volatile private var codeUntil = 0L
+    @Volatile private var appCtx: Context? = null
     private val rnd = SecureRandom()
 
     init { Tunnel.log = { Logs.i("online", it) } }
@@ -151,7 +152,7 @@ object Online {
         }
         val r = open(ctx)
         if (r.has("error")) return r
-        newCode(ctx)
+        if (code == null || System.currentTimeMillis() >= codeUntil) newCode(ctx) // keep a code that still runs
         return hostStatus(ctx)
     }
 
@@ -172,22 +173,31 @@ object Online {
     /** a new code (the old one stops working); guests who used it keep their access */
     @Synchronized
     fun newCode(ctx: Context): String {
-        val app = ctx.applicationContext
         val c = (1..CODE_LEN).map { rnd.nextInt(SYMBOLS.size) }.joinToString("")
-        code = c; codeUntil = System.currentTimeMillis() + CODE_MINUTES * 60_000
+        val until = System.currentTimeMillis() + CODE_MINUTES * 60_000
+        // stored, so a restart (update, crash) does not kill a code a friend is just typing
+        Prefs.of(ctx).edit().putString("online.code", c).putLong("online.codeUntil", until).apply()
+        listenCode(ctx.applicationContext, c, until)
+        Logs.i("online", "neuer Code, gilt $CODE_MINUTES Minuten")
+        return c
+    }
+
+    private fun listenCode(app: Context, c: String, until: Long) {
+        code = c; codeUntil = until
         val ch = codeChannel(c)
         subscribe(ch, { code == c && System.currentTimeMillis() < codeUntil }) { m ->
             if (m.optString("t") != "code") return@subscribe
             val theirs = m.optString("pub").ifEmpty { return@subscribe }
-            val h = host ?: return@subscribe
             Logs.i("online", "${m.optString("n", "Gast").take(32)} hat den Code eingegeben")
+            val h = host ?: run { // the room may be closed (restart, game server off): open it for the friend
+                if (!Netplay.serverOn) Netplay.startServer(app)
+                open(app); host
+            } ?: return@subscribe
             val mine = ecdhPair()
             val box = JSONObject().put("n", Me.name(app)).put("s", b64(secret ?: return@subscribe)).put("c", JSONArray(h.candidates))
             publish(ch, JSONObject().put("t", "ok").put("id", m.optString("id")).put("pub", b64(mine.public.encoded))
                 .put("box", b64(Tunnel.seal(boxKey(mine, theirs), 0, 0, 0, box.toString().toByteArray()))))
         }
-        Logs.i("online", "neuer Code, gilt $CODE_MINUTES Minuten")
-        return c
     }
 
     /**
@@ -197,9 +207,14 @@ object Online {
     @Synchronized
     fun listen(ctx: Context) {
         val app = ctx.applicationContext
+        appCtx = app
         val s = roomSecret(app)
         if (listening?.contentEquals(s) == true) return
         listening = s
+        // a code shown before a restart keeps working until it runs out
+        val p = Prefs.of(app)
+        val c = p.getString("online.code", null); val until = p.getLong("online.codeUntil", 0)
+        if (c != null && until > System.currentTimeMillis() && code != c) listenCode(app, c, until)
         subscribe(s, { listening === s }) { m ->
             if (m.optString("t") != "guest") return@subscribe
             val c = m.optJSONArray("c") ?: return@subscribe
@@ -230,6 +245,7 @@ object Online {
     fun stopHost() {
         val h = host ?: return
         host = null; secret = null; code = null
+        appCtx?.let { Prefs.of(it).edit().remove("online.code").remove("online.codeUntil").apply() }
         h.close()
         Logs.i("online", "Online-Raum zu")
     }
