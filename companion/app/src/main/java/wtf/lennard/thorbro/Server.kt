@@ -590,6 +590,27 @@ object Server {
                     Netplay.setWlanOnly(ctx, q("on") == "1")
                     json(JSONObject().put("wlanOnly", Netplay.wlanOnly(ctx)))
                 }
+                // online (internet) 3DS room: see Online.kt
+                get("/api/online") {
+                    if (denied(ctx)) return@get
+                    json(Online.hostStatus(ctx).put("relay", Relay.status()))
+                }
+                post("/api/online/host") {
+                    if (denied(ctx)) return@post
+                    val res = withContext(Dispatchers.IO) { Online.startHost(ctx) }
+                    json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
+                }
+                post("/api/online/close") {
+                    if (denied(ctx)) return@post
+                    withContext(Dispatchers.IO) { Online.stopHost() }
+                    json(JSONObject().put("ok", true))
+                }
+                post("/api/online/join") {
+                    if (denied(ctx)) return@post
+                    val link = q("link") ?: return@post fail("link missing")
+                    val job = Jobs.start("Online beitreten") { Online.join(ctx, link, it) }
+                    json(job.json())
+                }
                 post("/api/netplay/relay") {
                     if (denied(ctx)) return@post
                     val addr = q("address")?.takeIf { Regex("^[0-9.]{7,15}$").matches(it) }

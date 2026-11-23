@@ -149,7 +149,7 @@ object AutoPlay {
         DatagramSocket().use { s ->
             s.soTimeout = 700
             val q = "GET_STATUS".toByteArray()
-            s.send(DatagramPacket(q, q.size, InetAddress.getLoopbackAddress(), 55355))
+            s.send(DatagramPacket(q, q.size, InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 55355))
             val buf = ByteArray(1024)
             val p = DatagramPacket(buf, buf.size)
             s.receive(p)

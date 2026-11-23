@@ -82,7 +82,6 @@ object Netplay {
 
     /** what this device joined last (guest side), for the status line */
     @Volatile var joinedRoom: JSONObject? = null
-        private set
 
     /** guest session over: 127.0.0.1 points at this Thor again (own room if the server runs) */
     fun clearJoined(ctx: Context? = null) {
@@ -226,6 +225,7 @@ object Netplay {
             .put("direct", Direct.active())
             .put("server", server(ctx))
             .put("relay", Relay.status())
+            .put("online", Online.hostStatus(ctx))
             .put("wlanOnly", wlanOnly(ctx))
             .put("azahar", if ("azahar" in Emulators.installed(ctx).map { it.id }) JSONObject()
                 .put("identity", Azahar.identity(ctx))
@@ -367,6 +367,7 @@ object Netplay {
         val c = ctx ?: appCtx
         if (serverOn) { c?.let { Direct.refreshInvite(it) }; return } // the server keeps room and Wi-Fi Direct up
         Room.stop()
+        Online.stopHost() // the online room needs the local room behind it
         if (c != null) {
             if (autoDirect) { autoDirect = false; runCatching { Direct.stop(c) } } else Direct.refreshInvite(c)
         }
@@ -389,7 +390,7 @@ object Netplay {
             if (attempt == 0 || attempt == 2) runCatching {
                 DatagramSocket().use { s ->
                     val b = "NETPLAY_HOST_TOGGLE".toByteArray()
-                    s.send(DatagramPacket(b, b.size, InetAddress.getLoopbackAddress(), RA_CMD_PORT))
+                    s.send(DatagramPacket(b, b.size, InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), RA_CMD_PORT))
                 }
             }
             Thread.sleep(4000)
@@ -399,7 +400,7 @@ object Netplay {
     }
 
     private fun listening(port: Int) = runCatching {
-        Socket().use { it.connect(InetSocketAddress(InetAddress.getLoopbackAddress(), port), 500); true }
+        Socket().use { it.connect(InetSocketAddress(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), port), 500); true }
     }.getOrDefault(false)
 
     /** called by the guest over HTTP; checks the PIN and counts wrong tries */

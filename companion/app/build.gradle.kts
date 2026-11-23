@@ -23,6 +23,7 @@ val appVersionName = if (onMain && !gitDirty) baseVersion
 val appVersionCode = (System.currentTimeMillis() / 60_000L - 28_000_000L).toInt()
 
 android {
+    testOptions { unitTests.isReturnDefaultValues = true } // Logs → android.util.Log is a no-op in JVM tests
     namespace = "wtf.lennard.thorbro"
     compileSdk = 37
 
@@ -69,6 +70,8 @@ dependencies {
     implementation("org.apache.commons:commons-compress:1.28.0")
     implementation("org.tukaani:xz:1.12")
     implementation("com.google.zxing:core:3.5.3")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303") // the real org.json; android.jar only has stubs
 
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.compose.ui:ui")
