@@ -433,6 +433,18 @@ object Server {
                     json(JSONObject().put("version", BuildConfigVersion.name(ctx)).put("app", Logs.tail(n))
                         .put("logcat", withContext(Dispatchers.IO) { Logs.logcat(n) }).put("crashes", CrashLog.read(ctx)))
                 }
+                // netplay diagnosis (via Shizuku): who listens on the 3DS port, and Azahar's own log lines
+                get("/api/debug/netplay") {
+                    if (denied(ctx)) return@get
+                    val n = q("lines")?.toIntOrNull()?.coerceIn(100, 20000) ?: 3000
+                    val out = withContext(Dispatchers.IO) {
+                        JSONObject()
+                            .put("shell", Shell.state())
+                            .put("udp", Shell.out("sh", "-c", "grep -i ':6128 ' /proc/net/udp /proc/net/udp6; ss -uanp 2>/dev/null | grep 24872"))
+                            .put("logcat", Shell.out("sh", "-c", "logcat -d -v time -t $n | grep -i -E 'azahar|citra|network|room|enet|24872' | tail -300"))
+                    }
+                    json(out)
+                }
                 get("/api/debug/crash") {
                     if (denied(ctx)) return@get
                     call.respondText(CrashLog.read(ctx), ContentType.Text.Plain)
