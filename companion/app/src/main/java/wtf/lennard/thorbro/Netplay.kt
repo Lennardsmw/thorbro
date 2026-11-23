@@ -164,6 +164,7 @@ object Netplay {
         val roomErr = if ("azahar" in Emulators.installed(ctx).map { it.id }) Room.start(ctx, lobby?.public()?.optString("game") ?: "") else null
         Direct.refreshInvite(ctx)
         Logs.i("netplay", "Spielserver an" + (roomErr?.let { " (3DS-Raum: $it)" } ?: ""))
+        if (roomErr == null && Room.running()) thread(name = "online-open", isDaemon = true) { runCatching { Online.open(ctx) } } // STUN takes a moment
         return server(ctx).also { if (roomErr != null) it.put("roomError", roomErr) }
     }
 

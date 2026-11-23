@@ -605,6 +605,10 @@ object Server {
                     withContext(Dispatchers.IO) { Online.stopHost() }
                     json(JSONObject().put("ok", true))
                 }
+                post("/api/online/new") {
+                    if (denied(ctx)) return@post
+                    json(withContext(Dispatchers.IO) { Online.newLink(ctx) })
+                }
                 post("/api/online/join") {
                     if (denied(ctx)) return@post
                     val link = q("link") ?: return@post fail("link missing")

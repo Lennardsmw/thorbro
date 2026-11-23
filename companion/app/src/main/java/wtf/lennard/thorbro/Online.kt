@@ -29,7 +29,7 @@ object Online {
     @Volatile var host: Tunnel.Host? = null
         private set
     @Volatile private var secret: ByteArray? = null
-    @Volatile private var hostListen: Thread? = null
+    @Volatile private var listening: ByteArray? = null
 
     init { Tunnel.log = { Logs.i("online", it) } }
 
@@ -98,30 +98,73 @@ object Online {
 
     // ---------- host ----------
 
-    /** opens the room to the internet and returns the invite link (the same link while it stays open) */
-    @Synchronized
+    /**
+     * The room secret stays the same across restarts, so an invite link keeps working as long as the game server
+     * runs (and after a reboot). [newLink] makes a new one, which locks out everyone who had the old link.
+     */
+    private fun roomSecret(ctx: Context): ByteArray {
+        val p = Prefs.of(ctx)
+        p.getString("online.secret", null)?.let { runCatching { unb64(it) }.getOrNull()?.takeIf { it.size == 16 }?.let { s -> return s } }
+        return Tunnel.newSecret().also { p.edit().putString("online.secret", b64(it)).apply() }
+    }
+
+    /** opens the room to the internet (starting the game server if needed) and returns the invite link */
     fun startHost(ctx: Context): JSONObject {
-        // the online room lives as long as the game server: a closing lobby must not take the room with it
-        val err = if (!Netplay.serverOn) Netplay.startServer(ctx).optString("roomError").ifEmpty { null }
-            else if (!Room.running()) Room.start(ctx, "") else null
-        if (err != null) return JSONObject().put("error", err)
+        if (!Netplay.serverOn) {
+            Netplay.startServer(ctx).optString("roomError").ifEmpty { null }?.let { return JSONObject().put("error", it) }
+        }
+        return open(ctx)
+    }
+
+    /** the game server is on: be reachable online too (called by [Netplay.startServer]) */
+    @Synchronized
+    fun open(ctx: Context): JSONObject {
+        if (!Room.running()) Room.start(ctx, "")?.let { return JSONObject().put("error", it) }
         host?.let { return hostStatus(ctx) }
-        val s = Tunnel.newSecret()
+        val s = roomSecret(ctx)
         val h = runCatching { Tunnel.Host(s, Azahar.PORT, TUNNEL_PORT) }.getOrElse { runCatching { Tunnel.Host(s, Azahar.PORT) }.getOrNull() }
             ?: return JSONObject().put("error", "Kein UDP-Port frei")
         host = h; secret = s
         Logs.i("online", "Online-Raum offen, erreichbar über ${h.candidates.size} Adressen" +
             (if (h.candidates.none { isPublic(it) }) " (keine öffentliche Adresse gefunden)" else ""))
-        hostListen = subscribe(s, { host === h }) { m ->
+        return hostStatus(ctx)
+    }
+
+    /**
+     * Always on while ThorBro runs: listens for guests knocking with this Thor's link. Being found has nothing to do
+     * with the game server — a knock starts room and tunnel when they are not up yet, then opens the router for the
+     * guest and sends the current addresses back.
+     */
+    @Synchronized
+    fun listen(ctx: Context) {
+        val app = ctx.applicationContext
+        val s = roomSecret(app)
+        if (listening?.contentEquals(s) == true) return
+        listening = s
+        subscribe(s, { listening === s }) { m ->
             if (m.optString("t") != "guest") return@subscribe
             val c = m.optJSONArray("c") ?: return@subscribe
             val cands = (0 until minOf(c.length(), 12)).map { c.getString(it) }
-            Logs.i("online", "${m.optString("n", "Gast").take(32)} klopft an, öffne den Weg")
+            Logs.i("online", "${m.optString("n", "Gast").take(32)} klopft an")
+            val h = host ?: run {
+                val r = startHost(app)
+                if (r.has("error")) { Logs.i("online", "Raum geht nicht auf: ${r.optString("error")}"); return@subscribe }
+                host
+            } ?: return@subscribe
             h.punch(cands)
             h.refreshPublic(); Thread.sleep(600) // the router may have re-mapped the port since the invite
             publish(s, JSONObject().put("t", "host").put("c", JSONArray(h.candidates)))
         }
-        return hostStatus(ctx)
+        Logs.i("online", "erreichbar für Einladungen")
+    }
+
+    /** a new invite link; the old one stops working */
+    fun newLink(ctx: Context): JSONObject {
+        Prefs.of(ctx).edit().remove("online.secret").apply()
+        val wasOpen = host != null
+        stopHost()
+        listen(ctx) // now under the new secret; the old topic goes quiet
+        return if (wasOpen) open(ctx) else JSONObject().put("open", false)
     }
 
     @Synchronized
