@@ -9,11 +9,13 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
 #include <string>
 #include <thread>
 #include <unistd.h>
 #include "enet/enet.h"
 #include "network/room.h"
+#include "network/verify_user.h"
 
 static std::atomic<bool> stop{false};
 
@@ -38,7 +40,8 @@ int main(int argc, char** argv) {
         return 1;
     }
     Network::Room room;
-    if (!room.Create(name, "ThorBro", "", static_cast<u16>(port), password, static_cast<u32>(members), "ThorBro")) {
+    if (!room.Create(name, "ThorBro", "", static_cast<u16>(port), password, static_cast<u32>(members), "ThorBro", "", 0,
+                     std::make_unique<Network::VerifyUser::NullBackend>())) { // a join calls the backend: never null
         std::printf("error could not open port %d\n", port);
         std::fflush(stdout);
         enet_deinitialize();
