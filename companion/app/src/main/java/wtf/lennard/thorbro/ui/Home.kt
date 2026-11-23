@@ -158,9 +158,35 @@ fun StatusBar(title: String) {
     }
 }
 
+/** a status line in the bottom bar, next to the button hints; set by long actions (joining, connecting) */
+object BottomStatus {
+    var text by androidx.compose.runtime.mutableStateOf<String?>(null)
+    var progress by androidx.compose.runtime.mutableStateOf<Float?>(null)
+    var error by androidx.compose.runtime.mutableStateOf(false)
+    private var shownAt = 0L
+
+    fun working(t: String, p: Float) { text = t; progress = p.coerceIn(0.02f, 1f); error = false; shownAt = System.currentTimeMillis() }
+    /** a result: stays for a few seconds, then the bar is clean again */
+    fun done(t: String, failed: Boolean, scope: kotlinx.coroutines.CoroutineScope) {
+        text = t; progress = null; error = failed
+        val at = System.currentTimeMillis().also { shownAt = it }
+        scope.launch { kotlinx.coroutines.delay(if (failed) 9000 else 6000); if (shownAt == at) text = null }
+    }
+}
+
 @Composable
 fun ButtonHints(vararg hints: Pair<String, String>) {
     Box(Modifier.fillMaxWidth().background(Color(0x99000000)).padding(horizontal = 32.dp, vertical = 10.dp)) {
+        BottomStatus.text?.let { t -> // e.g. "Verbinde mit Thor-8b8e …" while a job runs, then its result for a moment
+            Row(Modifier.align(Alignment.CenterStart).fillMaxWidth(0.62f), verticalAlignment = Alignment.CenterVertically) {
+                val p = BottomStatus.progress
+                if (p != null) androidx.compose.material3.CircularProgressIndicator(progress = { p }, modifier = Modifier.size(18.dp), strokeWidth = 2.5.dp,
+                    color = Color.White, trackColor = Color(0x33FFFFFF))
+                else Box(Modifier.size(10.dp).clip(CircleShape).background(if (BottomStatus.error) Color(0xFFE5484D) else Color(0xFF3FB950)))
+                Text("  $t", fontSize = 14.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    color = if (BottomStatus.error) Color(0xFFFF8A8D) else Color.White)
+            }
+        }
         Row(Modifier.align(Alignment.CenterEnd), horizontalArrangement = Arrangement.spacedBy(22.dp)) {
             hints.forEach { (btn, what) ->
                 Row(verticalAlignment = Alignment.CenterVertically) {

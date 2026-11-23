@@ -99,18 +99,16 @@ fun NetplayScreen() {
     var pinFor by remember { mutableStateOf<JSONObject?>(null) }
     var info by remember { mutableStateOf<Pair<String, String>?>(null) }
     var joinJob by remember { mutableStateOf<Jobs.Job?>(null) }
-    var joinProg by remember { mutableStateOf(0f) }
     val direct = rememberDirect()
     var invites by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
     var invitePopup by remember { mutableStateOf<JSONObject?>(null) }
     val seenInvites = remember { mutableSetOf<String>() }
     var serverBusy by remember { mutableStateOf(false) }
     var advanced by remember { mutableStateOf(false) }
-    var friendMenu by remember { mutableStateOf<JSONObject?>(null) }
     var onlineMenu by remember { mutableStateOf<JSONObject?>(null) }
     var onlineBusy by remember { mutableStateOf(false) }
     var codePad by remember { mutableStateOf(false) }
-    var knownMenu by remember { mutableStateOf<JSONObject?>(null) }
+    var friendsOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(tick) {
         withContext(Dispatchers.IO) {
@@ -141,12 +139,21 @@ fun NetplayScreen() {
     val s = st
     if (s == null) { Line("Lade …", Muted); return }
 
+    /** joining runs in the bottom bar (next to A/B), not as a tile; only a failure with a long reason opens a dialog */
     fun runJoin(j: Jobs.Job) {
         joinJob = j
         scope.launch {
-            while (!j.done) { joinProg = j.progress.toFloat(); delay(300) }
-            joinProg = 1f
-            info = if (j.error != null) "Ging nicht" to j.error!! else (if (j.result?.optString("mode") == "share") "Spiel erhalten" else "Läuft") to (j.result?.optString("hint") ?: "")
+            while (!j.done) { BottomStatus.working(j.message.ifEmpty { "Verbinde …" }, j.progress.toFloat()); delay(250) }
+            val err = j.error
+            if (err != null) {
+                BottomStatus.done("Ging nicht", true, scope)
+                info = "Ging nicht" to err
+            } else BottomStatus.done(when (j.result?.optString("mode")) {
+                "share" -> "Spiel erhalten"
+                "azahar" -> "Verbunden mit ${j.result?.optString("host")} · in Azahar 127.0.0.1 beitreten"
+                else -> j.result?.optString("hint")?.lineSequence()?.firstOrNull()?.ifEmpty { null } ?: "Verbunden"
+            }, false, scope)
+            joinJob = null
             tick++
         }
     }
@@ -191,153 +198,119 @@ fun NetplayScreen() {
         }
     }
 
+    val online = s.optJSONObject("online")
+    val onlineOpen = online?.optBoolean("open") == true
+    val known = online?.optJSONArray("known").objs()
+    val friends = s.optJSONArray("friends").objs()
+    val joined = s.optJSONObject("joined")?.takeIf { it.optString("mode") == "azahar" && lobby == null }
+    fun showCode() {
+        if (onlineBusy) return
+        onlineBusy = true
+        scope.launch {
+            BottomStatus.working("Öffne Online-Raum …", 0.3f)
+            val r = withContext(Dispatchers.IO) { runCatching { if (onlineOpen && online!!.optString("code").isNotEmpty()) Online.hostStatus(ctx) else Online.startHost(ctx) }
+                .getOrElse { JSONObject().put("error", it.message) } }
+            onlineBusy = false
+            if (r.has("error")) { BottomStatus.done("Online geht nicht", true, scope); info = "Freunde einladen" to r.optString("error") }
+            else { BottomStatus.text = null; onlineMenu = r }
+            tick++
+        }
+    }
+
     TileGrid(first) {
+        // ---- 1. open lobbies: what you can join (or are in) right now ----
+        val lobbyCount = (if (lobby != null) 1 else 0) + (if (joined != null) 1 else 0) + invites.size
+        header("Offene Lobbys", when {
+            lobbyCount > 0 -> ""
+            serverOn -> "Gerade keine bei anderen – dein Spielserver läuft, Freunde finden dich"
+            else -> "Gerade keine – Thors in der Nähe tauchen hier von selbst auf"
+        })
         if (lobby != null) {
             val share = lobby.optString("mode") == "share"
-            header(if (share) "Du gibst weiter" else "Du spielst", "${lobby.optString("game")} · ${modeNames[lobby.optString("mode")]}")
             item {
-                ConsoleTile(hostStateText(lobby, room), "PIN ${lobby.optString("pin")} · Details",
+                ConsoleTile(lobby.optString("game"), (if (share) "du gibst weiter · " else "deine Lobby · ") + hostStateText(lobby, room),
                     if (lobby.optString("hostState") in setOf("hosting", "sharing")) Icons.Filled.CheckCircle else Icons.Filled.Lock, image = lobbyArt, accent = true,
                     modifier = Modifier.firstFocus(first, true)) {
                     val guests = lobby.optJSONArray("guestNames").let { a -> (0 until (a?.length() ?: 0)).joinToString(", ") { a!!.optString(it) } }.ifEmpty { "noch keiner" }
                     val inRoom = room?.optJSONArray("members").let { a -> (0 until (a?.length() ?: 0)).joinToString(", ") { a!!.optString(it) } }
-                    info = "PIN ${lobby.optString("pin")}" to buildString {
-                        append("Beigetreten: $guests")
-                        if (lobby.optString("mode") == "azahar") {
-                            append("\nIm 3DS-Raum: ${inRoom.ifEmpty { "niemand" }}\n\n${Azahar.hostSteps()}")
-                            append("\n\nDer Raum ist erreichbar unter (Port ${room?.optInt("port")}):\n${addressText(s.optJSONArray("addresses"))}")
-                            append("\nVon unterwegs: über NetBird, wenn beide Thors drin sind.")
-                        } else append("\n\nDieser Thor:\n${addressText(s.optJSONArray("addresses"))}")
+                    info = lobby.optString("game") to buildString {
+                        append("PIN ${lobby.optString("pin")} · beigetreten: $guests")
+                        if (lobby.optString("mode") == "azahar") append("\nIm 3DS-Raum: ${inRoom.ifEmpty { "niemand" }}\n\n${Azahar.hostSteps()}")
                         if (lobby.optString("hostState") == "manual") append("\n\nRetroArch hat nicht von selbst gehostet: RetroArch-Menü → Netplay → Netplay-Host starten.")
                     }
                 }
             }
-            item { ConsoleTile("Beenden", if (share) "nicht mehr anbieten" else "Lobby und Raum schließen", Icons.Filled.Close) { Netplay.close(ctx); tick++ } }
+            item { ConsoleTile("Lobby beenden", if (share) "nicht mehr anbieten" else "für alle schließen", Icons.Filled.Close) { Netplay.close(ctx); tick++ } }
         }
-        // guest side of a 3DS room: did it work?
-        s.optJSONObject("joined")?.takeIf { it.optString("mode") == "azahar" && lobby == null }?.let { j ->
-            header("3DS-Raum", "${j.optString("game")} · bei ${j.optString("host")} · Azahar → 127.0.0.1")
+        joined?.let { j ->
+            val st3 = s.optJSONObject("azahar")?.optString("room")
             item {
-                val st3 = s.optJSONObject("azahar")?.optString("room")
-                ConsoleTile(when (st3) { "connected" -> "Im Raum ✓"; "unknown" -> "Status unbekannt"; else -> "Noch nicht im Raum" },
-                    if (st3 == "connected") "im Spiel lokalen Mehrspieler wählen" else "in Azahar: Mehrspieler → Raum beitreten",
-                    if (st3 == "connected") Icons.Filled.CheckCircle else Icons.Filled.SportsEsports, accent = st3 == "connected") {
-                    info = "3DS-Raum" to j.optString("hint")
-                }
+                ConsoleTile("3DS-Raum bei ${j.optString("host")}", if (st3 == "connected") "du bist drin ✓ · im Spiel lokal spielen" else "in Azahar: Mehrspieler → Raum beitreten → 127.0.0.1",
+                    if (st3 == "connected") Icons.Filled.CheckCircle else Icons.Filled.SportsEsports, accent = true,
+                    modifier = Modifier.firstFocus(first, lobby == null)) { info = "3DS-Raum bei ${j.optString("host")}" to j.optString("hint") }
             }
-            item { ConsoleTile("Trennen", "127.0.0.1 wieder dieser Thor", Icons.Filled.Close) {
+            item { ConsoleTile("Verlassen", "127.0.0.1 wieder dieser Thor", Icons.Filled.Close) {
                 scope.launch { withContext(Dispatchers.IO) { Netplay.clearJoined(ctx) }; tick++ }
             } }
         }
-        joinJob?.let { j ->
-            header("Verbinden")
+        invites.forEach { inv ->
+            val mode = inv.optString("mode")
             item {
-                ConsoleTile(if (j.done) (j.error ?: "Fertig") else j.message.ifEmpty { "Verbinde …" }, "${(joinProg * 100).toInt()} %",
-                    Icons.Filled.SportsEsports, progress = joinProg) { if (j.done) joinJob = null }
-            }
-        }
-        if (invites.isNotEmpty()) {
-            header("Einladungen in der Nähe", "ein Druck genügt")
-            invites.forEach { inv ->
-                val shareInv = inv.optString("mode") == "share"
-                item {
-                    ConsoleTile(inv.optString("name"), inv.optString("game").ifEmpty { "Wi-Fi Direct offen" }.let { g ->
-                        when { inv.optString("mode") == "server" -> "3DS-Raum nutzen · ${inv.optString("via")}"; inv.optString("pin").isEmpty() -> "$g · verbinden"; shareInv -> "$g · annehmen"; else -> "$g · beitreten · ${inv.optString("via")}" } },
-                        if (inv.optString("pin").isEmpty() && inv.optString("mode") != "server") Icons.Filled.BluetoothSearching else Icons.Filled.SportsEsports, accent = inv.optString("pin").isNotEmpty() || inv.optString("mode") == "server",
-                        modifier = Modifier.firstFocus(first, lobby == null)) { accept(inv) }
-                }
+                ConsoleTile(if (mode == "server") "Spielserver von ${inv.optString("name")}" else inv.optString("game").ifEmpty { inv.optString("name") },
+                    when { mode == "server" -> "3DS-Raum · ${inv.optString("via")}"; mode == "share" -> "${inv.optString("name")} schickt dir das Spiel"
+                        inv.optString("pin").isEmpty() -> "${inv.optString("name")} · verbinden"; else -> "${inv.optString("name")} · ${modeNames[mode] ?: ""} · ${inv.optString("via")}" },
+                    if (inv.optString("pin").isEmpty() && mode != "server") Icons.Filled.BluetoothSearching else Icons.Filled.SportsEsports,
+                    accent = inv.optString("pin").isNotEmpty() || mode == "server",
+                    modifier = Modifier.firstFocus(first, lobby == null && joined == null && inv === invites.first())) { accept(inv) }
             }
         }
 
+        // ---- 2. friends: invite, join with a code, manage ----
+        header("Freunde", if (onlineOpen) "Online-Raum offen · ${online!!.optInt("guests")} von außen drin" else "auch übers Internet · Freundes-Code reicht")
+        item {
+            ConsoleTile(if (onlineBusy) "Öffnet …" else "Freunde einladen", "Freundes-Code zeigen", Icons.Filled.Public, accent = onlineOpen,
+                modifier = Modifier.firstFocus(first, lobbyCount == 0)) { showCode() }
+        }
+        item { ConsoleTile("Code eingeben", "bei einem Freund mitspielen", Icons.Filled.Dialpad) { codePad = true } }
+        item {
+            val n = known.size + friends.size
+            ConsoleTile("Freunde verwalten", if (n == 0) "noch keine" else "$n ${if (n == 1) "Freund" else "Freunde"}", Icons.Filled.Groups) { friendsOpen = true }
+        }
+
+        // ---- 3. game server ----
         header("Spielserver", when {
-            serverOn -> "läuft – Spiel aus einem beliebigen Frontend starten"
             supported.isEmpty() -> "Azahar, PPSSPP, RetroArch oder Eden installieren"
-            else -> "ein Knopf: 3DS-Raum, Wi-Fi Direct und Einladungen · " + supported.values.map { modeNames[it.optString("mode")] }.distinct().joinToString(", ")
+            serverOn -> "läuft · Spiel aus einem beliebigen Frontend starten"
+            else -> "3DS-Raum, Wi-Fi Direct und Einladungen mit einem Knopf"
         })
         item {
             ConsoleTile(when { serverBusy -> if (serverOn) "Stoppt …" else "Startet …"; serverOn -> "Server läuft"; else -> "Spielserver starten" },
-                if (serverOn) addressText(server.optJSONArray("addresses")).lineSequence().firstOrNull()?.substringAfter(": ") ?: "" else "keine Spielauswahl nötig",
-                if (serverOn) Icons.Filled.CheckCircle else Icons.Filled.WifiTethering, accent = serverOn,
-                modifier = Modifier.firstFocus(first, invites.isEmpty() && lobby == null)) {
+                if (serverOn) "Details" else "keine Spielauswahl nötig",
+                if (serverOn) Icons.Filled.CheckCircle else Icons.Filled.WifiTethering, accent = serverOn) {
                 if (serverOn) info = "Spielserver" to serverInfo(server) else toggleServer()
             }
         }
-        if (serverOn) {
-            item { ConsoleTile("Infos", "Adressen, Ports, wer drin ist", Icons.Filled.Info) { info = "Spielserver" to serverInfo(server) } }
-            item { ConsoleTile("Server stoppen", "Raum und Wi-Fi Direct aus", Icons.Filled.Close) { toggleServer() } }
-        }
+        if (serverOn) item { ConsoleTile("Server stoppen", "Raum und Wi-Fi Direct aus", Icons.Filled.Close) { toggleServer() } }
 
-        // online: friends anywhere, with a button code (encrypted tunnel, no server in between; Azahar stays on 127.0.0.1)
-        val online = s.optJSONObject("online")
-        val onlineOpen = online?.optBoolean("open") == true
-        header("Online spielen", if (onlineOpen) "Online-Raum offen · ${online!!.optInt("guests")} von außen drin"
-            else "Freunde überall · Code zeigen, sie drücken ihn · bis zu 7 Gäste")
-        item {
-            ConsoleTile(if (onlineBusy) "Öffnet …" else if (onlineOpen) "Code zeigen" else "Online einladen", "8-Tasten-Code für deine Freunde", Icons.Filled.Public,
-                accent = onlineOpen) {
-                if (onlineBusy) return@ConsoleTile
-                onlineBusy = true
-                scope.launch {
-                    val r = withContext(Dispatchers.IO) { runCatching { if (onlineOpen && online!!.optString("code").isNotEmpty()) Online.hostStatus(ctx) else Online.startHost(ctx) }
-                        .getOrElse { JSONObject().put("error", it.message) } }
-                    onlineBusy = false
-                    if (r.has("error")) info = "Online einladen" to r.optString("error") else onlineMenu = r
-                    tick++
-                }
-            }
-        }
-        item { ConsoleTile("Code eingeben", "von einem Freund", Icons.Filled.Dialpad) { codePad = true } }
-        online?.optJSONArray("known").objs().forEach { k ->
-            item {
-                ConsoleTile("Wieder zu ${k.optString("name")}", "ohne Code", Icons.Filled.SportsEsports) { knownMenu = k }
-            }
-        }
-
-        val friends = s.optJSONArray("friends").objs()
-        header("Freunde", if (friends.isEmpty()) "Einmal eine Einladung annehmen – danach kommt sie als Benachrichtigung, auch in ES-DE & Co."
-            else "Einladungen kommen als Benachrichtigung · ein Spiel aus jedem Frontend lädt sie ein")
-        friends.forEach { f ->
-            item {
-                ConsoleTile(f.optString("name"), "Freund · ${f.optString("id")}", Icons.Filled.Groups) { friendMenu = f }
-            }
-        }
-        if (friends.isNotEmpty()) {
-            item {
-                val auto = s.optBoolean("auto")
-                ConsoleTile(if (auto) "Automatisch einladen: an" else "Automatisch einladen: aus",
-                    when { !auto -> "nur bei laufendem Spielserver"; s.optString("shizuku") != "ready" -> "braucht Shizuku, um das Spiel zu erkennen"; else -> "beim Spielstart aus jedem Frontend" },
-                    Icons.Filled.WifiTethering, accent = auto) {
-                    wtf.lennard.thorbro.Friends.setAuto(ctx, !auto); tick++
-                }
-            }
-            item {
-                ConsoleTile("Emulatoren einrichten", "RetroArch & PPSSPP fürs Hosten vorbereiten", Icons.Filled.Tune) {
-                    scope.launch {
-                        val r = withContext(Dispatchers.IO) { runCatching { Netplay.prepare(ctx) }.getOrElse { JSONObject().put("Fehler", it.message) } }
-                        info = "Emulatoren" to r.keys().asSequence().joinToString("\n") { "${modeNames[it] ?: it}: ${r.optString(it)}" }.ifEmpty { "Nichts zu tun" }
-                    }
-                }
-            }
-        }
-
-        header("Ein Bildschirm, zwei Spieler", "Dolphin, melonDS & Co. haben am Thor keinen Mehrspieler übers Netz")
-        item {
-            ConsoleTile("Thor als Controller", "dieser Thor wird Bluetooth-Gamepad für den anderen Thor oder den Fernseher",
-                Icons.Filled.Gamepad) { ctx.startActivity(android.content.Intent(ctx, GamepadActivity::class.java)) }
-        }
-
-        header("Erweitert", if (advanced) "gleiches WLAN, PIN, Wi-Fi Direct von Hand" else "")
-        item { ConsoleTile(if (advanced) "Weniger" else "Erweitert", "Suchen, PIN, Wi-Fi Direct, ThorBro weitergeben", Icons.Filled.Tune) { advanced = !advanced } }
+        // ---- 4. advanced ----
+        header("Erweitert", "")
+        item { ConsoleTile(if (advanced) "Weniger" else "Erweitert", "WLAN, PIN, Wi-Fi Direct, Controller", Icons.Filled.Tune) { advanced = !advanced } }
         if (advanced) {
             item {
+                val auto = s.optBoolean("auto")
+                ConsoleTile(if (auto) "Auto-Einladen: an" else "Auto-Einladen: aus",
+                    when { !auto -> "nur bei laufendem Spielserver"; s.optString("shizuku") != "ready" -> "braucht Shizuku"; else -> "Spielstart lädt Freunde ein" },
+                    Icons.Filled.WifiTethering, accent = auto) { wtf.lennard.thorbro.Friends.setAuto(ctx, !auto); tick++ }
+            }
+            item {
                 val wlan = s.optBoolean("wlanOnly")
-                ConsoleTile(if (wlan) "Verbindung: nur WLAN" else "Verbindung: WLAN + Wi-Fi Direct",
-                    if (wlan) "beide Thors im selben WLAN (oder NetBird)" else "WLAN, sonst eigenes Funknetz", Icons.Filled.WifiTethering, accent = wlan) {
+                ConsoleTile(if (wlan) "Nur WLAN" else "WLAN + Wi-Fi Direct",
+                    if (wlan) "beide im selben WLAN" else "WLAN, sonst eigenes Funknetz", Icons.Filled.WifiTethering, accent = wlan) {
                     scope.launch { withContext(Dispatchers.IO) { runCatching { Netplay.setWlanOnly(ctx, !wlan) } }; tick++ }
                 }
             }
             item {
-                ConsoleTile(if (searching) "Sucht …" else "Thors suchen", peers?.let { "${it.size} gefunden" } ?: "im selben WLAN", Icons.Filled.Search) { search() }
+                ConsoleTile(if (searching) "Sucht …" else "Thors suchen", peers?.let { "${it.size} gefunden" } ?: "im selben WLAN, mit PIN", Icons.Filled.Search) { search() }
             }
             peers.orEmpty().forEach { p ->
                 val l = p.optJSONObject("lobby")
@@ -351,7 +324,9 @@ fun NetplayScreen() {
                             open -> pinFor = p
                             l?.optBoolean("room") == true -> scope.launch {
                                 val r = withContext(Dispatchers.IO) { Netplay.useRoomOf(ctx, p.optString("address"), l.optString("host")) }
-                                info = (if (r.has("error")) "Ging nicht" else "3DS-Raum von ${l.optString("host")}") to (r.optString("error").ifEmpty { r.optString("hint") }); tick++
+                                if (r.has("error")) BottomStatus.done(r.optString("error"), true, scope)
+                                else BottomStatus.done("3DS-Raum von ${l.optString("host")} · in Azahar 127.0.0.1 beitreten", false, scope)
+                                tick++
                             }
                             else -> search()
                         }
@@ -359,9 +334,23 @@ fun NetplayScreen() {
                 }
             }
             item {
-                ConsoleTile("Dieser Thor", addressText(s.optJSONArray("addresses")).replace("\n", " · "), Icons.Filled.Home) {
-                    info = "Adressen dieses Thors" to addressText(s.optJSONArray("addresses")) +
-                        "\n\nVon unterwegs spielen: beide Thors in NetBird, dann klappt „Thors suchen“ nicht (kein mDNS) – der Freund tippt im Web-Panel die NetBird-Adresse ein, für 3DS reicht die Adresse in Azahar."
+                ConsoleTile("Thor als Controller", "Bluetooth-Gamepad für anderen Thor oder TV", Icons.Filled.Gamepad) {
+                    ctx.startActivity(android.content.Intent(ctx, GamepadActivity::class.java))
+                }
+            }
+            item {
+                ConsoleTile("Emulatoren einrichten", "RetroArch & PPSSPP fürs Hosten", Icons.Filled.Tune) {
+                    scope.launch {
+                        BottomStatus.working("Richte Emulatoren ein …", 0.5f)
+                        val r = withContext(Dispatchers.IO) { runCatching { Netplay.prepare(ctx) }.getOrElse { JSONObject().put("Fehler", it.message) } }
+                        BottomStatus.text = null
+                        info = "Emulatoren" to r.keys().asSequence().joinToString("\n") { "${modeNames[it] ?: it}: ${r.optString(it)}" }.ifEmpty { "Nichts zu tun" }
+                    }
+                }
+            }
+            item {
+                ConsoleTile("Dieser Thor", addressText(s.optJSONArray("addresses")).lineSequence().firstOrNull() ?: "", Icons.Filled.Home) {
+                    info = "Adressen dieses Thors" to addressText(s.optJSONArray("addresses"))
                 }
             }
             directTiles(ctx, direct, scope, share = true)
@@ -382,30 +371,19 @@ fun NetplayScreen() {
             else "${inv.optString("game")} (${modeNames[inv.optString("mode")] ?: ""})\n\nThorBro verbindet sich per Wi-Fi Direct, holt das Spiel falls nötig und startet es.",
             options = listOf((if (shareInv) "Annehmen" else "Beitreten") to { invitePopup = null; accept(inv) })) { invitePopup = null }
     }
-    friendMenu?.let { f ->
-        ConsoleMenu(f.optString("name"), "Einladungen von diesem Thor kommen als Benachrichtigung.",
-            options = listOf("Entfernen" to { wtf.lennard.thorbro.Friends.remove(ctx, f.optString("id")); friendMenu = null; tick++ })) { friendMenu = null }
-    }
     onlineMenu?.let { o ->
-        val code = o.optString("code")
-        ConsoleMenu("Online einladen",
-            (if (code.isEmpty()) "Kein Code aktiv." else "Code für deine Freunde:\n\n$code\n\nals Zahlen: ${o.optString("digits")} · gilt noch ${o.optInt("codeMinutes")} Min.") +
-                "\n\nSie tippen bei sich Mehrspieler → „Code eingeben“ und drücken ihn auf dem Controller. In Azahar bleibt 127.0.0.1." +
-                "\nWer einmal drin war, kommt danach ohne Code wieder." +
-                (if (!o.optBoolean("public")) "\n\nAchtung: keine öffentliche Adresse gefunden – von außen klappt es evtl. nicht." else ""),
-            options = listOf(
-                "Neuer Code" to { scope.launch { onlineMenu = withContext(Dispatchers.IO) { Online.newCode(ctx); Online.hostStatus(ctx) }; tick++ } },
-                "Online schließen" to { scope.launch { withContext(Dispatchers.IO) { Online.stopHost() }; onlineMenu = null; tick++ } },
-                "Alle aussperren (neuer Schlüssel)" to { scope.launch { onlineMenu = withContext(Dispatchers.IO) { Online.resetAccess(ctx) }.takeIf { it.optBoolean("open") }; tick++ } },
-            )) { onlineMenu = null }
+        CodeDialog(o,
+            onNew = { scope.launch { onlineMenu = withContext(Dispatchers.IO) { Online.newCode(ctx); Online.hostStatus(ctx) }; tick++ } },
+            onStop = { scope.launch { withContext(Dispatchers.IO) { Online.stopHost() }; onlineMenu = null; tick++ } },
+            onReset = { scope.launch { onlineMenu = withContext(Dispatchers.IO) { Online.resetAccess(ctx) }.takeIf { it.optBoolean("open") }; tick++ } },
+        ) { onlineMenu = null }
     }
-    knownMenu?.let { k ->
-        ConsoleMenu("Wieder zu ${k.optString("name")}", "Du warst schon in diesem Online-Raum – kein Code nötig.",
-            options = listOf(
-                "Beitreten" to { knownMenu = null; runJoin(Jobs.start("Online beitreten") { Online.joinKnown(ctx, k.optString("id"), it) }) },
-                "Vergessen" to { Online.forget(ctx, k.optString("id")); knownMenu = null; tick++ },
-            )) { knownMenu = null }
-    }
+    if (friendsOpen) FriendsDialog(known, friends,
+        onPlay = { k -> friendsOpen = false; runJoin(Jobs.start("Online beitreten") { Online.joinKnown(ctx, k.optString("id"), it) }) },
+        onRemoveOnline = { k -> Online.forget(ctx, k.optString("id")); tick++ },
+        onRemoveNearby = { f -> wtf.lennard.thorbro.Friends.remove(ctx, f.optString("id")); tick++ },
+        onCode = { friendsOpen = false; codePad = true },
+    ) { friendsOpen = false }
     if (codePad) CodePad(onClose = { codePad = false }) { c ->
         codePad = false
         runJoin(Jobs.start("Online beitreten") { Online.joinCode(ctx, c, it) })
@@ -444,52 +422,6 @@ private fun PinPad(game: String, onClose: () -> Unit, onDone: (String) -> Unit) 
             }
             Spacer(Modifier.height(8.dp))
             BigButton("Zurück") { onClose() }
-        }
-    }
-}
-
-/**
- * Button code entry: the code is pressed on the controller (D-pad and A B X Y), so every key goes into the code here
- * and none moves the focus. L1 deletes, Select/Start cancels. The buttons on screen are for touch.
- */
-@Composable
-private fun CodePad(onClose: () -> Unit, onDone: (String) -> Unit) {
-    var code by remember { mutableStateOf("") }
-    val box = remember { FocusRequester() }
-    LaunchedEffect(Unit) { delay(150); runCatching { box.requestFocus() } }
-    fun press(i: Int) { if (code.length < 8) { code += i; if (code.length == 8) onDone(code) } }
-    DialogOpen()
-    Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        ImmersiveDialog()
-        Column(Modifier.width(520.dp).clip(RoundedCornerShape(22.dp)).background(Color(0xF0141519)).padding(24.dp)
-            .focusRequester(box).focusable()
-            .onPreviewKeyEvent { e ->
-                val i = when (e.key) {
-                    Key.DirectionUp -> 0; Key.DirectionDown -> 1; Key.DirectionLeft -> 2; Key.DirectionRight -> 3
-                    Key.ButtonA -> 4; Key.ButtonB -> 5; Key.ButtonX -> 6; Key.ButtonY -> 7
-                    Key.ButtonL1, Key.Backspace -> 8
-                    Key.ButtonSelect, Key.ButtonStart, Key.Back, Key.Escape -> 9
-                    else -> -1
-                }
-                if (i < 0) return@onPreviewKeyEvent false
-                if (e.type == KeyEventType.KeyDown) when (i) { 8 -> code = code.dropLast(1); 9 -> onClose(); else -> press(i) }
-                true
-            }) {
-            Text("Code eingeben", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-            Text("Drück die 8 Tasten vom Code deines Freundes · L1 löscht · Select bricht ab", fontSize = 15.sp, color = Muted, modifier = Modifier.padding(top = 4.dp))
-            Text((code.map { Online.SYMBOLS[it - '0'] } + List(8 - code.length) { "·" }).joinToString(" "), fontSize = 38.sp,
-                fontFamily = FontFamily.Monospace, color = Accent, modifier = Modifier.padding(vertical = 14.dp))
-            Online.SYMBOLS.chunked(4).forEachIndexed { r, row ->
-                Row {
-                    row.forEachIndexed { c, sym ->
-                        BigButton(sym, modifier = Modifier.weight(1f).padding(4.dp)) { press(r * 4 + c) }
-                    }
-                }
-            }
-            Row {
-                BigButton("Löschen", modifier = Modifier.weight(1f).padding(4.dp)) { code = code.dropLast(1) }
-                BigButton("Abbrechen", modifier = Modifier.weight(1f).padding(4.dp)) { onClose() }
-            }
         }
     }
 }
