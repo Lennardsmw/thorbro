@@ -436,17 +436,24 @@ fun DirectDialog(d: DirectUi) {
     when (val m = d.menu) {
         null -> {}
         "info" -> ConsoleMenu("Wi-Fi Direct",
-            "Thor mit ThorBro in der Nähe: bekommt automatisch eine Einladung (Multiplayer öffnen).\n\nSonst in den WLAN-Einstellungen verbinden:\nNetz: ${s?.optString("ssid")}\nPasswort: ${s?.optString("pass")}\n\nThorBro dort im Browser: ${s?.optString("download")}",
-            mono = true, options = listOf("Wi-Fi Direct beenden" to {
+            "Thor mit ThorBro in der Nähe: bekommt automatisch eine Einladung (Multiplayer öffnen).\n\nOhne ThorBro: in den WLAN-Einstellungen verbinden, dann die Adresse im Browser öffnen.\nNetz: ${s?.optString("ssid")}\nPasswort: ${s?.optString("pass")}\nThorBro: ${s?.optString("download")}",
+            mono = true, qrs = listOfNotNull(
+                s?.optString("ssid")?.takeIf { it.isNotEmpty() }?.let { wtf.lennard.thorbro.Qr.wifi(it, s.optString("pass")) to "1. Scannen: Netz beitreten" },
+                s?.optString("download")?.takeIf { it.isNotEmpty() }?.let { it to "2. Scannen: ThorBro laden" }),
+            options = listOf("Wi-Fi Direct beenden" to {
                 scope.launch { d.st = withContext(Dispatchers.IO) { wtf.lennard.thorbro.Direct.stop(ctx) } }; d.menu = null
             })) { d.menu = null }
-        "share" -> ConsoleMenu("ThorBro weitergeben",
-            "Ohne gemeinsames WLAN: Wi-Fi Direct starten, der andere Thor verbindet sich und öffnet die angezeigte Adresse im Browser." +
-                (s?.optString("lanDownload")?.takeIf { it.isNotEmpty() }?.let { "\n\nIm selben WLAN: $it" } ?: ""),
-            options = listOf(
-                "Über Wi-Fi Direct" to { if (s?.optBoolean("active") == true) d.menu = "info" else directOn(ctx, d, scope, "info") },
-                "Quick Share / Bluetooth" to { d.menu = null; runCatching { ctx.startActivity(wtf.lennard.thorbro.Direct.shareIntent(ctx)) } },
-            )) { d.menu = null }
+        "share" -> {
+            val lan = s?.optString("lanDownload")?.takeIf { it.isNotEmpty() }
+            ConsoleMenu("ThorBro weitergeben",
+                if (lan != null) "Im selben WLAN: QR-Code scannen oder im Browser öffnen:\n$lan\n\nKein gemeinsames WLAN: über Wi-Fi Direct."
+                else "Kein WLAN verbunden: über Wi-Fi Direct weitergeben.",
+                qrs = listOfNotNull(lan?.let { it to "Im selben WLAN scannen" }),
+                options = listOf(
+                    "Über Wi-Fi Direct" to { if (s?.optBoolean("active") == true) d.menu = "info" else directOn(ctx, d, scope, "info") },
+                    "Quick Share / Bluetooth" to { d.menu = null; runCatching { ctx.startActivity(wtf.lennard.thorbro.Direct.shareIntent(ctx)) } },
+                )) { d.menu = null }
+        }
         else -> ConsoleMenu("Wi-Fi Direct", m.removePrefix("error:"), options = emptyList()) { d.menu = null }
     }
 }

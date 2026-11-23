@@ -58,6 +58,11 @@ object Server {
                 get("/") { asset(ctx, "index.html") }
                 // ThorBro for another device (e.g. over Wi-Fi Direct): public, it is only the app itself
                 get("/get") { call.respondText(Direct.page(ctx), ContentType.Text.Html) }
+                // QR code as SVG for the web panel (only encodes the given text)
+                get("/qr.svg") {
+                    val t = call.request.queryParameters["t"]?.take(512) ?: return@get fail("missing t")
+                    call.respondText(Qr.svg(t), ContentType.Image.SVG)
+                }
                 get("/thorbro.apk") {
                     call.response.header(HttpHeaders.ContentDisposition, "attachment; filename=\"ThorBro.apk\"")
                     call.respondFile(Direct.apk(ctx))

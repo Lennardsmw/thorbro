@@ -1442,12 +1442,17 @@ $('#frPrepare').onclick = async () => {
 };
 
 // ---------- Wi-Fi Direct ----------
+const wifiQr = (ssid, pass) => { const e = (x) => String(x).replace(/([\\;,:"])/g, '\\$1'); return `WIFI:T:WPA;S:${e(ssid)};P:${e(pass)};;`; };
+const qrImg = (text, caption) => `<figure style="display:inline-block;margin:10px 16px 0 0;text-align:center">
+  <img src="/qr.svg?${q({ t: text })}" alt="QR-Code" width="180" height="180" style="background:#fff;border-radius:8px">
+  <figcaption class="muted" style="max-width:180px">${esc(caption)}</figcaption></figure>`;
 function showDirect(d) {
   $('#dxStop').hidden = !d.active; $('#dxStart').hidden = d.active;
   $('#dxInfo').innerHTML = d.active
-    ? `Netz <strong>${esc(d.ssid)}</strong> · Passwort <code>${esc(d.pass)}</code> · ThorBro laden: <a href="${esc(d.download)}">${esc(d.download)}</a>`
+    ? `Netz <strong>${esc(d.ssid)}</strong> · Passwort <code>${esc(d.pass)}</code> · ThorBro laden: <a href="${esc(d.download)}">${esc(d.download)}</a><br>`
+      + qrImg(wifiQr(d.ssid, d.pass), '1. Scannen: Netz beitreten') + qrImg(d.download, '2. Scannen: ThorBro laden')
     : (d.permission ? 'aus' : 'Beim ersten Mal am Thor unter Multiplayer → Wi-Fi Direct die Berechtigung erlauben.')
-      + (d.lanDownload ? ` · Im selben WLAN gibt es ThorBro unter <a href="${esc(d.lanDownload)}">${esc(d.lanDownload)}</a>` : '');
+      + (d.lanDownload ? ` · Im selben WLAN gibt es ThorBro unter <a href="${esc(d.lanDownload)}">${esc(d.lanDownload)}</a><br>` + qrImg(d.lanDownload, 'Im selben WLAN scannen') : '');
 }
 async function loadDirect() { try { showDirect((await api('/api/direct')).body); } catch {} }
 $('#dxStart').onclick = async () => {

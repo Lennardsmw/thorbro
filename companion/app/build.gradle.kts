@@ -68,6 +68,7 @@ dependencies {
     implementation("org.slf4j:slf4j-nop:2.0.17")
     implementation("org.apache.commons:commons-compress:1.28.0")
     implementation("org.tukaani:xz:1.12")
+    implementation("com.google.zxing:core:3.5.3")
 
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.compose.ui:ui")

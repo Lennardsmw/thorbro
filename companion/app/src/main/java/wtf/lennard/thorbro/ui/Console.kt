@@ -139,7 +139,8 @@ fun Modifier.firstFocus(f: FocusRequester?, isFirst: Boolean) = if (f != null &&
 
 /** a console menu: title, an optional short line, big buttons stacked; B closes */
 @Composable
-fun ConsoleMenu(title: String, text: String = "", mono: Boolean = false, options: List<Pair<String, () -> Unit>>, onClose: () -> Unit) {
+fun ConsoleMenu(title: String, text: String = "", mono: Boolean = false, options: List<Pair<String, () -> Unit>>,
+                qrs: List<Pair<String, String>> = emptyList(), onClose: () -> Unit) {
     val first = remember { FocusRequester() }
     LaunchedEffect(Unit) { kotlinx.coroutines.delay(150); runCatching { first.requestFocus() } }
     DialogOpen()
@@ -149,6 +150,8 @@ fun ConsoleMenu(title: String, text: String = "", mono: Boolean = false, options
             Text(title, fontSize = 22.sp, fontWeight = FontWeight.Bold)
             if (text.isNotEmpty()) Text(text, fontSize = if (mono) 15.sp else 15.sp, color = if (mono) Accent else Muted,
                 fontFamily = if (mono) androidx.compose.ui.text.font.FontFamily.Monospace else null, modifier = Modifier.padding(top = 8.dp))
+            if (qrs.isNotEmpty()) androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth().padding(top = 14.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly) { qrs.forEach { (text, caption) -> QrImage(text, caption, if (qrs.size > 1) 190.dp else 220.dp) } }
             Spacer(Modifier.height(16.dp))
             (options + ("Zurück" to onClose)).forEachIndexed { i, (label, act) ->
                 BigButton(label, modifier = Modifier.firstFocus(first, i == 0)) { act() }
