@@ -14,6 +14,9 @@ if [ ! -d "$SRC/.git" ]; then
 fi
 git -C "$SRC" checkout -q "$AZAHAR_COMMIT"
 git -C "$SRC" submodule update --init --depth 1 externals/enet externals/fmt
+# diagnosis: log every connection and every refused join (Azahar's room refuses silently)
+git -C "$SRC" checkout -q -- src/network/room.cpp
+perl -0pi -e 's/(void Room::RoomImpl::Send(NameCollision|MacCollision|ConsoleIdCollision|WrongPassword|RoomIsFull|VersionMismatch|UserBanned)\(ENetPeer\* client\) \{)/$1\n    LOG_INFO(Network, "join refused: $2");/g; s/(            case ENET_EVENT_TYPE_NONE:\n            case ENET_EVENT_TYPE_CONNECT:\n)/            case ENET_EVENT_TYPE_CONNECT:\n                LOG_INFO(Network, "connect from port {}", event.peer->address.port);\n                break;\n            case ENET_EVENT_TYPE_NONE:\n/' "$SRC/src/network/room.cpp"
 OUT=$ROOT/companion/room/build/arm64
 "$CMAKE" -S "$ROOT/companion/room" -B "$OUT" -DAZAHAR="$SRC" -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=30

@@ -441,7 +441,7 @@ object Server {
                         JSONObject()
                             .put("shell", Shell.state())
                             .put("udp", Shell.out("sh", "-c", "grep -i ':6128 ' /proc/net/udp /proc/net/udp6; ss -uanp 2>/dev/null | grep 24872"))
-                            .put("logcat", Shell.out("sh", "-c", "logcat -d -v time -t $n | grep -i -E 'azahar|citra|network|room|enet|24872' | tail -300"))
+                            .put("logcat", Shell.out("sh", "-c", "logcat -d -v time -t $n | grep -v PulseFps | grep -i -E ${q("grep")?.let { Shell.q(it) } ?: "'azahar|citra|network|room|enet|24872'"} | tail -400"))
                     }
                     json(out)
                 }
