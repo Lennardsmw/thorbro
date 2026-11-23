@@ -20,14 +20,18 @@ import kotlin.concurrent.thread
  */
 object Updater {
     const val DEFAULT_FEED = "https://api.github.com/repos/Lennardsmw/thorbro/releases"
-    /** dev channel on LXC 107 (apps), home network only */
-    const val DEV_FEED = "http://192.168.178.97:8097/feed.json"
+    /** the old home-network dev channel; ignored now, test builds come from GitHub pre-releases too */
+    private const val OLD_DEV_FEED = "http://192.168.178.97:8097/feed.json"
     private const val EVERY = 6L * 3600 * 1000
 
+    /**
+     * Test builds ("<version>-<branch>+<commit>") update from GitHub pre-releases tagged "dev-<versionCode>"
+     * (scripts/publish-dev.sh), so testers anywhere get them; normal builds only take "v1.2.3" releases.
+     */
     fun dev(ctx: Context) = current(ctx).contains('+')
-    fun defaultFeed(ctx: Context) = if (dev(ctx)) DEV_FEED else DEFAULT_FEED
+    fun defaultFeed(@Suppress("UNUSED_PARAMETER") ctx: Context) = DEFAULT_FEED
     fun feed(ctx: Context): String = Prefs.of(ctx).getString("updateFeed", null)
-        ?.takeUnless { dev(ctx) && it == DEFAULT_FEED } ?: defaultFeed(ctx)
+        ?.takeUnless { it == OLD_DEV_FEED } ?: defaultFeed(ctx)
     fun auto(ctx: Context): Boolean = Prefs.of(ctx).getBoolean("autoUpdate", true)
 
     fun configure(ctx: Context, feed: String?, auto: Boolean?) {
@@ -47,7 +51,9 @@ object Updater {
             // GitHub's API allows only 60 anonymous requests per hour and connection; the release feed has no such limit
             return fromAtom(ctx, out) ?: out.put("error", "Update-Quelle nicht erreichbar: ${e.message}")
         }
-        // a release list (GitHub /releases): take the newest app release ("v1.2.3" with an .apk), skip desktop ones
+        // a release list (GitHub /releases): take the newest app release ("v1.2.3" with an .apk), skip desktop ones;
+        // a test build takes the newest test pre-release ("dev-<versionCode>") instead
+        if (dev(ctx) && body.trimStart().startsWith("[")) return devRelease(ctx, org.json.JSONArray(body), out)
         val j = try {
             if (body.trimStart().startsWith("[")) {
                 val arr = org.json.JSONArray(body)
@@ -75,8 +81,26 @@ object Updater {
         return out.put("latest", latest).put("url", url).put("available", available)
     }
 
+    private fun devRelease(ctx: Context, arr: org.json.JSONArray, out: JSONObject): JSONObject {
+        val r = (0 until arr.length()).map { arr.getJSONObject(it) }
+            .filter { !it.optBoolean("draft") && Regex("^dev-\\d+$").matches(it.optString("tag_name")) }
+            .maxByOrNull { it.optString("tag_name").removePrefix("dev-").toLong() } ?: return out.put("error", "Noch kein Test-Build auf GitHub")
+        val code = r.getString("tag_name").removePrefix("dev-").toLong()
+        val assets = r.optJSONArray("assets")
+        val url = (0 until (assets?.length() ?: 0)).map { assets!!.getJSONObject(it) }
+            .firstOrNull { it.optString("name").endsWith(".apk", true) }?.optString("browser_download_url") ?: return out.put("error", "Test-Build ohne APK")
+        return out.put("latest", r.optString("name").removePrefix("ThorBro ").ifEmpty { "dev-$code" }).put("url", url)
+            .put("available", code > currentCode(ctx))
+    }
+
     private fun fromAtom(ctx: Context, out: JSONObject): JSONObject? = runCatching {
         if (!feed(ctx).contains("api.github.com/repos/Lennardsmw/thorbro")) return null
+        if (dev(ctx)) { // test builds: newest "dev-<versionCode>" tag, its APK always has the same name
+            val atom = get("https://github.com/Lennardsmw/thorbro/releases.atom")
+            val code = Regex("/releases/tag/dev-(\\d+)").findAll(atom).map { it.groupValues[1].toLong() }.maxOrNull() ?: return null
+            return out.put("latest", "dev-$code").put("url", "https://github.com/Lennardsmw/thorbro/releases/download/dev-$code/ThorBro-dev.apk")
+                .put("available", code > currentCode(ctx)).put("via", "atom")
+        }
         val atom = get("https://github.com/Lennardsmw/thorbro/releases.atom")
         val latest = Regex("/releases/tag/v(\\d+\\.\\d+\\.\\d+)").findAll(atom).map { it.groupValues[1] }
             .maxWithOrNull { a, b -> if (newer(a, b)) 1 else -1 } ?: return null
