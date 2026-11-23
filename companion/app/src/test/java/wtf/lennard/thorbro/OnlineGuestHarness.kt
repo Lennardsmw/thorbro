@@ -13,16 +13,16 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.thread
 
 /**
- * Manual test, not part of the normal run: THORBRO_INVITE=<link> ./gradlew :app:testDebugUnitTest --tests '*OnlineGuestHarness*'
+ * Manual test, not part of the normal run: THORBRO_CODE=<digits 1-8> ./gradlew :app:testDebugUnitTest --tests '*OnlineGuestHarness*'
  * Plays the guest Thor on the Mac: 127.0.0.1:24872 on the Mac leads through the tunnel into the host's room, for
  * THORBRO_HARNESS_SECONDS (default 60). Join it with the ENet test client meanwhile.
  */
 class OnlineGuestHarness {
     @Test fun guest() {
-        val link = System.getenv("THORBRO_INVITE")
-        assumeTrue(link != null)
+        val code = System.getenv("THORBRO_CODE")
+        assumeTrue(code != null)
         Tunnel.log = { println("tunnel: $it") }
-        val inv = Online.parse(link!!)!!
+        val inv = Online.redeem("Mac-Test", code!!)
         println("host ${inv.name}, candidates ${inv.candidates}")
         val g = Tunnel.Guest(inv.secret, inv.candidates)
         println("own candidates ${g.candidates}")

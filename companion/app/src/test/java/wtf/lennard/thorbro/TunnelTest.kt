@@ -84,6 +84,15 @@ class TunnelTest {
         g1.close(); g2.close(); host.close(); room.close()
     }
 
+    @Test fun codes() {
+        val c = Online.normalize("↓ ↓ A B X X → Y")!!
+        assertEquals("11456637", c)
+        assertEquals(c, Online.normalize("22567748"))
+        assertEquals(c, Online.normalize("d d a b x x r y"))
+        assertEquals("↓ ↓ A B X X → Y", Online.codeText(c))
+        assertNull(Online.normalize("1234"))
+    }
+
     @Test fun stunAndCandidates() {
         DatagramSocket().use { s ->
             val c = Tunnel.candidates(s)

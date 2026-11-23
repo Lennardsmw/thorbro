@@ -1382,37 +1382,30 @@ $('#svToggle').onclick = async () => {
 function renderOnline(o) {
   if (!o) return;
   $('#onState').innerHTML = o.open ? `<span class="ok">offen</span> · ${o.guests} von außen drin` + (o.public ? '' : ' · <span class="err">keine öffentliche Adresse</span>') : 'zu';
-  $('#onInvite').textContent = o.open ? 'Einladung zeigen' : 'Online einladen';
-  if (!o.open) $('#onBox').hidden = true;
+  $('#onInvite').textContent = o.open ? 'Code zeigen' : 'Online einladen';
+  if (o.open && o.code) {
+    $('#onCode').textContent = o.code;
+    $('#onCodeSub').textContent = `als Zahlen: ${o.digits} · gilt noch ${o.codeMinutes} Min. · Freund: Mehrspieler → „Code eingeben“`;
+  } else if (!o.open) $('#onBox').hidden = true;
+  $('#onKnown').innerHTML = (o.known || []).map((k) => `<button data-known="${esc(k.id)}">Wieder zu ${esc(k.name)}</button><button data-forget="${esc(k.id)}" title="vergessen">✕</button>`).join('');
 }
-function showOnline(o) {
-  $('#onBox').hidden = false;
-  $('#onShare').value = o.share || '';
-  $('#onQr').innerHTML = qrImg(o.web, 'Mit dem anderen Thor scannen');
-  renderOnline(o);
+async function onlineAction(path) {
+  try { const { body } = await api(path, { method: 'POST' }); if (body.error) alert(body.error); else { renderOnline(body); $('#onBox').hidden = !body.open; } }
+  catch (err) { alert(err.message); }
+  loadNetplay();
 }
 $('#onInvite').onclick = async () => {
   $('#onInvite').disabled = true; $('#onState').textContent = 'öffnet …';
-  try { const { body } = await api('/api/online/host', { method: 'POST' }); if (body.error) alert(body.error); else showOnline(body); }
-  catch (err) { alert(err.message); }
-  $('#onInvite').disabled = false; loadNetplay();
+  await onlineAction(np && np.online && np.online.open && np.online.code ? '/api/online/new' : '/api/online/host');
+  $('#onInvite').disabled = false;
 };
-$('#onCopy').onclick = async () => {
-  try { await navigator.clipboard.writeText($('#onShare').value); toast('Kopiert'); }
-  catch { $('#onShare').select(); document.execCommand('copy'); toast('Kopiert'); }
-};
-$('#onNew').onclick = async () => {
-  if (!confirm('Neuer Link? Der alte funktioniert dann nicht mehr.')) return;
-  const { body } = await api('/api/online/new', { method: 'POST' });
-  if (body.open) showOnline(body); loadNetplay();
-};
+$('#onNew').onclick = () => onlineAction('/api/online/new');
+$('#onReset').onclick = () => { if (confirm('Alle, die schon mal drin waren, brauchen dann wieder einen Code. Weiter?')) onlineAction('/api/online/reset'); };
 $('#onClose').onclick = async () => { await api('/api/online/close', { method: 'POST' }); $('#onBox').hidden = true; loadNetplay(); };
-$('#onJoin').onclick = async () => {
-  const link = $('#onJoinLink').value.trim();
-  if (!link) return;
+async function onlineJoin(params) {
   $('#onJoin').disabled = true; $('#onJoinInfo').textContent = 'verbinde …';
   try {
-    const { body } = await api('/api/online/join?' + q({ link }), { method: 'POST' });
+    const { body } = await api('/api/online/join?' + q(params), { method: 'POST' });
     for (;;) {
       await new Promise((r) => setTimeout(r, 700));
       const { body: j } = await api('/api/jobs/' + body.id);
@@ -1421,6 +1414,12 @@ $('#onJoin').onclick = async () => {
     }
   } catch (err) { $('#onJoinInfo').textContent = err.message; }
   $('#onJoin').disabled = false; loadNetplay();
+}
+$('#onJoin').onclick = () => { const code = $('#onJoinCode').value.trim(); if (code) onlineJoin({ code }); };
+$('#onKnown').onclick = async (e) => {
+  const k = e.target.dataset.known, f = e.target.dataset.forget;
+  if (k) onlineJoin({ known: k });
+  if (f) { await api('/api/online/forget?' + q({ id: f }), { method: 'POST' }); loadNetplay(); }
 };
 
 $('#npClose').onclick = async () => { await api('/api/netplay/close', { method: 'POST' }); loadNetplay(); loadDirect(); };

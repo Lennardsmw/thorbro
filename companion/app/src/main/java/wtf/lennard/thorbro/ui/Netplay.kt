@@ -53,7 +53,14 @@ import wtf.lennard.thorbro.Jobs
 import wtf.lennard.thorbro.Netplay
 import wtf.lennard.thorbro.Online
 import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.Dialpad
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.focusRequester
 import java.io.File
 
 private val modeNames = mapOf("retroarch" to "RetroArch", "ppsspp" to "PPSSPP", "eden" to "Eden", "azahar" to "Azahar", "share" to "Weitergeben", "server" to "Spielserver")
@@ -102,6 +109,8 @@ fun NetplayScreen() {
     var friendMenu by remember { mutableStateOf<JSONObject?>(null) }
     var onlineMenu by remember { mutableStateOf<JSONObject?>(null) }
     var onlineBusy by remember { mutableStateOf(false) }
+    var codePad by remember { mutableStateOf(false) }
+    var knownMenu by remember { mutableStateOf<JSONObject?>(null) }
 
     LaunchedEffect(tick) {
         withContext(Dispatchers.IO) {
@@ -258,30 +267,29 @@ fun NetplayScreen() {
             item { ConsoleTile("Server stoppen", "Raum und Wi-Fi Direct aus", Icons.Filled.Close) { toggleServer() } }
         }
 
-        // online: a link for friends anywhere (encrypted tunnel, no server in between; Azahar stays on 127.0.0.1)
+        // online: friends anywhere, with a button code (encrypted tunnel, no server in between; Azahar stays on 127.0.0.1)
         val online = s.optJSONObject("online")
-        header("Online spielen", if (online?.optBoolean("open") == true) "Online-Raum offen · ${online.optInt("guests")} von außen drin"
-            else "Freunde überall: Link schicken, sie tippen drauf · bis zu 7 Gäste")
+        val onlineOpen = online?.optBoolean("open") == true
+        header("Online spielen", if (onlineOpen) "Online-Raum offen · ${online!!.optInt("guests")} von außen drin"
+            else "Freunde überall · Code zeigen, sie drücken ihn · bis zu 7 Gäste")
         item {
-            ConsoleTile(if (onlineBusy) "Öffnet …" else "Online einladen", "Link per WhatsApp & Co. oder QR-Code", Icons.Filled.Public,
-                accent = online?.optBoolean("open") == true) {
+            ConsoleTile(if (onlineBusy) "Öffnet …" else if (onlineOpen) "Code zeigen" else "Online einladen", "8-Tasten-Code für deine Freunde", Icons.Filled.Public,
+                accent = onlineOpen) {
                 if (onlineBusy) return@ConsoleTile
                 onlineBusy = true
                 scope.launch {
-                    val r = withContext(Dispatchers.IO) { runCatching { Online.startHost(ctx) }.getOrElse { JSONObject().put("error", it.message) } }
+                    val r = withContext(Dispatchers.IO) { runCatching { if (onlineOpen && online!!.optString("code").isNotEmpty()) Online.hostStatus(ctx) else Online.startHost(ctx) }
+                        .getOrElse { JSONObject().put("error", it.message) } }
                     onlineBusy = false
                     if (r.has("error")) info = "Online einladen" to r.optString("error") else onlineMenu = r
                     tick++
                 }
             }
         }
-        item {
-            ConsoleTile("Einladung öffnen", "Link aus der Zwischenablage", Icons.Filled.ContentPaste) {
-                val clip = ctx.getSystemService(android.content.ClipboardManager::class.java)?.primaryClip
-                val text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString() ?: ""
-                val inv = Online.parse(text)
-                if (inv == null) info = "Einladung öffnen" to "In der Zwischenablage ist kein ThorBro-Einladungslink.\n\nDie Nachricht mit dem Link lange drücken → Kopieren, dann hier noch mal."
-                else runJoin(Jobs.start("Online beitreten") { Online.join(ctx, text, it) })
+        item { ConsoleTile("Code eingeben", "von einem Freund", Icons.Filled.Dialpad) { codePad = true } }
+        online?.optJSONArray("known").objs().forEach { k ->
+            item {
+                ConsoleTile("Wieder zu ${k.optString("name")}", "ohne Code", Icons.Filled.SportsEsports) { knownMenu = k }
             }
         }
 
@@ -379,29 +387,28 @@ fun NetplayScreen() {
             options = listOf("Entfernen" to { wtf.lennard.thorbro.Friends.remove(ctx, f.optString("id")); friendMenu = null; tick++ })) { friendMenu = null }
     }
     onlineMenu?.let { o ->
+        val code = o.optString("code")
         ConsoleMenu("Online einladen",
-            "Schick deinen Freunden diesen Link. Sie tippen drauf, ThorBro verbindet sich direkt und verschlüsselt mit diesem Thor." +
-                "\nIn Azahar bleibt alles gleich: 127.0.0.1.\n\nDer Link gilt, bis du einen neuen machst." +
+            (if (code.isEmpty()) "Kein Code aktiv." else "Code für deine Freunde:\n\n$code\n\nals Zahlen: ${o.optString("digits")} · gilt noch ${o.optInt("codeMinutes")} Min.") +
+                "\n\nSie tippen bei sich Mehrspieler → „Code eingeben“ und drücken ihn auf dem Controller. In Azahar bleibt 127.0.0.1." +
+                "\nWer einmal drin war, kommt danach ohne Code wieder." +
                 (if (!o.optBoolean("public")) "\n\nAchtung: keine öffentliche Adresse gefunden – von außen klappt es evtl. nicht." else ""),
-            qrs = listOf(o.optString("web") to "Mit dem anderen Thor scannen"),
             options = listOf(
-                "Link teilen" to {
-                    runCatching {
-                        ctx.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND)
-                            .setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, o.optString("share")), "Einladung schicken")
-                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
-                    }
-                },
-                "Link kopieren" to {
-                    ctx.getSystemService(android.content.ClipboardManager::class.java)
-                        ?.setPrimaryClip(android.content.ClipData.newPlainText("ThorBro-Einladung", o.optString("share")))
-                    info = "Online einladen" to "Kopiert – in WhatsApp & Co. einfügen."; onlineMenu = null
-                },
-                "Neuer Link (alter gilt nicht mehr)" to {
-                    scope.launch { onlineMenu = withContext(Dispatchers.IO) { Online.newLink(ctx) }.takeIf { it.optBoolean("open") }; tick++ }
-                },
+                "Neuer Code" to { scope.launch { onlineMenu = withContext(Dispatchers.IO) { Online.newCode(ctx); Online.hostStatus(ctx) }; tick++ } },
                 "Online schließen" to { scope.launch { withContext(Dispatchers.IO) { Online.stopHost() }; onlineMenu = null; tick++ } },
+                "Alle aussperren (neuer Schlüssel)" to { scope.launch { onlineMenu = withContext(Dispatchers.IO) { Online.resetAccess(ctx) }.takeIf { it.optBoolean("open") }; tick++ } },
             )) { onlineMenu = null }
+    }
+    knownMenu?.let { k ->
+        ConsoleMenu("Wieder zu ${k.optString("name")}", "Du warst schon in diesem Online-Raum – kein Code nötig.",
+            options = listOf(
+                "Beitreten" to { knownMenu = null; runJoin(Jobs.start("Online beitreten") { Online.joinKnown(ctx, k.optString("id"), it) }) },
+                "Vergessen" to { Online.forget(ctx, k.optString("id")); knownMenu = null; tick++ },
+            )) { knownMenu = null }
+    }
+    if (codePad) CodePad(onClose = { codePad = false }) { c ->
+        codePad = false
+        runJoin(Jobs.start("Online beitreten") { Online.joinCode(ctx, c, it) })
     }
     info?.let { (t, x) -> ConsoleMenu(t, x, options = emptyList()) { info = null } }
     DirectDialog(direct)
@@ -437,6 +444,52 @@ private fun PinPad(game: String, onClose: () -> Unit, onDone: (String) -> Unit) 
             }
             Spacer(Modifier.height(8.dp))
             BigButton("Zurück") { onClose() }
+        }
+    }
+}
+
+/**
+ * Button code entry: the code is pressed on the controller (D-pad and A B X Y), so every key goes into the code here
+ * and none moves the focus. L1 deletes, Select/Start cancels. The buttons on screen are for touch.
+ */
+@Composable
+private fun CodePad(onClose: () -> Unit, onDone: (String) -> Unit) {
+    var code by remember { mutableStateOf("") }
+    val box = remember { FocusRequester() }
+    LaunchedEffect(Unit) { delay(150); runCatching { box.requestFocus() } }
+    fun press(i: Int) { if (code.length < 8) { code += i; if (code.length == 8) onDone(code) } }
+    DialogOpen()
+    Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        ImmersiveDialog()
+        Column(Modifier.width(520.dp).clip(RoundedCornerShape(22.dp)).background(Color(0xF0141519)).padding(24.dp)
+            .focusRequester(box).focusable()
+            .onPreviewKeyEvent { e ->
+                val i = when (e.key) {
+                    Key.DirectionUp -> 0; Key.DirectionDown -> 1; Key.DirectionLeft -> 2; Key.DirectionRight -> 3
+                    Key.ButtonA -> 4; Key.ButtonB -> 5; Key.ButtonX -> 6; Key.ButtonY -> 7
+                    Key.ButtonL1, Key.Backspace -> 8
+                    Key.ButtonSelect, Key.ButtonStart, Key.Back, Key.Escape -> 9
+                    else -> -1
+                }
+                if (i < 0) return@onPreviewKeyEvent false
+                if (e.type == KeyEventType.KeyDown) when (i) { 8 -> code = code.dropLast(1); 9 -> onClose(); else -> press(i) }
+                true
+            }) {
+            Text("Code eingeben", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Text("Drück die 8 Tasten vom Code deines Freundes · L1 löscht · Select bricht ab", fontSize = 15.sp, color = Muted, modifier = Modifier.padding(top = 4.dp))
+            Text((code.map { Online.SYMBOLS[it - '0'] } + List(8 - code.length) { "·" }).joinToString(" "), fontSize = 38.sp,
+                fontFamily = FontFamily.Monospace, color = Accent, modifier = Modifier.padding(vertical = 14.dp))
+            Online.SYMBOLS.chunked(4).forEachIndexed { r, row ->
+                Row {
+                    row.forEachIndexed { c, sym ->
+                        BigButton(sym, modifier = Modifier.weight(1f).padding(4.dp)) { press(r * 4 + c) }
+                    }
+                }
+            }
+            Row {
+                BigButton("Löschen", modifier = Modifier.weight(1f).padding(4.dp)) { code = code.dropLast(1) }
+                BigButton("Abbrechen", modifier = Modifier.weight(1f).padding(4.dp)) { onClose() }
+            }
         }
     }
 }

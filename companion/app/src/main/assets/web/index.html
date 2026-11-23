@@ -173,14 +173,15 @@
     </div>
     <div class="panel">
       <h3>Online spielen</h3>
-      <div class="sub">Freunde überall: Link schicken, sie tippen drauf, ThorBro verbindet direkt und verschlüsselt mit diesem Thor. In Azahar bleibt alles gleich (127.0.0.1). Bis zu 7 Gäste.</div>
+      <div class="sub">Freunde überall: Code zeigen, sie geben ihn bei sich ein, ThorBro verbindet direkt und verschlüsselt. In Azahar bleibt alles gleich (127.0.0.1). Bis zu 7 Gäste. Wer einmal drin war, kommt ohne Code wieder.</div>
       <div class="row"><button id="onInvite" class="primary">Online einladen</button><span id="onState" class="muted grow"></span></div>
       <div id="onBox" hidden>
-        <p><textarea id="onShare" rows="4" readonly style="width:100%"></textarea></p>
-        <div class="row"><button id="onCopy">Kopieren</button><button id="onNew">Neuer Link</button><button id="onClose">Online schließen</button></div>
-        <div id="onQr"></div>
+        <p id="onCode" style="font-size:2em;font-family:monospace;letter-spacing:.15em"></p>
+        <div class="muted" id="onCodeSub"></div>
+        <div class="row"><button id="onNew">Neuer Code</button><button id="onClose">Online schließen</button><button id="onReset">Alle aussperren</button></div>
       </div>
-      <div class="row"><input id="onJoinLink" class="grow" placeholder="Einladung eines Freundes hier einfügen"><button id="onJoin">Beitreten</button></div>
+      <div class="row"><input id="onJoinCode" class="grow" placeholder="Code eines Freundes: 8 Ziffern 1–8 oder U D L R A B X Y"><button id="onJoin">Beitreten</button></div>
+      <div id="onKnown" class="row"></div>
       <div id="onJoinInfo" class="muted"></div>
     </div>
     <div class="panel">

@@ -606,15 +606,25 @@ object Server {
                     withContext(Dispatchers.IO) { Online.stopHost() }
                     json(JSONObject().put("ok", true))
                 }
-                post("/api/online/new") {
+                post("/api/online/new") { // a new code
                     if (denied(ctx)) return@post
-                    json(withContext(Dispatchers.IO) { Online.newLink(ctx) })
+                    json(withContext(Dispatchers.IO) { if (Online.host == null) Online.startHost(ctx) else { Online.newCode(ctx); Online.hostStatus(ctx) } })
                 }
-                post("/api/online/join") {
+                post("/api/online/reset") { // new room key: everyone who joined before needs a code again
                     if (denied(ctx)) return@post
-                    val link = q("link") ?: return@post fail("link missing")
-                    val job = Jobs.start("Online beitreten") { Online.join(ctx, link, it) }
+                    json(withContext(Dispatchers.IO) { Online.resetAccess(ctx) })
+                }
+                post("/api/online/join") { // ?code=… (digits 1-8 or U D L R A B X Y) or ?known=<id>
+                    if (denied(ctx)) return@post
+                    val code = q("code"); val known = q("known")
+                    if (code == null && known == null) return@post fail("code missing")
+                    val job = Jobs.start("Online beitreten") { if (known != null) Online.joinKnown(ctx, known, it) else Online.joinCode(ctx, code!!, it) }
                     json(job.json())
+                }
+                post("/api/online/forget") {
+                    if (denied(ctx)) return@post
+                    Online.forget(ctx, q("id") ?: return@post fail("id missing"))
+                    json(JSONObject().put("ok", true))
                 }
                 post("/api/netplay/relay") {
                     if (denied(ctx)) return@post
