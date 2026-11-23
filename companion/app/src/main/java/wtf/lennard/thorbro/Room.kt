@@ -25,6 +25,7 @@ object Room {
     @Volatile var error: String? = null
         private set
     @Volatile private var game: String = ""
+    private val restarts = java.util.concurrent.CopyOnWriteArrayList<Long>()
 
     fun binary(ctx: Context) = File(ctx.applicationInfo.nativeLibraryDir, "libazaharroom.so")
 
@@ -56,10 +57,25 @@ object Room {
                         }
                         line.startsWith("error") -> { error = line.removePrefix("error ").trim(); Logs.i("room", line) }
                         line.startsWith("[info]") -> Logs.i("room", line.removePrefix("[info] "))
+                        line.isNotBlank() -> Logs.i("room", line.take(200))
                     }
                 }
             }
-            if (proc === p) { ready = false; members = emptyList() }
+            val code = runCatching { p.waitFor() }.getOrDefault(-1)
+            if (proc === p) {
+                ready = false; members = emptyList()
+                // 137 = killed by Android, 139 = crashed
+                error = "Raumserver beendet (Code $code)"
+                Logs.i("room", "3DS-Raum unerwartet beendet (Code $code)")
+                proc = null
+                val now = System.currentTimeMillis()
+                restarts.removeAll { now - it > 120_000 }
+                if (Netplay.serverOn && !Relay.active() && restarts.size < 5) {
+                    restarts += now
+                    Thread.sleep(1000)
+                    start(ctx.applicationContext, game)?.let { Logs.i("room", "Neustart ging nicht: $it") } ?: Logs.i("room", "3DS-Raum neu gestartet")
+                }
+            }
         }
         // wait for "ready" (or the port being taken, e.g. by a room made in Azahar's own menu)
         repeat(30) {
