@@ -1313,6 +1313,7 @@ async function loadNetplay() {
     ? 'Ein Knopf, keine Spielauswahl: 3DS-Raum, Wi-Fi Direct und Einladungen. Dann ein Spiel aus einem beliebigen Frontend starten. Geht mit: ' + np.supported.map((s) => s.name + (s.shaky ? ' (wackelig)' : '')).join(', ') + '.'
     : 'Kein passender Emulator installiert (RetroArch, PPSSPP, Azahar oder Eden).') + ' Ein Spiel weitergeben: im Spiele-Tab beim Spiel „Weitergeben“.';
   renderServer(np.server);
+  renderOnline(np.online);
   if (np.joined && np.joined.mode === 'azahar' && !l) {
     const st = np.azahar && np.azahar.room;
     $('#npLobby').innerHTML += `<p>3DS-Raum bei ${esc(np.joined.host)} (Azahar → 127.0.0.1): ${st === 'connected' ? '<span class="ok">im Raum ✓</span>' : '<span class="err">noch nicht im Raum</span>'} <button data-relay-off>Trennen</button></p><pre>${esc(np.joined.hint || '')}</pre>`;
@@ -1377,6 +1378,51 @@ $('#svToggle').onclick = async () => {
   } catch (err) { alert(err.message); }
   $('#svToggle').disabled = false; loadNetplay(); loadDirect();
 };
+// ---------- online (internet) ----------
+function renderOnline(o) {
+  if (!o) return;
+  $('#onState').innerHTML = o.open ? `<span class="ok">offen</span> · ${o.guests} von außen drin` + (o.public ? '' : ' · <span class="err">keine öffentliche Adresse</span>') : 'zu';
+  $('#onInvite').textContent = o.open ? 'Einladung zeigen' : 'Online einladen';
+  if (!o.open) $('#onBox').hidden = true;
+}
+function showOnline(o) {
+  $('#onBox').hidden = false;
+  $('#onShare').value = o.share || '';
+  $('#onQr').innerHTML = qrImg(o.web, 'Mit dem anderen Thor scannen');
+  renderOnline(o);
+}
+$('#onInvite').onclick = async () => {
+  $('#onInvite').disabled = true; $('#onState').textContent = 'öffnet …';
+  try { const { body } = await api('/api/online/host', { method: 'POST' }); if (body.error) alert(body.error); else showOnline(body); }
+  catch (err) { alert(err.message); }
+  $('#onInvite').disabled = false; loadNetplay();
+};
+$('#onCopy').onclick = async () => {
+  try { await navigator.clipboard.writeText($('#onShare').value); toast('Kopiert'); }
+  catch { $('#onShare').select(); document.execCommand('copy'); toast('Kopiert'); }
+};
+$('#onNew').onclick = async () => {
+  if (!confirm('Neuer Link? Der alte funktioniert dann nicht mehr.')) return;
+  const { body } = await api('/api/online/new', { method: 'POST' });
+  if (body.open) showOnline(body); loadNetplay();
+};
+$('#onClose').onclick = async () => { await api('/api/online/close', { method: 'POST' }); $('#onBox').hidden = true; loadNetplay(); };
+$('#onJoin').onclick = async () => {
+  const link = $('#onJoinLink').value.trim();
+  if (!link) return;
+  $('#onJoin').disabled = true; $('#onJoinInfo').textContent = 'verbinde …';
+  try {
+    const { body } = await api('/api/online/join?' + q({ link }), { method: 'POST' });
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 700));
+      const { body: j } = await api('/api/jobs/' + body.id);
+      $('#onJoinInfo').textContent = j.message || 'verbinde …';
+      if (j.done) { $('#onJoinInfo').textContent = j.error ? 'Ging nicht: ' + j.error : (j.result && j.result.hint) || 'Verbunden'; break; }
+    }
+  } catch (err) { $('#onJoinInfo').textContent = err.message; }
+  $('#onJoin').disabled = false; loadNetplay();
+};
+
 $('#npClose').onclick = async () => { await api('/api/netplay/close', { method: 'POST' }); loadNetplay(); loadDirect(); };
 
 function renderPeers(peers) {

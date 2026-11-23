@@ -172,6 +172,18 @@
       <pre id="svInfo" hidden></pre>
     </div>
     <div class="panel">
+      <h3>Online spielen</h3>
+      <div class="sub">Freunde überall: Link schicken, sie tippen drauf, ThorBro verbindet direkt und verschlüsselt mit diesem Thor. In Azahar bleibt alles gleich (127.0.0.1). Bis zu 7 Gäste.</div>
+      <div class="row"><button id="onInvite" class="primary">Online einladen</button><span id="onState" class="muted grow"></span></div>
+      <div id="onBox" hidden>
+        <p><textarea id="onShare" rows="4" readonly style="width:100%"></textarea></p>
+        <div class="row"><button id="onCopy">Kopieren</button><button id="onNew">Neuer Link</button><button id="onClose">Online schließen</button></div>
+        <div id="onQr"></div>
+      </div>
+      <div class="row"><input id="onJoinLink" class="grow" placeholder="Einladung eines Freundes hier einfügen"><button id="onJoin">Beitreten</button></div>
+      <div id="onJoinInfo" class="muted"></div>
+    </div>
+    <div class="panel">
       <h3>Freunde</h3>
       <div class="sub">Einmal eine Einladung annehmen, dann kennen sich die Thors: Einladungen kommen als Benachrichtigung (auch in ES-DE &amp; Co.), und ein Spiel, das du in irgendeinem Frontend startest, lädt deine Freunde von selbst ein (braucht Shizuku).</div>
       <div id="frList" class="cards"></div>

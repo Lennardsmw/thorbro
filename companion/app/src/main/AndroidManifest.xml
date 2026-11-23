@@ -85,6 +85,27 @@
 
         <receiver android:name=".InstallReceiver" android:exported="false" />
         <receiver android:name=".AutoPlay$CloseReceiver" android:exported="false" />
+        <!-- online invite links: thorbro://join/<code> and the web page they are shared as -->
+        <activity
+            android:name=".ui.JoinActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard|navigation|screenLayout|smallestScreenSize|density|fontScale|uiMode|layoutDirection">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="thorbro" android:host="join" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="lennardsmw.github.io" android:pathPrefix="/thorbro/join" />
+            </intent-filter>
+        </activity>
         <activity
             android:name=".ui.InviteActivity"
             android:exported="false"

@@ -41,11 +41,23 @@ object Online {
     fun link(name: String, secret: ByteArray, candidates: List<String>): String =
         LINK_PREFIX + b64(JSONObject().put("v", 1).put("n", name).put("s", b64(secret)).put("c", JSONArray(candidates)).toString().toByteArray())
 
+    /** the web address for chats (custom schemes are not clickable there): the page only forwards to ThorBro, and
+     *  the code after # never leaves the phone — browsers do not send it to the server */
+    const val WEB_JOIN = "https://lennardsmw.github.io/thorbro/join"
+
+    fun webLink(link: String) = WEB_JOIN + "#" + link.substringAfter(LINK_PREFIX)
+
+    fun shareText(name: String, link: String) =
+        "Komm in meinen 3DS-Raum ($name), über ThorBro:\n${webLink(link)}\n\n" +
+            "Geht der Link nicht auf: diese Nachricht kopieren, ThorBro → Mehrspieler → „Einladung öffnen“."
+
     class Invite(val name: String, val secret: ByteArray, val candidates: List<String>)
 
     /** the invite from a link (thorbro://join/…, or any URL that ends in …join/<code> or #<code>), or null */
     fun parse(link: String): Invite? = runCatching {
-        val code = link.trim().substringAfterLast("join/").substringAfterLast('#').trim()
+        // also finds the link inside a whole chat message
+        val code = Regex("(?:join/|join#|#)([A-Za-z0-9_-]{40,})").find(link)?.groupValues?.get(1)
+            ?: link.trim().takeIf { Regex("^[A-Za-z0-9_-]{40,}$").matches(it) } ?: return null
         val j = JSONObject(String(unb64(code)))
         val c = j.getJSONArray("c")
         Invite(j.optString("n", "Thor").take(32), unb64(j.getString("s")).also { require(it.size == 16) },
@@ -177,7 +189,8 @@ object Online {
 
     fun hostStatus(ctx: Context): JSONObject {
         val h = host ?: return JSONObject().put("open", false)
-        return JSONObject().put("open", true).put("link", link(Me.name(ctx), secret!!, h.candidates))
+        val l = link(Me.name(ctx), secret!!, h.candidates)
+        return JSONObject().put("open", true).put("link", l).put("web", webLink(l)).put("share", shareText(Me.name(ctx), l))
             .put("guests", h.guests).put("public", h.candidates.any { isPublic(it) })
     }
 

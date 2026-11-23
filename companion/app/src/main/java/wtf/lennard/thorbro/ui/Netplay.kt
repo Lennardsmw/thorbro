@@ -51,6 +51,9 @@ import wtf.lennard.thorbro.Azahar
 import wtf.lennard.thorbro.Direct
 import wtf.lennard.thorbro.Jobs
 import wtf.lennard.thorbro.Netplay
+import wtf.lennard.thorbro.Online
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.ContentPaste
 import java.io.File
 
 private val modeNames = mapOf("retroarch" to "RetroArch", "ppsspp" to "PPSSPP", "eden" to "Eden", "azahar" to "Azahar", "share" to "Weitergeben", "server" to "Spielserver")
@@ -97,6 +100,8 @@ fun NetplayScreen() {
     var serverBusy by remember { mutableStateOf(false) }
     var advanced by remember { mutableStateOf(false) }
     var friendMenu by remember { mutableStateOf<JSONObject?>(null) }
+    var onlineMenu by remember { mutableStateOf<JSONObject?>(null) }
+    var onlineBusy by remember { mutableStateOf(false) }
 
     LaunchedEffect(tick) {
         withContext(Dispatchers.IO) {
@@ -253,6 +258,33 @@ fun NetplayScreen() {
             item { ConsoleTile("Server stoppen", "Raum und Wi-Fi Direct aus", Icons.Filled.Close) { toggleServer() } }
         }
 
+        // online: a link for friends anywhere (encrypted tunnel, no server in between; Azahar stays on 127.0.0.1)
+        val online = s.optJSONObject("online")
+        header("Online spielen", if (online?.optBoolean("open") == true) "Online-Raum offen · ${online.optInt("guests")} von außen drin"
+            else "Freunde überall: Link schicken, sie tippen drauf · bis zu 7 Gäste")
+        item {
+            ConsoleTile(if (onlineBusy) "Öffnet …" else "Online einladen", "Link per WhatsApp & Co. oder QR-Code", Icons.Filled.Public,
+                accent = online?.optBoolean("open") == true) {
+                if (onlineBusy) return@ConsoleTile
+                onlineBusy = true
+                scope.launch {
+                    val r = withContext(Dispatchers.IO) { runCatching { Online.startHost(ctx) }.getOrElse { JSONObject().put("error", it.message) } }
+                    onlineBusy = false
+                    if (r.has("error")) info = "Online einladen" to r.optString("error") else onlineMenu = r
+                    tick++
+                }
+            }
+        }
+        item {
+            ConsoleTile("Einladung öffnen", "Link aus der Zwischenablage", Icons.Filled.ContentPaste) {
+                val clip = ctx.getSystemService(android.content.ClipboardManager::class.java)?.primaryClip
+                val text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString() ?: ""
+                val inv = Online.parse(text)
+                if (inv == null) info = "Einladung öffnen" to "In der Zwischenablage ist kein ThorBro-Einladungslink.\n\nDie Nachricht mit dem Link lange drücken → Kopieren, dann hier noch mal."
+                else runJoin(Jobs.start("Online beitreten") { Online.join(ctx, text, it) })
+            }
+        }
+
         val friends = s.optJSONArray("friends").objs()
         header("Freunde", if (friends.isEmpty()) "Einmal eine Einladung annehmen – danach kommt sie als Benachrichtigung, auch in ES-DE & Co."
             else "Einladungen kommen als Benachrichtigung · ein Spiel aus jedem Frontend lädt sie ein")
@@ -345,6 +377,31 @@ fun NetplayScreen() {
     friendMenu?.let { f ->
         ConsoleMenu(f.optString("name"), "Einladungen von diesem Thor kommen als Benachrichtigung.",
             options = listOf("Entfernen" to { wtf.lennard.thorbro.Friends.remove(ctx, f.optString("id")); friendMenu = null; tick++ })) { friendMenu = null }
+    }
+    onlineMenu?.let { o ->
+        ConsoleMenu("Online einladen",
+            "Schick deinen Freunden diesen Link. Sie tippen drauf, ThorBro verbindet sich direkt und verschlüsselt mit diesem Thor." +
+                "\nIn Azahar bleibt alles gleich: 127.0.0.1.\n\nDer Link gilt, bis du einen neuen machst." +
+                (if (!o.optBoolean("public")) "\n\nAchtung: keine öffentliche Adresse gefunden – von außen klappt es evtl. nicht." else ""),
+            qrs = listOf(o.optString("web") to "Mit dem anderen Thor scannen"),
+            options = listOf(
+                "Link teilen" to {
+                    runCatching {
+                        ctx.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND)
+                            .setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, o.optString("share")), "Einladung schicken")
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
+                },
+                "Link kopieren" to {
+                    ctx.getSystemService(android.content.ClipboardManager::class.java)
+                        ?.setPrimaryClip(android.content.ClipData.newPlainText("ThorBro-Einladung", o.optString("share")))
+                    info = "Online einladen" to "Kopiert – in WhatsApp & Co. einfügen."; onlineMenu = null
+                },
+                "Neuer Link (alter gilt nicht mehr)" to {
+                    scope.launch { onlineMenu = withContext(Dispatchers.IO) { Online.newLink(ctx) }.takeIf { it.optBoolean("open") }; tick++ }
+                },
+                "Online schließen" to { scope.launch { withContext(Dispatchers.IO) { Online.stopHost() }; onlineMenu = null; tick++ } },
+            )) { onlineMenu = null }
     }
     info?.let { (t, x) -> ConsoleMenu(t, x, options = emptyList()) { info = null } }
     DirectDialog(direct)
