@@ -14,4 +14,5 @@ curl -sS --fail-with-body -X POST -H "Authorization: Bearer $CODE" \
   -H "Content-Type: application/vnd.android.package-archive" --data-binary "@$APK" "http://$THOR:7330/api/self-update"
 echo
 write_lock
+# for testers elsewhere: scripts/publish-dev.sh (GitHub pre-release) – not automatic, every push here would be public
 echo "Auf dem Thor bestätigen, falls Android fragt. ThorBro startet danach neu."

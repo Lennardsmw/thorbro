@@ -41,6 +41,8 @@ class ThorService : Service() {
             Updater.startSchedule(applicationContext)
             SaveWatcher.start(applicationContext)
             Players.watch(applicationContext)
+            AutoPlay.start(applicationContext)
+            Online.listen(applicationContext) // friends with the link can knock any time, game server on or off
             running = true
         }
         return START_STICKY
@@ -51,6 +53,8 @@ class ThorService : Service() {
         Updater.stopSchedule()
         SaveWatcher.stop()
         Players.unwatch(applicationContext)
+        Room.stop()
+        AutoPlay.stop()
         nsdListener?.let { runCatching { getSystemService(NsdManager::class.java).unregisterService(it) } }
         nsdListener = null
         val s = server
@@ -68,7 +72,7 @@ class ThorService : Service() {
             this, 0, Intent(this, wtf.lennard.thorbro.ui.ThorActivity::class.java), PendingIntent.FLAG_IMMUTABLE
         )
         val n = Notification.Builder(this, CHANNEL)
-            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+            .setSmallIcon(R.drawable.ic_stat_game)
             .setContentTitle("ThorBro läuft")
             .setContentText("http://${Device.ip() ?: "?"}:$PORT")
             .setContentIntent(open)

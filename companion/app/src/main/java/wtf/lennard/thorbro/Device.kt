@@ -16,11 +16,13 @@ object Device {
         (runCatching { Settings.Global.getString(ctx.contentResolver, "device_name") }.getOrNull()?.takeIf { it.isNotBlank() } ?: Build.MODEL)
             .replace(Regex("[\\\\/:*?\"<>|()\\[\\]]"), " ").replace(Regex("\\s+"), " ").trim().take(40).ifEmpty { "Thor" }
 
+    /** LAN address (normal WLAN first); never the Wi-Fi Direct one (p2p*, 192.168.49.x), that is [Direct.ownIp] */
     fun ip(): String? = NetworkInterface.getNetworkInterfaces().toList()
-        .filter { it.isUp && !it.isLoopback }
+        .filter { it.isUp && !it.isLoopback && !it.name.startsWith("p2p") }
+        .sortedBy { if (it.name.startsWith("wlan")) 0 else 1 }
         .flatMap { it.inetAddresses.toList() }
         .filterIsInstance<Inet4Address>()
-        .firstOrNull { it.isSiteLocalAddress }?.hostAddress
+        .firstOrNull { it.isSiteLocalAddress && !it.hostAddress.orEmpty().startsWith("192.168.49.") }?.hostAddress
 
     fun permissions(ctx: Context) = JSONObject()
         .put("allFiles", Environment.isExternalStorageManager())

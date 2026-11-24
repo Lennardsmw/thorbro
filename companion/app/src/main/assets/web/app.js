@@ -692,6 +692,7 @@ function openRom(path, sysId) {
           `<tr><td class="muted">${x.switchKind === 'base' ? 'Spiel' : x.switchKind === 'update' ? 'Update ' + esc(x.versionLabel) : 'DLC'}${r.group.oldUpdates.includes(x) ? ' <span class="badge warnbadge">veraltet</span>' : ''}</td><td>${esc(x.file)} <span class="muted">${fmt(x.size)}</span></td><td><button data-romdel="${esc(x.path)}">Löschen</button></td></tr>`).join('')}</table>` : ''}
         <div class="row">
           ${emus && emus.systems[sysId] && (!r.group || r.group.base) ? `<button class="primary" data-play="${esc(r.path)}" data-play-sys="${esc(sysId)}">▶ Auf dem Thor spielen</button>` : ''}
+          ${r.dir || sysId === 'ports' ? '' : `<button data-share-rom="${esc(r.path)}" data-share-sys="${esc(sysId)}">Weitergeben</button>`}
           <button data-dir-roms="${esc(folder)}">Im Datei-Tab öffnen</button>
           ${r.dir ? '' : `<a class="btn" href="/api/files/raw?${q({ path: r.path, token })}">Herunterladen</a>`}
           <button data-romdel="${esc(r.path)}">Löschen</button>
@@ -954,6 +955,14 @@ $('#romDetail').onclick = async (e) => {
   const t = e.target, dlg = $('#romDetail');
   if (t === dlg || t.dataset.close !== undefined) return dlg.close();
   if (t.dataset.play) return play(t.dataset.play, t.dataset.playSys);
+  if (t.dataset.shareRom) {
+    try {
+      const { body } = await api('/api/netplay/host?' + q({ system: t.dataset.shareSys, path: t.dataset.shareRom, share: '1' }), { method: 'POST' });
+      if (body.error) throw new Error(body.error);
+      toast(body.direct ? 'Wird angeboten – der Thor in der Nähe bekommt eine Einladung' : `Wird angeboten · PIN ${body.pin}`);
+    } catch (err) { alert(err.message); }
+    return;
+  }
   try {
     if (t.dataset.dirRoms) { dlg.close(); showTab('files'); await loadFiles(t.dataset.dirRoms); }
     if (t.dataset.romdel && confirm(`${t.dataset.romdel} löschen?`)) {
@@ -1299,77 +1308,57 @@ $('#mlScan').onclick = async () => {
 
 // ---------- netplay (local multiplayer) ----------
 let np = null;
-const npModes = { retroarch: 'RetroArch', ppsspp: 'PPSSPP', eden: 'Eden', azahar: 'Azahar' };
+const npModes = { retroarch: 'RetroArch', ppsspp: 'PPSSPP', eden: 'Eden', azahar: 'Azahar', share: 'Weitergeben', server: 'Spielserver' };
+const npAddrs = (a) => (a || []).map((x) => `${x.kind}: ${x.ip}`).join(' · ') || 'kein Netz';
 async function loadNetplay() {
   try { np = (await api('/api/netplay')).body; } catch (err) { $('#npStatus').textContent = 'Fehler: ' + err.message; return; }
   const l = np.lobby;
+  const room = np.azahar && np.azahar.server;
   $('#npClose').hidden = !l;
   if (l) {
     const az = l.mode === 'azahar';
+    const members = room && room.members ? room.members : [];
     const state = { starting: 'startet …',
-      hosting: `<span class="ok">${az ? 'Raum läuft ✓' : 'wartet auf Mitspieler'}</span>`,
-      manual: `<span class="err">${az ? (l.online ? 'in Azahar dem Online-Raum beitreten' : 'in Azahar: Zurück-Taste → Mehrspieler → Raum erstellen') : 'RetroArch hostet nicht von selbst: im RetroArch-Menü Netplay → Host starten'}</span>`,
-      unknown: '<span class="muted">Raum-Status unbekannt (Shizuku fehlt)</span>' }[l.hostState] || '';
-    $('#npStatus').innerHTML = `Lobby offen: <strong>${esc(l.game)}</strong> (${esc(npModes[l.mode] || l.mode)}) ${state}`;
+      hosting: `<span class="ok">${az ? 'Raum läuft · ' + (members.length ? members.length + ' im Raum' : 'in Azahar beitreten') : 'wartet auf Mitspieler'}</span>`,
+      sharing: '<span class="ok">wird angeboten</span>',
+      error: '<span class="err">3DS-Raum ist aus – beenden und neu starten</span>',
+      manual: '<span class="err">RetroArch hostet nicht von selbst: im RetroArch-Menü Netplay → Host starten</span>' }[l.hostState] || '';
+    $('#npStatus').innerHTML = `${l.mode === 'share' ? 'Du gibst weiter' : 'Du spielst'}: <strong>${esc(l.game)}</strong> (${esc(npModes[l.mode] || l.mode)}) ${state}`;
     $('#npLobby').innerHTML = `<p style="font-size:2em;letter-spacing:.2em" class="ok">PIN ${esc(l.pin)}</p>
-      <p class="muted">IP dieses Thors: ${esc(l.roomIp || np.ip || '?')} · Mitspieler: ${l.guestNames.length ? l.guestNames.map(esc).join(', ') : 'noch keiner'}</p>`
-      + (az ? `<pre>${esc(l.online ? 'In Azahar: Zurück-Taste → Mehrspieler → Raum beitreten\nIP/Port: ' + l.online
-        : 'In Azahar: Zurück-Taste → Mehrspieler → Raum erstellen\nIP: ' + (l.roomIp || np.ip) + '   Port: ' + l.roomPort + '\nRaumname: Thor   Passwort: leer lassen')}</pre>` : '');
+      <p class="muted">${np.direct ? 'Wi-Fi Direct an – Thors in der Nähe sehen die Einladung.' : 'Wi-Fi Direct aus – der andere Thor braucht dasselbe WLAN (Erweitert → Thors suchen).'}
+      Beigetreten: ${l.guestNames.length ? l.guestNames.map(esc).join(', ') : 'noch keiner'}</p>`
+      + (az ? `<p>Im 3DS-Raum: ${members.length ? members.map(esc).join(', ') : 'niemand'}</p><pre>${esc('In Azahar (dieser Thor): Zurück-Taste → Mehrspieler → Raum beitreten\nIP: 127.0.0.1   Port: ' + l.roomPort + '   Passwort: leer\n\nErreichbar für andere (Port ' + l.roomPort + '): ' + npAddrs(np.addresses))}</pre>` : '');
   } else {
-    $('#npStatus').textContent = `Keine Lobby offen. Dieser Thor: ${np.ip || 'kein WLAN'}`;
+    $('#npStatus').textContent = 'Nichts offen.';
     $('#npLobby').innerHTML = '';
   }
+  $('#npAddrs').textContent = 'Dieser Thor: ' + npAddrs(np.addresses) + '. Von unterwegs: beide Thors in NetBird, dann hier die NetBird-Adresse des anderen eintippen.';
   if (np.shizuku !== 'ready') $('#npLobby').innerHTML += '<p class="muted">Tipp: Mit Shizuku übernimmt ThorBro deine RetroArch-Einstellungen 1:1 und kann PPSSPP einstellen.</p>';
-  $('#npSupported').textContent = np.supported.length
-    ? 'Geht mit: ' + np.supported.map((s) => s.name + (s.shaky ? ' (wackelig)' : '')).join(', ')
-    : 'Kein passender Emulator installiert (RetroArch, PPSSPP oder Eden).';
+  $('#npSupported').textContent = (np.supported.length
+    ? 'Ein Knopf, keine Spielauswahl: 3DS-Raum, Wi-Fi Direct und Einladungen. Dann ein Spiel aus einem beliebigen Frontend starten. Geht mit: ' + np.supported.map((s) => s.name + (s.shaky ? ' (wackelig)' : '')).join(', ') + '.'
+    : 'Kein passender Emulator installiert (RetroArch, PPSSPP, Azahar oder Eden).') + ' Ein Spiel weitergeben: im Spiele-Tab beim Spiel „Weitergeben“.';
+  renderServer(np.server);
+  renderOnline(np.online);
   if (np.joined && np.joined.mode === 'azahar' && !l) {
-    const room = np.azahar && np.azahar.room;
-    $('#npLobby').innerHTML += `<p>Azahar-Raum bei ${esc(np.joined.host)}: ${room === 'connected' ? '<span class="ok">im Raum ✓</span>' : '<span class="err">noch nicht im Raum</span>'}</p><pre>${esc(np.joined.hint || '')}</pre>`;
+    const st = np.azahar && np.azahar.room;
+    $('#npLobby').innerHTML += `<p>3DS-Raum bei ${esc(np.joined.host)} (Azahar → 127.0.0.1): ${st === 'connected' ? '<span class="ok">im Raum ✓</span>' : '<span class="err">noch nicht im Raum</span>'} <button data-relay-off>Trennen</button></p><pre>${esc(np.joined.hint || '')}</pre>`;
   }
-  const a = np.azahar;
-  $('#azPanel').hidden = !a;
-  if (a) {
-    $('#azInfo').innerHTML = `3DS-Name: <strong>${esc(a.identity?.user || '?')}</strong> · Raum: ${esc({ hosting: 'läuft auf diesem Thor', connected: 'verbunden', off: 'keiner', unknown: 'unbekannt (Shizuku fehlt)' }[a.room] || a.room)} · IP: ${esc(a.ip || 'kein Netz')}`;
-    if (document.activeElement !== $('#azServer')) $('#azServer').value = a.server || '';
-  }
-  if (!romData) { try { romData = (await api('/api/roms')).body; } catch {} }
-  renderNetplayGames();
-  renderAzGames();
-  if ((l && l.mode === 'azahar') || (np.joined && np.joined.mode === 'azahar')) { clearTimeout(loadNetplay.t); loadNetplay.t = setTimeout(() => { if (!$('#netplay').hidden) loadNetplay(); }, 4000); }
+  $('#frList').innerHTML = (np.friends || []).length ? np.friends.map((f) => `<div class="card"><h3>${esc(f.name)}</h3><div class="muted">${esc(f.id)}</div>
+    <p><button data-unfriend="${esc(f.id)}">Entfernen</button></p></div>`).join('') : '<p class="muted">Noch keine – einmal eine Einladung annehmen.</p>';
+  $('#frAuto').checked = !!np.auto;
+  $('#npWlan').checked = !!np.wlanOnly;
+  if ((np.server && np.server.on) || (l && l.mode === 'azahar') || (np.joined && np.joined.mode === 'azahar')) { clearTimeout(loadNetplay.t); loadNetplay.t = setTimeout(() => { if (!$('#netplay').hidden) loadNetplay(); }, 4000); }
 }
-function renderAzGames() {
-  if (!np || !romData || !np.azahar) return;
-  const f = $('#azFilter').value.trim().toLowerCase();
-  const sys = romData.systems.find((s) => s.id === 'n3ds');
-  const rows = (sys ? sys.roms : []).filter((r) => !r.dir && (!f || r.name.toLowerCase().includes(f)))
-    .map((r) => `<tr><td>${esc(r.name)}<div class="muted">${fmt(r.size)}</div></td><td><button data-az="${esc(r.path)}">Raum öffnen</button></td></tr>`);
-  $('#azGames').innerHTML = rows.length ? `<table class="files"><tbody>${rows.slice(0, 200).join('')}</tbody></table>` : '<p class="muted">Keine 3DS-Spiele.</p>';
-}
-$('#azFilter').oninput = renderAzGames;
-$('#azServerSave').onclick = async () => {
-  try { const { body } = await api('/api/netplay/azahar-server?' + q({ address: $('#azServer').value.trim() }), { method: 'POST' }); if (body.error) throw new Error(body.error); toast(body.server ? 'Online-Server gespeichert' : 'Online-Server entfernt'); loadNetplay(); } catch (err) { alert(err.message); }
-};
-$('#azGames').addEventListener('click', async (e) => {
-  const b = e.target.closest('[data-az]'); if (!b) return;
-  b.disabled = true;
-  try {
-    const { body } = await api('/api/netplay/host?' + q({ system: 'n3ds', path: b.dataset.az, online: $('#azVariant').value }), { method: 'POST' });
-    if (body.error) throw new Error(body.error);
-    toast(`Raum vorbereitet – PIN ${body.pin}`);
-  } catch (err) { alert(err.message); }
-  b.disabled = false; loadNetplay();
-});
 let invites = [];
 $('#invScan').onclick = async () => {
   $('#invInfo').textContent = 'Suche per Funk (ca. 6 s) …'; $('#invList').innerHTML = '';
   try {
     const { body } = await api('/api/netplay/invites');
     invites = body.invites;
-    $('#invInfo').textContent = !body.permission ? 'Am Thor unter Multiplayer → Wi-Fi Direct einmal „Geräte in der Nähe“ erlauben.'
+    $('#invInfo').textContent = !body.permission ? 'Am Thor in ThorBro einmal „Geräte in der Nähe“ erlauben (Multiplayer → Erweitert → Wi-Fi Direct).'
       : invites.length ? `${invites.length} gefunden` : 'Keiner gefunden. Der andere Thor muss Wi-Fi Direct an haben.';
-    $('#invList').innerHTML = invites.map((i) => `<div class="card"><h3>${esc(i.name)}</h3><div class="muted">${esc(i.game || 'Wi-Fi Direct offen')}${i.mode ? ' · ' + esc(npModes[i.mode] || i.mode) : ''}</div>
-      <p><button class="primary" data-inv="${esc(i.device)}">${i.lobby ? 'Beitreten' : 'Verbinden'}</button></p></div>`).join('');
+    $('#invList').innerHTML = invites.map((i) => `<div class="card"><h3>${esc(i.name)}</h3><div class="muted">${esc(i.game || 'Wi-Fi Direct offen')}${i.mode ? ' · ' + esc(npModes[i.mode] || i.mode) : ''}${i.via ? ' · ' + esc(i.via) : ''}</div>
+      ${i.friend ? '<div class="ok">Freund</div>' : ''}<p><button class="primary" data-inv="${esc(i.device)}">${i.mode === 'server' ? '3DS-Raum nutzen' : !i.lobby ? 'Verbinden' : i.mode === 'share' ? 'Annehmen' : 'Beitreten'}</button></p></div>`).join('');
   } catch (err) { $('#invInfo').textContent = 'Fehler: ' + err.message; }
 };
 $('#invList').addEventListener('click', async (e) => {
@@ -1384,35 +1373,89 @@ $('#invList').addEventListener('click', async (e) => {
   } catch (err) { alert(err.message); $('#invInfo').textContent = ''; }
   b.disabled = false;
 });
-function renderNetplayGames() {
-  if (!np || !romData) return;
-  const ids = new Set(np.supported.map((s) => s.id));
-  const f = $('#npFilter').value.trim().toLowerCase();
-  const rows = [];
-  romData.systems.filter((s) => ids.has(s.id)).forEach((s) => s.roms.filter((r) => !r.dir && (!f || r.name.toLowerCase().includes(f)))
-    .forEach((r) => rows.push(`<tr><td>${esc(r.name)}<div class="muted">${esc(s.name)} · ${fmt(r.size)}</div></td>
-      <td><button data-host="${esc(r.path)}" data-sys="${esc(s.id)}">Hosten</button></td></tr>`)));
-  $('#npGames').innerHTML = rows.length ? `<table class="files"><tbody>${rows.slice(0, 200).join('')}</tbody></table>` : '<p class="muted">Keine passenden Spiele.</p>';
+function serverText(sv) {
+  const lines = [`Name: ${sv.name}`];
+  if (sv.direct) lines.push(`Wi-Fi Direct: ${sv.ssid} (Thors in der Nähe sehen ihn von selbst)`);
+  lines.push('', 'Adressen:', ...(sv.addresses || []).map((x) => `${x.kind}: ${x.ip}`));
+  if ((sv.services || []).length) {
+    lines.push('', 'Läuft hier:');
+    sv.services.forEach((x) => lines.push(`• ${x.name}${x.port ? ' · Port ' + x.port : ''}`, `   ${x.how}`));
+  }
+  const m = (sv.room && sv.room.members) || [];
+  if (m.length) lines.push('', 'Im 3DS-Raum: ' + m.join(', '));
+  lines.push('', 'Spiel aus einem beliebigen Frontend starten – Freunde in der Nähe bekommen die Einladung. Von unterwegs: über NetBird.');
+  return lines.join('\n');
 }
-$('#npFilter').oninput = renderNetplayGames;
-$('#npClose').onclick = async () => { await api('/api/netplay/close', { method: 'POST' }); loadNetplay(); };
-$('#npGames').addEventListener('click', async (e) => {
-  const b = e.target.closest('[data-host]'); if (!b) return;
-  b.disabled = true;
+function renderServer(sv) {
+  if (!sv) return;
+  $('#svToggle').textContent = sv.on ? 'Server stoppen' : 'Spielserver starten';
+  $('#svToggle').classList.toggle('primary', !sv.on);
+  $('#svState').innerHTML = sv.on ? '<span class="ok">läuft</span>' : 'aus';
+  $('#svInfo').hidden = !sv.on;
+  $('#svInfo').textContent = sv.on ? serverText(sv) : '';
+}
+$('#svToggle').onclick = async () => {
+  const on = !(np && np.server && np.server.on);
+  $('#svToggle').disabled = true; $('#svState').textContent = on ? 'startet …' : 'stoppt …';
   try {
-    const { body } = await api('/api/netplay/host?' + q({ system: b.dataset.sys, path: b.dataset.host }), { method: 'POST' });
-    if (body.error) throw new Error(body.error);
-    toast(`Lobby offen – PIN ${body.pin}`); if (body.hint) toast(body.hint);
+    const { body } = await api('/api/netplay/server?' + q({ on: on ? '1' : '0' }), { method: 'POST' });
+    if (body.roomError) toast('3DS-Raum: ' + body.roomError);
   } catch (err) { alert(err.message); }
-  b.disabled = false; loadNetplay();
-  setTimeout(loadNetplay, 12000);
-});
+  $('#svToggle').disabled = false; loadNetplay(); loadDirect();
+};
+// ---------- online (internet) ----------
+function renderOnline(o) {
+  if (!o) return;
+  $('#onState').innerHTML = o.open ? `<span class="ok">offen</span> · ${o.guests} von außen drin` + (o.public ? '' : ' · <span class="err">keine öffentliche Adresse</span>') : 'zu';
+  $('#onInvite').textContent = o.open ? 'Code zeigen' : 'Online einladen';
+  if (o.open && o.code) {
+    $('#onCode').textContent = o.code;
+    $('#onCodeSub').textContent = `als Zahlen: ${o.digits} · gilt noch ${o.codeMinutes} Min. · Freund: Mehrspieler → „Code eingeben“`;
+  } else if (!o.open) $('#onBox').hidden = true;
+  $('#onKnown').innerHTML = (o.known || []).map((k) => `<button data-known="${esc(k.id)}">Wieder zu ${esc(k.name)}</button><button data-forget="${esc(k.id)}" title="vergessen">✕</button>`).join('');
+}
+async function onlineAction(path) {
+  try { const { body } = await api(path, { method: 'POST' }); if (body.error) alert(body.error); else { renderOnline(body); $('#onBox').hidden = !body.open; } }
+  catch (err) { alert(err.message); }
+  loadNetplay();
+}
+$('#onInvite').onclick = async () => {
+  $('#onInvite').disabled = true; $('#onState').textContent = 'öffnet …';
+  await onlineAction(np && np.online && np.online.open && np.online.code ? '/api/online/new' : '/api/online/host');
+  $('#onInvite').disabled = false;
+};
+$('#onNew').onclick = () => onlineAction('/api/online/new');
+$('#onReset').onclick = () => { if (confirm('Alle, die schon mal drin waren, brauchen dann wieder einen Code. Weiter?')) onlineAction('/api/online/reset'); };
+$('#onClose').onclick = async () => { await api('/api/online/close', { method: 'POST' }); $('#onBox').hidden = true; loadNetplay(); };
+async function onlineJoin(params) {
+  $('#onJoin').disabled = true; $('#onJoinInfo').textContent = 'verbinde …';
+  try {
+    const { body } = await api('/api/online/join?' + q(params), { method: 'POST' });
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 700));
+      const { body: j } = await api('/api/jobs/' + body.id);
+      $('#onJoinInfo').textContent = j.message || 'verbinde …';
+      if (j.done) { $('#onJoinInfo').textContent = j.error ? 'Ging nicht: ' + j.error : (j.result && j.result.hint) || 'Verbunden'; break; }
+    }
+  } catch (err) { $('#onJoinInfo').textContent = err.message; }
+  $('#onJoin').disabled = false; loadNetplay();
+}
+$('#onJoin').onclick = () => { const code = $('#onJoinCode').value.trim(); if (code) onlineJoin({ code }); };
+$('#onKnown').onclick = async (e) => {
+  const k = e.target.dataset.known, f = e.target.dataset.forget;
+  if (k) onlineJoin({ known: k });
+  if (f) { await api('/api/online/forget?' + q({ id: f }), { method: 'POST' }); loadNetplay(); }
+};
+
+$('#npClose').onclick = async () => { await api('/api/netplay/close', { method: 'POST' }); loadNetplay(); loadDirect(); };
+
 function renderPeers(peers) {
   $('#npPeers').innerHTML = peers.map((p) => {
     const l = p.lobby;
     const body = !p.reachable ? '<div class="err">nicht erreichbar</div>'
       : l && l.open ? `<div><strong>${esc(l.game)}</strong></div><div class="muted">${esc(npModes[l.mode] || l.mode)} · ${fmt(l.size)}</div>
         <p><button class="primary" data-join="${esc(p.address)}">Beitreten</button></p>`
+      : l && l.room ? `<div class="muted">Spielserver läuft</div><p><button class="primary" data-relay="${esc(p.address)}" data-relay-name="${esc(l.host || p.address)}">3DS-Raum nutzen</button></p>`
       : '<div class="muted">keine Lobby offen</div>';
     return `<div class="card"><h3>${esc(l?.host || p.service || p.address)}</h3><div class="muted">${esc(p.address)}</div>${body}</div>`;
   }).join('');
@@ -1430,6 +1473,15 @@ $('#npAddrGo').onclick = async () => {
   try { renderPeers((await api('/api/netplay/peers?' + q({ address: a }))).body.peers); } catch (err) { alert(err.message); }
 };
 $('#npPeers').addEventListener('click', async (e) => {
+  const r = e.target.closest('[data-relay]');
+  if (r) {
+    try {
+      const { body } = await api('/api/netplay/relay?' + q({ address: r.dataset.relay, name: r.dataset.relayName }), { method: 'POST' });
+      if (body.error) throw new Error(body.error);
+      $('#npScanInfo').textContent = body.hint; loadNetplay();
+    } catch (err) { alert(err.message); }
+    return;
+  }
   const b = e.target.closest('[data-join]'); if (!b) return;
   const pin = prompt('PIN vom anderen Thor:'); if (!pin) return;
   b.disabled = true;
@@ -1443,13 +1495,34 @@ $('#npPeers').addEventListener('click', async (e) => {
   b.disabled = false;
 });
 
+$('#frList').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-unfriend]'); if (!b) return;
+  await api('/api/netplay/friend/remove?' + q({ id: b.dataset.unfriend }), { method: 'POST' }); loadNetplay();
+});
+$('#npWlan').onchange = async () => { await api('/api/netplay/wlan?' + q({ on: $('#npWlan').checked ? '1' : '0' }), { method: 'POST' }); loadNetplay(); loadDirect(); };
+$('#npLobby').addEventListener('click', async (e) => {
+  if (e.target.dataset.relayOff === undefined) return;
+  await api('/api/netplay/relay', { method: 'POST' }); loadNetplay();
+});
+$('#frAuto').onchange = async () => { await api('/api/netplay/auto?' + q({ on: $('#frAuto').checked ? '1' : '0' }), { method: 'POST' }); loadNetplay(); };
+$('#frPrepare').onclick = async () => {
+  $('#frInfo').textContent = 'Richte ein …';
+  try { const { body } = await api('/api/netplay/prepare', { method: 'POST' }); $('#frInfo').textContent = Object.entries(body).map(([k, v]) => `${npModes[k] || k}: ${v}`).join(' · ') || 'Nichts zu tun'; }
+  catch (err) { $('#frInfo').textContent = 'Fehler: ' + err.message; }
+};
+
 // ---------- Wi-Fi Direct ----------
+const wifiQr = (ssid, pass) => { const e = (x) => String(x).replace(/([\\;,:"])/g, '\\$1'); return `WIFI:T:WPA;S:${e(ssid)};P:${e(pass)};;`; };
+const qrImg = (text, caption) => `<figure style="display:inline-block;margin:10px 16px 0 0;text-align:center">
+  <img src="/qr.svg?${q({ t: text })}" alt="QR-Code" width="180" height="180" style="background:#fff;border-radius:8px">
+  <figcaption class="muted" style="max-width:180px">${esc(caption)}</figcaption></figure>`;
 function showDirect(d) {
   $('#dxStop').hidden = !d.active; $('#dxStart').hidden = d.active;
   $('#dxInfo').innerHTML = d.active
-    ? `Netz <strong>${esc(d.ssid)}</strong> · Passwort <code>${esc(d.pass)}</code> · ThorBro laden: <a href="${esc(d.download)}">${esc(d.download)}</a>`
+    ? `Netz <strong>${esc(d.ssid)}</strong> · Passwort <code>${esc(d.pass)}</code> · ThorBro laden: <a href="${esc(d.download)}">${esc(d.download)}</a><br>`
+      + qrImg(wifiQr(d.ssid, d.pass), '1. Scannen: Netz beitreten') + qrImg(d.download, '2. Scannen: ThorBro laden')
     : (d.permission ? 'aus' : 'Beim ersten Mal am Thor unter Multiplayer → Wi-Fi Direct die Berechtigung erlauben.')
-      + (d.lanDownload ? ` · Im selben WLAN gibt es ThorBro unter <a href="${esc(d.lanDownload)}">${esc(d.lanDownload)}</a>` : '');
+      + (d.lanDownload ? ` · Im selben WLAN gibt es ThorBro unter <a href="${esc(d.lanDownload)}">${esc(d.lanDownload)}</a><br>` + qrImg(d.lanDownload, 'Im selben WLAN scannen') : '');
 }
 async function loadDirect() { try { showDirect((await api('/api/direct')).body); } catch {} }
 $('#dxStart').onclick = async () => {

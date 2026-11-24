@@ -58,6 +58,11 @@ object Server {
                 get("/") { asset(ctx, "index.html") }
                 // ThorBro for another device (e.g. over Wi-Fi Direct): public, it is only the app itself
                 get("/get") { call.respondText(Direct.page(ctx), ContentType.Text.Html) }
+                // QR code as SVG for the web panel (only encodes the given text)
+                get("/qr.svg") {
+                    val t = call.request.queryParameters["t"]?.take(512) ?: return@get fail("missing t")
+                    call.respondText(Qr.svg(t), ContentType.Image.SVG)
+                }
                 get("/thorbro.apk") {
                     call.response.header(HttpHeaders.ContentDisposition, "attachment; filename=\"ThorBro.apk\"")
                     call.respondFile(Direct.apk(ctx))
@@ -436,6 +441,18 @@ object Server {
                     json(JSONObject().put("version", BuildConfigVersion.name(ctx)).put("app", Logs.tail(n))
                         .put("logcat", withContext(Dispatchers.IO) { Logs.logcat(n) }).put("crashes", CrashLog.read(ctx)))
                 }
+                // netplay diagnosis (via Shizuku): who listens on the 3DS port, and Azahar's own log lines
+                get("/api/debug/netplay") {
+                    if (denied(ctx)) return@get
+                    val n = q("lines")?.toIntOrNull()?.coerceIn(100, 20000) ?: 3000
+                    val out = withContext(Dispatchers.IO) {
+                        JSONObject()
+                            .put("shell", Shell.state())
+                            .put("udp", Shell.out("sh", "-c", "grep -i ':6128 ' /proc/net/udp /proc/net/udp6; ss -uanp 2>/dev/null | grep 24872"))
+                            .put("logcat", Shell.out("sh", "-c", "logcat -d -v time -t $n | grep -v PulseFps | grep -i -E ${q("grep")?.let { Shell.q(it) } ?: "'azahar|citra|network|room|enet|24872'"} | tail -400"))
+                    }
+                    json(out)
+                }
                 get("/api/debug/crash") {
                     if (denied(ctx)) return@get
                     call.respondText(CrashLog.read(ctx), ContentType.Text.Plain)
@@ -539,11 +556,12 @@ object Server {
                 // ---- netplay (local multiplayer between two ThorBro devices) ----
                 // public for the other Thor: only the open lobby; data needs the lobby PIN
                 get("/api/netplay/lobby") {
-                    json(Netplay.lobby?.public() ?: JSONObject().put("open", false))
+                    json(Netplay.publicInfo(ctx, q("id")))
                 }
                 post("/api/netplay/join") {
                     val l = Netplay.checkPin(q("pin")) ?: return@post fail("wrong pin or no lobby", HttpStatusCode.Forbidden)
                     Netplay.joined(l, q("name") ?: "")
+                    Friends.add(ctx, q("id"), q("name"))
                     json(l.public().put("ok", true))
                 }
                 get("/api/netplay/rom") {
@@ -565,8 +583,78 @@ object Server {
                 post("/api/netplay/host") {
                     if (denied(ctx)) return@post
                     val rom = Storage.resolve(q("path")) ?: return@post fail("path not allowed")
-                    val res = withContext(Dispatchers.IO) { Netplay.host(ctx, q("system") ?: "", rom, online = q("online") == "1") }
+                    val res = withContext(Dispatchers.IO) {
+                        if (q("share") == "1") Netplay.share(ctx, q("system") ?: "", rom) else Netplay.host(ctx, q("system") ?: "", rom)
+                    }
                     json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
+                }
+                post("/api/netplay/server") {
+                    if (denied(ctx)) return@post
+                    val res = withContext(Dispatchers.IO) { if (q("on") == "1") Netplay.startServer(ctx) else { Netplay.stopServer(ctx); Netplay.server(ctx) } }
+                    json(res)
+                }
+                post("/api/netplay/wlan") {
+                    if (denied(ctx)) return@post
+                    Netplay.setWlanOnly(ctx, q("on") == "1")
+                    json(JSONObject().put("wlanOnly", Netplay.wlanOnly(ctx)))
+                }
+                // online (internet) 3DS room: see Online.kt
+                get("/api/online") {
+                    if (denied(ctx)) return@get
+                    val addrs = runCatching { java.net.NetworkInterface.getNetworkInterfaces().toList().flatMap { n -> n.inetAddresses.toList().map { "${n.name} ${it.hostAddress}" } } }.getOrDefault(emptyList())
+                    json(Online.hostStatus(ctx).put("relay", Relay.status()).put("interfaces", org.json.JSONArray(addrs)))
+                }
+                post("/api/online/host") {
+                    if (denied(ctx)) return@post
+                    val res = withContext(Dispatchers.IO) { Online.startHost(ctx) }
+                    json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
+                }
+                post("/api/online/close") {
+                    if (denied(ctx)) return@post
+                    withContext(Dispatchers.IO) { Online.stopHost() }
+                    json(JSONObject().put("ok", true))
+                }
+                post("/api/online/new") { // a new code
+                    if (denied(ctx)) return@post
+                    json(withContext(Dispatchers.IO) { if (Online.host == null) Online.startHost(ctx) else { Online.newCode(ctx); Online.hostStatus(ctx) } })
+                }
+                post("/api/online/reset") { // new room key: everyone who joined before needs a code again
+                    if (denied(ctx)) return@post
+                    json(withContext(Dispatchers.IO) { Online.resetAccess(ctx) })
+                }
+                post("/api/online/join") { // ?code=… (digits 1-8 or U D L R A B X Y) or ?known=<id>
+                    if (denied(ctx)) return@post
+                    val code = q("code"); val known = q("known")
+                    if (code == null && known == null) return@post fail("code missing")
+                    val job = Jobs.start("Online beitreten") { if (known != null) Online.joinKnown(ctx, known, it) else Online.joinCode(ctx, code!!, it) }
+                    json(job.json())
+                }
+                post("/api/online/forget") {
+                    if (denied(ctx)) return@post
+                    Online.forget(ctx, q("id") ?: return@post fail("id missing"))
+                    json(JSONObject().put("ok", true))
+                }
+                post("/api/netplay/relay") {
+                    if (denied(ctx)) return@post
+                    val addr = q("address")?.takeIf { Regex("^[0-9.]{7,15}$").matches(it) }
+                    val res = withContext(Dispatchers.IO) {
+                        if (addr == null) { Netplay.clearJoined(ctx); JSONObject().put("ok", true) } else Netplay.useRoomOf(ctx, addr, q("name") ?: addr)
+                    }
+                    json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
+                }
+                post("/api/netplay/auto") {
+                    if (denied(ctx)) return@post
+                    Friends.setAuto(ctx, q("on") == "1")
+                    json(JSONObject().put("auto", Friends.auto(ctx)))
+                }
+                post("/api/netplay/friend/remove") {
+                    if (denied(ctx)) return@post
+                    Friends.remove(ctx, q("id") ?: "")
+                    json(JSONObject().put("ok", true))
+                }
+                post("/api/netplay/prepare") {
+                    if (denied(ctx)) return@post
+                    json(withContext(Dispatchers.IO) { Netplay.prepare(ctx) })
                 }
                 post("/api/netplay/close") {
                     if (denied(ctx)) return@post
@@ -580,20 +668,15 @@ object Server {
                     json(Jobs.start("Netplay beitreten") { Netplay.join(ctx, addr, pin, it) }.json())
                 }
 
-                post("/api/netplay/azahar-server") {
-                    if (denied(ctx)) return@post
-                    runCatching { Netplay.setOnlineServer(ctx, q("address")) }.onFailure { return@post fail(it.message ?: "bad address") }
-                    json(JSONObject().put("server", Netplay.onlineServer(ctx)))
-                }
                 // Thors nearby that invite over Wi-Fi Direct (radio scan; works without a shared network)
                 get("/api/netplay/invites") {
                     if (denied(ctx)) return@get
-                    val res = withContext(Dispatchers.IO) { Direct.invites(ctx) }
+                    val res = withContext(Dispatchers.IO) { org.json.JSONArray(Netplay.invites(ctx)) }
                     // the password and PIN stay on this device; the panel answers with the device address
                     lastInvites = res
                     val pub = org.json.JSONArray()
                     for (i in 0 until res.length()) res.getJSONObject(i).let { pub.put(JSONObject(it.toString()).apply { remove("pass"); remove("pin") }.put("lobby", it.optString("pin").isNotEmpty())) }
-                    json(JSONObject().put("invites", pub).put("permission", Direct.permitted(ctx)))
+                    json(JSONObject().put("invites", pub).put("permission", Direct.permitted(ctx) || Netplay.wlanOnly(ctx)))
                 }
                 post("/api/netplay/accept") {
                     if (denied(ctx)) return@post

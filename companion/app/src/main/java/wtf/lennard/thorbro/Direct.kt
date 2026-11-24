@@ -90,7 +90,8 @@ object Direct {
         if (!permitted(ctx)) return status(ctx).put("error", "Berechtigung „Geräte in der Nähe“ fehlt – am Thor in ThorBro erlauben").put("code", "permission")
         val (m, c) = init(ctx)
         groupInfo(m, c)?.let { call { l -> m.removeGroup(c, l) }; Thread.sleep(500) }
-        val name = "DIRECT-TB-" + (Build.MODEL ?: "Thor").filter { it.isLetterOrDigit() }.take(12)
+        // own id in the name: two Thors of the same model must not open the same network
+        val name = "DIRECT-TB-" + Me.name(ctx).filter { it.isLetterOrDigit() }.take(12) + "-" + Me.id(ctx)
         val pass = easyPass(ctx)
         val cfg = WifiP2pConfig.Builder().setNetworkName(name).setPassphrase(pass)
             .setGroupOperatingBand(WifiP2pConfig.GROUP_OWNER_BAND_AUTO).enablePersistentMode(false).build()
@@ -140,9 +141,10 @@ object Direct {
         val (m, c) = runCatching { init(ctx) }.getOrNull() ?: return
         val l = Netplay.lobby
         val txt = mapOf(
-            "n" to (Build.MODEL ?: "Thor").take(24),
+            "n" to Me.name(ctx), "i" to Me.id(ctx),
             "s" to g.optString("ssid"), "p" to g.optString("pass"),
-            "g" to (l?.public()?.optString("game")?.take(40) ?: ""), "m" to (l?.mode ?: ""), "k" to (l?.pin ?: ""),
+            "g" to (l?.public()?.optString("game")?.take(40) ?: if (Netplay.serverOn) "Spielserver" else ""),
+            "m" to (l?.mode ?: if (Netplay.serverOn) "server" else ""), "k" to (l?.pin ?: ""),
         )
         call { cb -> m.clearLocalServices(c, cb) }
         call { cb -> m.addLocalService(c, WifiP2pDnsSdServiceInfo.newInstance("ThorBro", SERVICE, txt), cb) }
@@ -160,6 +162,7 @@ object Direct {
 
     /** Thors nearby that announce a ThorBro net (radio scan, a few seconds; call off the main thread) */
     @Suppress("MissingPermission")
+    @Synchronized // the screen and the background (AutoPlay) both scan
     fun invites(ctx: Context, ms: Long = 6000): JSONArray {
         val out = JSONArray()
         if (!permitted(ctx)) return out
@@ -176,9 +179,11 @@ object Direct {
         Thread.sleep(ms)
         call { l -> m.removeServiceRequest(c, req, l) }
         val mine = group?.optString("ssid")
+        val me = Me.id(ctx)
         found.forEach { (addr, r) ->
-            if (r["s"].isNullOrEmpty() || r["s"] == mine) return@forEach
-            out.put(JSONObject().put("device", addr).put("name", r["n"] ?: "Thor").put("ssid", r["s"]).put("pass", r["p"])
+            if (r["s"].isNullOrEmpty() || r["s"] == mine || r["i"] == me) return@forEach
+            out.put(JSONObject().put("device", addr).put("id", r["i"].orEmpty()).put("friend", Friends.isFriend(ctx, r["i"]))
+                .put("name", r["n"] ?: "Thor").put("ssid", r["s"]).put("pass", r["p"])
                 .put("game", r["g"].orEmpty()).put("mode", r["m"].orEmpty()).put("pin", r["k"].orEmpty()))
         }
         return out

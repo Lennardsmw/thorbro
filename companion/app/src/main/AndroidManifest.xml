@@ -84,6 +84,14 @@
         </service>
 
         <receiver android:name=".InstallReceiver" android:exported="false" />
+        <receiver android:name=".AutoPlay$CloseReceiver" android:exported="false" />
+        <activity
+            android:name=".ui.InviteActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard|navigation|screenLayout|smallestScreenSize|density|fontScale|uiMode|layoutDirection" />
 
         <!-- shares ThorBro's own APK (Quick Share, Bluetooth) -->
         <provider
