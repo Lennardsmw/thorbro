@@ -82,6 +82,9 @@ private fun ActivityCard(a: JSONObject) {
                 }
                 Text("  ${(p * 100).toInt()} %", fontSize = 12.sp, color = Muted)
             }
+            a.optString("transfer").takeIf { it.isNotEmpty() && it != "null" }?.let {
+                Text(it, fontSize = 12.sp, color = Color(0xD9FFFFFF), maxLines = 1, modifier = Modifier.padding(top = 4.dp))
+            }
         } else if (err != null) Text(err, fontSize = 12.sp, color = Bad, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }

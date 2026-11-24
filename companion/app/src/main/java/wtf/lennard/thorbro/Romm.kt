@@ -195,7 +195,7 @@ object Romm {
                     while (true) {
                         val n = inp.read(buf); if (n < 0) break
                         out.write(buf, 0, n); done += n
-                        if (total > 0) job.progress = done.toDouble() / total * (if (multi) 0.9 else 1.0)
+                        if (total > 0) { job.progress = done.toDouble() / total * (if (multi) 0.9 else 1.0); job.bytes(done, total) }
                     }
                 }
             }
@@ -208,6 +208,7 @@ object Romm {
         }
         Roms.invalidate()
         return JSONObject().put("path", if (multi) File(dir, name).path else target.path).put("system", system)
+            .put("name", r.optString("name").ifEmpty { name })
     }
 
     // ---------- raw API for syncing ----------

@@ -17,10 +17,14 @@ object History {
     fun init(ctx: Context) { if (file == null) file = File(ctx.applicationContext.filesDir, "history.json") }
 
     /** kind: save_up, save_down, rom_up, offload, download, restore */
-    fun add(ctx: Context, kind: String, name: String, system: String = "", detail: String = "") = synchronized(lock) {
+    fun add(ctx: Context, kind: String, name: String, system: String = "", detail: String = "", ms: Long = 0, romId: Int = 0,
+            size: Long = 0) = synchronized(lock) {
         init(ctx)
         val arr = read()
         val e = JSONObject().put("t", System.currentTimeMillis()).put("kind", kind).put("name", name).put("system", system).put("detail", detail)
+        if (ms > 0) e.put("ms", ms)
+        if (romId > 0) e.put("romId", romId)
+        if (size > 0) e.put("size", size)
         val out = JSONArray().put(e)
         for (i in 0 until minOf(arr.length(), MAX - 1)) out.put(arr.get(i))
         runCatching { file!!.writeText(out.toString()) }

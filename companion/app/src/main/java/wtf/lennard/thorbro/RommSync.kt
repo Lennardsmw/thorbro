@@ -175,8 +175,6 @@ object RommSync {
         val total = todo.sumOf { it.second.getLong("size") }.coerceAtLeast(1)
         var done = 0L
         job.total = todo.size
-        val started = System.currentTimeMillis()
-        var lastMsg = 0L
         for ((n, pair) in todo.withIndex()) {
             val (sys, rom) = pair
             job.index = n + 1
@@ -189,23 +187,17 @@ object RommSync {
             fun report(file: File): (Long) -> Unit { val len = file.length().coerceAtLeast(1); return { sent ->
                 val now = done + sent * romSize / len
                 job.progress = now.toDouble() / total
-                val t = System.currentTimeMillis()
-                if (t - lastMsg > 1000) {
-                    lastMsg = t
-                    val bps = now * 1000.0 / (t - started).coerceAtLeast(1)
-                    val eta = if (bps > 0) ((total - now) / bps).toLong() else 0L
-                    job.message = "Lade ${f.name} hoch · ${"%.1f".format(bps / 1_000_000)} MB/s" +
-                        (if (Romm.status(ctx).optBoolean("viaLan")) " · Heimnetz" else "") +
-                        " · noch ${if (eta >= 3600) "${eta / 3600} h ${eta % 3600 / 60} min" else if (eta >= 60) "${eta / 60} min" else "$eta s"}"
-                }
+                job.bytes(now, total)
             } }
+            if (Romm.status(ctx).optBoolean("viaLan")) job.message = "Lade ${f.name} hoch · Heimnetz"
+            val t0 = System.currentTimeMillis()
             try {
                 if (f.isDirectory) {
                     job.message = "Packe ${f.name} …"
                     val zip = File(ctx.cacheDir, "romm-upload.zip")
                     try { zipFolder(f, zip); upload(ctx, pid, f.name + ".zip", zip, report(zip)) } finally { zip.delete() }
                 } else upload(ctx, pid, f.name, f, report(f))
-                romsUp++; History.add(ctx, "rom_up", rom.optString("name").ifEmpty { f.name }, sys)
+                romsUp++; History.add(ctx, "rom_up", rom.optString("name").ifEmpty { f.name }, sys, ms = System.currentTimeMillis() - t0, size = romSize)
             } catch (e: Exception) { errors.put("${f.name}: ${e.message}"); Logs.e("romm", "Upload ${f.name}", e) }
             done += romSize
             job.progress = done.toDouble() / total

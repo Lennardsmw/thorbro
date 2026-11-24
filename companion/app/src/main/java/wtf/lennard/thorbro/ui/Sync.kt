@@ -1,6 +1,13 @@
 package wtf.lennard.thorbro.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -59,16 +66,6 @@ private fun ago(t: Long): String {
     }
 }
 
-private val kinds = mapOf(
-    "save_up" to Triple(Icons.Filled.CloudUpload, "Spielstand hochgeladen", true),
-    "save_down" to Triple(Icons.Filled.CloudDownload, "Spielstand von RomM geholt", true),
-    "rom_up" to Triple(Icons.Filled.Upload, "Spiel zu RomM hochgeladen", false),
-    "offload" to Triple(Icons.Filled.Inventory2, "Ausgelagert", false),
-    "download" to Triple(Icons.Filled.Download, "Aus RomM geladen", false),
-    "restore" to Triple(Icons.Filled.Restore, "Spielstand zurückgesetzt", true),
-    "save_install" to Triple(Icons.Filled.Download, "Spielstand installiert", true),
-)
-
 /** "Ordner „Saves“ (SD)" means nothing to a player; name it after the console/emulator instead */
 private fun friendly(l: JSONObject): String {
     val emu = l.optString("emulator"); val name = l.optString("name"); val id = l.optString("id")
@@ -109,7 +106,7 @@ fun SyncScreen() {
     var profileAdd by remember { mutableStateOf(false) }
     var serverOpen by remember { mutableStateOf(false) }
     LaunchedEffect(tick) { profiles = withContext(Dispatchers.IO) { wtf.lennard.thorbro.Profiles.json(ctx).optJSONArray("profiles").objs() } }
-    LaunchedEffect(tick) { history = withContext(Dispatchers.IO) { History.list(ctx, 40) } }
+    LaunchedEffect(tick) { history = withContext(Dispatchers.IO) { History.list(ctx, 200) } }
     LaunchedEffect(tick / 8) { saves = withContext(Dispatchers.IO) { runCatching { Saves.overview(ctx) }.getOrNull() } }
     val st = remember(tick) { Romm.status(ctx) }
     val connected = st.optBoolean("connected")
@@ -174,9 +171,10 @@ fun SyncScreen() {
                 scope.launch { withContext(Dispatchers.IO) { runCatching { Saves.backup(ctx, null) } }; note = "gesichert"; tick += 8 }
             }
         }
-        header("Verlauf", if (entries.isEmpty()) "noch nichts passiert" else "die letzten ${minOf(entries.size, 12)} Vorgänge")
-        entries.take(12).forEach { e ->
-            item(span = { GridItemSpan(maxLineSpan) }) { HistoryRow(e) }
+        val transfers = entries.filter { it.optString("kind") in listOf("download", "rom_up") }
+        header("Downloads", if (transfers.isEmpty()) "noch keine Spiele geladen" else "die letzten ${minOf(transfers.size, 20)} Spiele · wie lange es gedauert hat")
+        transfers.take(20).forEach { e ->
+            item(span = { GridItemSpan(maxLineSpan) }) { TransferRow(e) }
         }
 
     }
@@ -202,18 +200,33 @@ fun SyncScreen() {
     }
 }
 
+/** one downloaded (or uploaded) game: cover, name, size, how long it took */
 @Composable
-private fun HistoryRow(e: JSONObject) {
-    val (icon, label, _) = kinds[e.optString("kind")] ?: Triple(Icons.Filled.History, e.optString("kind"), false)
+private fun TransferRow(e: JSONObject) {
+    val ctx = LocalContext.current
+    val down = e.optString("kind") == "download"
+    val romId = e.optInt("romId")
+    val cover by androidx.compose.runtime.produceState<File?>(null, romId) {
+        value = if (romId > 0) withContext(Dispatchers.IO) { runCatching { wtf.lennard.thorbro.Library.coverFile(ctx, romId) }.getOrNull() } else null
+    }
     FocusCard(Modifier.fillMaxWidth(), onClick = {}) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null, Modifier.size(26.dp))
+            Box(Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(Color(0x22FFFFFF)), contentAlignment = Alignment.Center) {
+                if (cover != null) Img(cover, 160, Modifier.fillMaxSize(), ContentScale.Crop, e.optString("name"))
+                else Icon(if (down) Icons.Filled.Download else Icons.Filled.Upload, null, Modifier.size(26.dp))
+            }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(e.optString("name").substringBefore(" (").ifEmpty { "–" }, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(label + (e.optString("system").takeIf { it.isNotEmpty() }?.let { " · $it" } ?: ""), fontSize = 13.sp, color = Muted, maxLines = 1)
+                Text((if (down) "Aus RomM geladen" else "Zu RomM hochgeladen") +
+                    (e.optString("system").takeIf { it.isNotEmpty() }?.let { " · $it" } ?: "") +
+                    (e.optLong("size").takeIf { it > 0 }?.let { " · ${fmtBytes(it)}" } ?: ""), fontSize = 13.sp, color = Muted, maxLines = 1)
             }
-            Text(ago(e.optLong("t")), fontSize = 13.sp, color = Muted)
+            Column(horizontalAlignment = Alignment.End) {
+                val ms = e.optLong("ms")
+                Text(if (ms > 0) "in ${wtf.lennard.thorbro.Jobs.dur((ms + 999) / 1000)}" else "–", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text(ago(e.optLong("t")), fontSize = 13.sp, color = Muted)
+            }
         }
     }
 }

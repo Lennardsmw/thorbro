@@ -95,8 +95,8 @@ object Library {
             if (f.isDirectory) {
                 val zip = File(ctx.cacheDir, "offload.zip")
                 RommSync.zipFolder(f, zip)
-                try { RommSync.upload(ctx, pid, f.name + ".zip", zip) { n -> job.progress = 0.9 * (done + n) / total } } finally { zip.delete() }
-            } else RommSync.upload(ctx, pid, f.name, f) { n -> job.progress = 0.9 * (done + n) / total }
+                try { RommSync.upload(ctx, pid, f.name + ".zip", zip) { n -> job.progress = 0.9 * (done + n) / total; job.bytes(done + n, total) } } finally { zip.delete() }
+            } else RommSync.upload(ctx, pid, f.name, f) { n -> job.progress = 0.9 * (done + n) / total; job.bytes(done + n, total) }
             done += rom.getLong("size")
         }
         job.message = "Spielstände hochladen"; job.progress = 0.92
@@ -177,7 +177,10 @@ object Library {
         downloads[romId]?.takeIf { !it.done }?.let { return it }
         val app = ctx.applicationContext
         val j = Jobs.start("RomM-Download") { job ->
-            try { Romm.download(app, romId, romsRoot(app), job).also { invalidate(); History.add(app, "download", job.message, it.optString("system")) } }
+            val t0 = System.currentTimeMillis()
+            try { Romm.download(app, romId, romsRoot(app), job).also { invalidate()
+                History.add(app, "download", it.optString("name").ifEmpty { job.message }, it.optString("system"),
+                    ms = System.currentTimeMillis() - t0, romId = romId, size = job.bytesTotal) } }
             finally { Progress.done(app, "Download fertig", job.message) }
         }
         downloads[romId] = j

@@ -983,7 +983,7 @@ document.addEventListener('click', async (e) => {
   const systems = [...document.querySelectorAll('[data-sync-sys]:checked')].map((x) => x.dataset.syncSys).join(',');
   e.target.disabled = true;
   const { body: job } = await api('/api/romm/sync?' + q({ systems, saves: 1 }), { method: 'POST' });
-  const res = await waitJob(job.id, (j) => { $('#syncState').textContent = `${Math.round(j.progress * 100)} % · ${j.message}`; });
+  const res = await waitJob(job.id, (j) => { $('#syncState').textContent = `${Math.round(j.progress * 100)} % · ${j.message}${j.transfer ? ' · ' + j.transfer : ''}`; });
   e.target.disabled = false;
   $('#syncState').textContent = res.error ? 'Fehler: ' + res.error
     : `${res.result.romsUploaded} Spiele, ${res.result.savesUploaded} Spielstände hochgeladen${res.result.errors.length ? ' · ' + res.result.errors.length + ' Fehler: ' + res.result.errors.slice(0, 2).join('; ') : ''}`;
