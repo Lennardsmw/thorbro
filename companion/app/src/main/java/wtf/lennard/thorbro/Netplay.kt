@@ -108,7 +108,7 @@ object Netplay {
         val l = lobby
         return (l?.public() ?: JSONObject().put("open", false))
             .put("host", model()).put("hostId", Me.id(ctx))
-            .put("server", serverOn).put("room", Room.running() && Room.ready)
+            .put("server", serverOn).put("room", Room.running() && Room.ready).put("card", Pals.card(ctx))
             .apply { if (l != null && Friends.isFriend(ctx, askerId)) put("pin", l.pin) }
     }
 

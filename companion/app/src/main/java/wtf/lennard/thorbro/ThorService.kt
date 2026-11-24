@@ -42,6 +42,7 @@ class ThorService : Service() {
             SaveWatcher.start(applicationContext)
             Players.watch(applicationContext)
             AutoPlay.start(applicationContext)
+            Pals.listen(applicationContext) // friend network inbox (requests, later party and chat)
             Online.listen(applicationContext) // friends with the link can knock any time, game server on or off
             running = true
         }

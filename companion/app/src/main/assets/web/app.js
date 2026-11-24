@@ -1635,3 +1635,92 @@ start();
 document.addEventListener('keydown', (e) => {
   if ((e.key === 'Enter' || e.key === ' ') && e.target.classList?.contains('romcard')) { e.preventDefault(); e.target.click(); }
 });
+
+
+// ---------- friends (Pals.kt): button top right, panel on the right, "Freunde hinzufügen" popup ----------
+let friends = null;
+const ago = (ms) => { if (!ms) return ''; const m = Math.floor((Date.now() - ms) / 60000);
+  return m < 2 ? 'gerade eben' : m < 60 ? `vor ${m} Min.` : m < 2880 ? `vor ${Math.floor(m / 60)} Std.` : `vor ${Math.floor(m / 1440)} Tagen`; };
+async function friendsLoad(path = '/api/friends', method = 'GET') {
+  try { const { body } = await api(path, { method }); if (body.error) alert(body.error); else friends = body; } catch (e) { if (!(e instanceof AuthError)) console.warn(e); }
+  renderFriends();
+}
+function renderFriends() {
+  const f = friends; if (!f) return;
+  const b = $('#friendsBadge'); b.hidden = !f.requests.length; b.textContent = f.requests.length;
+  const d = $('#friendsDlg'); if (!d.open) return;
+  const person = (p, sub, btns) => `<div class="person"><div class="avatar">${esc((p.name || '?')[0].toUpperCase())}</div>
+    <div class="grow"><strong>${esc(p.name)}</strong><div class="muted">${esc(sub)}</div></div>${btns}</div>`;
+  d.innerHTML = `<div class="me"><div class="avatar big">👤</div><div class="grow"><strong style="font-size:19px">${esc(f.me.name)}</strong>
+      <div class="muted">ID ${esc(f.me.id.slice(0, 6))}</div></div><button data-fr="name">Name</button></div>
+    <div class="row"><button data-fr="party" class="grow">${f.partyOpen ? 'Party: offen' : 'Party: nur Einladung'}</button></div>
+    ${f.requests.length ? '<h4>Anfragen</h4>' + f.requests.map((r) => person(r, 'möchte dein Freund sein',
+      `<button class="primary" data-fr="accept" data-id="${esc(r.id)}">Annehmen</button><button data-fr="decline" data-id="${esc(r.id)}">✕</button>`)).join('') : ''}
+    <h4>Freunde (${f.friends.length})</h4>
+    ${f.friends.length ? f.friends.map((x) => person(x, [x.app, x.seen ? 'zuletzt ' + ago(x.seen) : ''].filter(Boolean).join(' · '),
+      `<button data-fr="remove" data-id="${esc(x.id)}" data-name="${esc(x.name)}" title="entfernen">✕</button>`)).join('')
+      : '<div class="muted">Noch keine. Unten „Freunde hinzufügen“ – per Code oder LocalSend.</div>'}
+    ${f.nearby.length ? '<h4>In der Nähe</h4>' + f.nearby.map((n) => person(n, (n.app || 'ThorBro') + ' · gleiches Netz',
+      n.asked ? '<span class="muted">angefragt</span>' : `<button data-fr="add" data-id="${esc(n.id)}">Hinzufügen</button>`)).join('') : ''}
+    <div class="row" style="margin-top:18px"><button class="primary grow" data-fr="addDlg">Freunde hinzufügen</button><button data-fr="close">Schließen</button></div>`;
+}
+let nearbyTimer = null;
+$('#friendsBtn').onclick = () => {
+  $('#friendsDlg').showModal(); renderFriends(); friendsLoad();
+  friendsLoad('/api/friends/scan', 'POST');
+  clearInterval(nearbyTimer); nearbyTimer = setInterval(() => $('#friendsDlg').open ? friendsLoad('/api/friends/scan', 'POST') : clearInterval(nearbyTimer), 15000);
+};
+$('#friendsDlg').onclick = async (e) => {
+  const t = e.target.closest('[data-fr]'); if (!t) { if (e.target === $('#friendsDlg')) $('#friendsDlg').close(); return; }
+  const a = t.dataset.fr, id = t.dataset.id;
+  if (a === 'close') return $('#friendsDlg').close();
+  if (a === 'addDlg') return friendAddOpen();
+  if (a === 'name') { const n = prompt('Dein Name (so sehen dich deine Freunde):', friends.me.name); if (n && n.trim()) friendsLoad('/api/friends/name?' + q({ name: n.trim() }), 'POST'); return; }
+  if (a === 'party') return friendsLoad('/api/friends/party?' + q({ open: friends.partyOpen ? '0' : '1' }), 'POST');
+  if (a === 'remove' && !confirm(`${t.dataset.name} als Freund entfernen?`)) return;
+  friendsLoad(`/api/friends/${a}?` + q({ id }), 'POST');
+};
+async function friendAddOpen() {
+  const d = $('#friendAdd');
+  d.innerHTML = `<h3>Freunde hinzufügen</h3>
+    <div class="sub">Code eines Freundes (Tasten oder Ziffern 1–8):</div>
+    <div class="row"><input id="frCode" class="grow" placeholder="z. B. ↓ ↓ A B X X → Y oder 22561487"><button id="frRedeem" class="primary">Hinzufügen</button></div>
+    <div id="frInfo" class="muted"></div>
+    <h4 style="margin-top:18px">Dein Code – der andere gibt ihn bei sich ein</h4>
+    <div id="frMine" class="keycode">…</div><div id="frMineSub" class="muted"></div>
+    <div class="row" style="margin-top:10px"><button id="frNew">Neuer Code</button><button id="frFile">Als Datei (LocalSend)</button>
+      <label class="btn"><input id="frImport" type="file" accept=".thorfriend" hidden>Datei importieren</label></div>
+    <div class="sub">Die Datei „Name.thorfriend“ per LocalSend o. ä. schicken. Landet sie auf dem anderen Thor im Download-Ordner, seid ihr beim nächsten Öffnen des Freunde-Menüs befreundet.</div>
+    <div class="row" style="margin-top:14px"><button id="frClose">Schließen</button></div>`;
+  d.showModal();
+  const mine = async (fresh) => { const { body } = await api('/api/friends/code' + (fresh ? '?fresh=1' : ''));
+    $('#frMine').textContent = body.code; $('#frMineSub').textContent = `als Ziffern ${body.digits} · gilt noch ${body.minutes} Min.`; };
+  mine(false);
+  $('#frNew').onclick = () => mine(true);
+  $('#frClose').onclick = () => { d.close(); friendsLoad(); };
+  $('#frFile').onclick = async () => {
+    const r = await fetch('/api/friends/file', { headers: { Authorization: 'Bearer ' + token } });
+    const name = (r.headers.get('Content-Disposition') || '').match(/filename="(.+)"/)?.[1] || 'ThorBro.thorfriend';
+    const a = document.createElement('a'); a.href = URL.createObjectURL(await r.blob()); a.download = name; a.click();
+  };
+  $('#frImport').onchange = async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const { body } = await api('/api/friends/import', { method: 'POST', body: await file.text() });
+    $('#frInfo').textContent = body.error ? body.error : 'Anfrage gesendet – sobald der andere online ist, seid ihr Freunde.'; friendsLoad();
+  };
+  $('#frRedeem').onclick = async () => {
+    const code = $('#frCode').value.trim(); if (!code) return;
+    $('#frRedeem').disabled = true; $('#frInfo').textContent = 'suche …';
+    try {
+      const { body } = await api('/api/friends/redeem?' + q({ code }), { method: 'POST' });
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 700));
+        const { body: j } = await api('/api/jobs/' + body.id);
+        if (j.done) { $('#frInfo').textContent = j.error ? j.error : `${j.result.name} ist jetzt dein Freund`; break; }
+      }
+    } catch (err) { $('#frInfo').textContent = err.message; }
+    $('#frRedeem').disabled = false; friendsLoad();
+  };
+}
+setTimeout(() => friendsLoad(), 1500);
+setInterval(() => { if (document.visibilityState === 'visible') friendsLoad(); }, 30000);

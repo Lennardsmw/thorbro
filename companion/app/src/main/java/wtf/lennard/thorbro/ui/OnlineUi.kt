@@ -55,7 +55,7 @@ import wtf.lennard.thorbro.Online
 
 /** one button of a code as it looks on the controller: D-pad arrows, A red, B yellow, X blue, Y green; null = still empty */
 @Composable
-private fun KeyCap(sym: String?, size: Int = 64, onClick: (() -> Unit)? = null) {
+internal fun KeyCap(sym: String?, size: Int = 64, onClick: (() -> Unit)? = null) {
     val face = when (sym) { "A" -> Color(0xFFE5484D); "B" -> Color(0xFFF2C230); "X" -> Color(0xFF3E8EF7); "Y" -> Color(0xFF3FB950); else -> null }
     val arrow = when (sym) {
         "↑" -> Icons.Filled.KeyboardArrowUp; "↓" -> Icons.Filled.KeyboardArrowDown
@@ -75,7 +75,7 @@ private fun KeyCap(sym: String?, size: Int = 64, onClick: (() -> Unit)? = null) 
 }
 
 @Composable
-private fun CodeRow(code: List<String?>, size: Int = 64) {
+internal fun CodeRow(code: List<String?>, size: Int = 64) {
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
         code.forEachIndexed { i, s ->
             if (i == 4) Spacer(Modifier.width(10.dp)) // two groups of four read easier

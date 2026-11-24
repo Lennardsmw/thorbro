@@ -602,6 +602,61 @@ object Server {
                     Netplay.setWlanOnly(ctx, q("on") == "1")
                     json(JSONObject().put("wlanOnly", Netplay.wlanOnly(ctx)))
                 }
+                // ---- friends (Pals.kt): card is public, everything else needs the panel login ----
+                get("/api/friends/card") { json(Pals.card(ctx)) }
+                get("/api/friends") {
+                    if (denied(ctx)) return@get
+                    json(withContext(Dispatchers.IO) { Pals.importDownloads(ctx); Pals.status(ctx) })
+                }
+                post("/api/friends/scan") {
+                    if (denied(ctx)) return@post
+                    json(withContext(Dispatchers.IO) { Pals.scanNearby(ctx); Pals.status(ctx) })
+                }
+                post("/api/friends/name") {
+                    if (denied(ctx)) return@post
+                    withContext(Dispatchers.IO) { Pals.setName(ctx, q("name") ?: "") }
+                    json(Pals.status(ctx))
+                }
+                post("/api/friends/party") {
+                    if (denied(ctx)) return@post
+                    Pals.setPartyOpen(ctx, q("open") == "1")
+                    json(Pals.status(ctx))
+                }
+                get("/api/friends/code") {
+                    if (denied(ctx)) return@get
+                    json(withContext(Dispatchers.IO) { Pals.myCode(ctx, q("fresh") == "1") })
+                }
+                post("/api/friends/redeem") { // ?code=… (digits 1-8 or U D L R A B X Y)
+                    if (denied(ctx)) return@post
+                    val code = q("code") ?: return@post fail("code missing")
+                    json(Jobs.start("Freund hinzufügen") { j -> JSONObject().put("name", Pals.redeem(ctx, code, j)) }.json())
+                }
+                post("/api/friends/{action}") { // accept | decline | remove | add (nearby) ?id=…
+                    if (denied(ctx)) return@post
+                    val id = q("id") ?: return@post fail("id missing")
+                    val err = withContext(Dispatchers.IO) {
+                        when (call.parameters["action"]) {
+                            "accept" -> if (Pals.accept(ctx, id)) null else "keine Anfrage"
+                            "decline" -> { Pals.decline(ctx, id); null }
+                            "remove" -> { Pals.remove(ctx, id); null }
+                            "add" -> Pals.addNearby(ctx, id)
+                            else -> "unbekannt"
+                        }
+                    }
+                    if (err != null) fail(err, HttpStatusCode.Conflict) else json(Pals.status(ctx))
+                }
+                get("/api/friends/file") { // the .thorfriend file to download in the web panel
+                    if (denied(ctx)) return@get
+                    val f = withContext(Dispatchers.IO) { Pals.shareFile(ctx) }
+                    call.response.header("Content-Disposition", "attachment; filename=\"${f.name}\"")
+                    call.respondFile(f)
+                }
+                post("/api/friends/import") { // body = the .thorfriend file
+                    if (denied(ctx)) return@post
+                    val text = call.receiveText()
+                    val err = withContext(Dispatchers.IO) { Pals.import(ctx, text) }
+                    if (err != null) fail(err, HttpStatusCode.Conflict) else json(Pals.status(ctx))
+                }
                 // online (internet) 3DS room: see Online.kt
                 get("/api/online") {
                     if (denied(ctx)) return@get

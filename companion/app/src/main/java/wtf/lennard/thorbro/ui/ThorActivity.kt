@@ -92,7 +92,9 @@ class ThorActivity : ComponentActivity() {
         setContent { ThorTheme { Box(Modifier.fillMaxSize()) {
             Root(screen.value) { screen.value = it }
             BackgroundOverlay(Modifier.align(Alignment.TopEnd))
+            FriendsPanel()
         } } }
+        if (intent?.getBooleanExtra("friends", false) == true) FriendsUi.open = true
     }
 
     // full screen like a console: bars come back only with a swipe from the edge
@@ -104,6 +106,7 @@ class ThorActivity : ComponentActivity() {
     // moving between the two screens no longer recreates the activity (configChanges) – just note where we are
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) { super.onConfigurationChanged(newConfig); rememberDisplay() }
     override fun onResume() { super.onResume(); rememberDisplay() }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); if (intent.getBooleanExtra("friends", false)) FriendsUi.open = true }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         // the live tester and player assignment only matter on the controller page
@@ -121,6 +124,8 @@ class ThorActivity : ComponentActivity() {
                 return true
             }
             KeyEvent.KEYCODE_BUTTON_R1 -> if (screen.value == null) { screen.value = Screen.GAMES; return true }
+            // L2 opens the friends menu from every page (inside the menu, L2 closes it again)
+            KeyEvent.KEYCODE_BUTTON_L2 -> if (openDialogs <= 0) { FriendsUi.open = true; return true }
         }
         return super.dispatchKeyEvent(event)
     }
