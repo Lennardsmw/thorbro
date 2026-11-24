@@ -172,7 +172,13 @@ private fun Root(screen: Screen?, open: (Screen?) -> Unit) {
         }
     }
     detail?.let { g ->
-        GameDetail(g.system, g.rom, g.meta) { detail = null }
+        // RomM status of this game, so the detail shows "in RomM" and the upload buttons like in the Games tab
+        val lib by androidx.compose.runtime.produceState<org.json.JSONObject?>(null, g) {
+            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { wtf.lennard.thorbro.Library.status(ctx).optJSONObject("games")?.optJSONObject(g.rom.getString("path")) }.getOrNull()
+            }
+        }
+        GameDetail(g.system, g.rom, g.meta, lib) { detail = null }
     }
 }
 

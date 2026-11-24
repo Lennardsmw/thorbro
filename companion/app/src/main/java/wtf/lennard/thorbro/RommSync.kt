@@ -130,10 +130,13 @@ object RommSync {
      *  batch would otherwise send them again */
     private fun ledgerFile(ctx: Context) = File(ctx.filesDir, "romm-roms-uploaded.json")
     private val ledgerLock = Any()
-    private fun ledger(ctx: Context): JSONObject = synchronized(ledgerLock) { runCatching { JSONObject(ledgerFile(ctx).readText()) }.getOrDefault(JSONObject()) }
+    internal fun ledger(ctx: Context): JSONObject = synchronized(ledgerLock) { runCatching { JSONObject(ledgerFile(ctx).readText()) }.getOrDefault(JSONObject()) }
     private fun remember(ctx: Context, slug: String, file: String, size: Long) = synchronized(ledgerLock) {
         val l = ledger(ctx).put("$slug/$file", size); ledgerFile(ctx).writeText(l.toString())
     }
+    /** uploaded from this Thor and waiting for RomM's next scan */
+    fun uploadedByUs(system: String, rom: JSONObject, led: JSONObject): Boolean =
+        rom.optLong("size") > 0 && led.optLong("${slugFor(system)}/${rom.getString("file")}", -1L) == rom.optLong("size")
     /** not in RomM, not uploaded by us already, and not an empty leftover file */
     private fun missing(rom: JSONObject, slug: String, have: Map<String, Int>, led: JSONObject): Boolean {
         val file = rom.getString("file"); val size = rom.optLong("size")
@@ -166,16 +169,17 @@ object RommSync {
 
     /** starts the upload in the background service process; keeps running when you switch apps */
     /** [systems] null = every console RomM is missing games of; the job starts at once and works that out itself */
-    fun start(ctx: Context, systems: Set<String>?, withSaves: Boolean): Jobs.Job {
+    /** [only] limits the upload to these local ROM paths (one game: base + updates/DLC) */
+    fun start(ctx: Context, systems: Set<String>?, withSaves: Boolean, only: Set<String>? = null): Jobs.Job {
         current?.takeIf { !it.done }?.let { return it }
         val app = ctx.applicationContext
-        val j = Jobs.start("RomM-Abgleich") { job ->
+        val j = Jobs.start(if (only != null) "Zu RomM hochladen" else "RomM-Abgleich") { job ->
             job.message = "Verbinde mit RomM …"
             Transfers.begin(app)
             val ticker = kotlin.concurrent.thread(isDaemon = true) {
                 while (!job.done) { Progress.show(app, "Spiele zu RomM", job.progress, job.message); runCatching { Thread.sleep(2000) } }
             }
-            try { run(app, systems, withSaves, job) } finally {
+            try { run(app, systems, withSaves, job, only) } finally {
                 Transfers.end(); ticker.interrupt()
                 Progress.done(app, "Abgleich mit RomM fertig", job.message)
             }
@@ -184,7 +188,14 @@ object RommSync {
         return j
     }
 
-    fun run(ctx: Context, systems: Set<String>?, withSaves: Boolean, job: Jobs.Job): JSONObject {
+    /** uploads one game (all [paths] of it) on its own; the running job if a batch is already going */
+    fun uploadGame(ctx: Context, paths: Set<String>): Jobs.Job {
+        val systems = localSystems(ctx).filter { (_, roms) -> roms.any { it.getString("path") in paths } }.map { it.first }.toSet()
+        require(systems.isNotEmpty()) { "Spiel nicht gefunden" }
+        return start(ctx, systems, withSaves = false, only = paths)
+    }
+
+    fun run(ctx: Context, systems: Set<String>?, withSaves: Boolean, job: Jobs.Job, only: Set<String>? = null): JSONObject {
         var romsUp = 0; var savesUp = 0; var savesDown = 0; val errors = JSONArray()
         job.message = "Verbinde mit RomM …"
         var (bySlug, remoteFiles) = remote(ctx)
@@ -192,9 +203,9 @@ object RommSync {
         val led = ledger(ctx)
         val todo = localSystems(ctx).filter { systems == null || it.first in systems }.flatMap { (sys, roms) ->
             val have = bySlug[slugFor(sys)]?.let { remoteFiles[it] } ?: emptyMap()
-            roms.filter { missing(it, slugFor(sys), have, led) }.map { sys to it }
+            roms.filter { (only == null || it.getString("path") in only) && missing(it, slugFor(sys), have, led) }.map { sys to it }
         }
-        if (todo.isEmpty()) job.message = "RomM hat schon alle Spiele"
+        if (todo.isEmpty()) job.message = if (only != null) "RomM hat das Spiel schon" else "RomM hat schon alle Spiele"
         val total = todo.sumOf { it.second.getLong("size") }.coerceAtLeast(1)
         var done = 0L
         job.total = todo.size

@@ -696,6 +696,9 @@ function openRom(path, sysId) {
           ${r.dir ? '' : `<a class="btn" href="/api/files/raw?${q({ path: r.path, token })}">Herunterladen</a>`}
           <button data-romdel="${esc(r.path)}">Löschen</button>
           ${lib?.connected && sysId !== 'ports' && sysId !== '_unassigned' ? `<button data-offload="${esc(JSON.stringify(r.group ? r.group.all.map((x) => x.path) : [r.path]))}" data-offload-size="${r.group ? r.group.size : r.size}" data-offload-in="${lib.games?.[r.path]?.inRomm ? 1 : 0}" data-offload-name="${esc(m.title || r.name.replace(/\s*[([].*$/, ''))}">${lib.games?.[r.path]?.inRomm ? 'In RomM auslagern' : 'Hochladen + auslagern'}</button>` : ''}
+          ${lib?.connected && sysId !== 'ports' && sysId !== '_unassigned' && lib.games?.[r.path] && !lib.games[r.path].inRomm
+            ? (lib.games[r.path].uploaded ? '<button disabled title="RomM zeigt es nach dem nächsten Scan">✓ In RomM hochgeladen</button>'
+              : `<button data-romm-up="${esc(JSON.stringify(r.group ? r.group.all.map((x) => x.path) : [r.path]))}">☁ Zu RomM hochladen</button>`) : ''}
           <span class="grow"></span>
           <button data-close>Schließen</button>
         </div>
@@ -781,6 +784,26 @@ $('#romDetail').addEventListener('click', async (e) => {
     $('#romDetail').close();
     pollActivity();
   } catch (err) { alert(err.message); }
+});
+
+// one game to RomM without deleting it; progress on the button, the bubble top right shows it too
+$('#romDetail').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-romm-up]');
+  if (!b) return;
+  const paths = JSON.parse(b.dataset.rommUp);
+  b.disabled = true; b.textContent = 'Verbinde …';
+  try {
+    const { body: job } = await api('/api/romm/upload?' + paths.map((p) => 'path=' + encodeURIComponent(p)).join('&'), { method: 'POST' });
+    if (job.error && !job.id) throw new Error(job.error);
+    if (job.name !== 'Zu RomM hochladen') { b.textContent = 'RomM-Abgleich läuft schon'; toast('Ein RomM-Abgleich läuft schon – Fortschritt oben rechts'); return; }
+    pollActivity();
+    const res = await waitJob(job.id, (j) => { b.textContent = `Lädt hoch … ${Math.round(j.progress * 100)} %`; b.title = [j.message, j.transfer].filter(Boolean).join(' · '); });
+    const err = res.error || res.result?.errors?.[0];
+    if (err) { b.disabled = false; b.textContent = '☁ Zu RomM hochladen'; alert('Upload fehlgeschlagen: ' + err); return; }
+    b.textContent = '✓ In RomM hochgeladen'; b.title = 'RomM zeigt es nach dem nächsten Scan';
+    const g = lib?.games?.[paths[0]]; if (g) g.uploaded = true;
+    toast('In RomM hochgeladen');
+  } catch (err) { b.disabled = false; b.textContent = '☁ Zu RomM hochladen'; alert(err.message); }
 });
 
 // ---------- store: games only in RomM ----------

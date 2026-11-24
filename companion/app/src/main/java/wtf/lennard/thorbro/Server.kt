@@ -386,6 +386,14 @@ object Server {
                     val j = RommSync.start(ctx, systems, withSaves)
                     json(j.json())
                 }
+                // one game (base + updates/DLC as several path=) to RomM; answers the job (or the batch already running)
+                post("/api/romm/upload") {
+                    if (denied(ctx)) return@post
+                    val paths = call.request.queryParameters.getAll("path").orEmpty().mapNotNull { Storage.resolve(it)?.path }.toSet()
+                    if (paths.isEmpty()) return@post fail("path missing")
+                    val j = withContext(Dispatchers.IO) { runCatching { RommSync.uploadGame(ctx, paths) } }
+                    j.fold({ json(it.json()) }, { fail(it.message ?: "Fehler") })
+                }
                 post("/api/romm/sync/config") {
                     if (denied(ctx)) return@post
                     q("auto")?.let { RommSync.setAuto(ctx, it == "1") }

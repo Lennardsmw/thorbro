@@ -37,7 +37,7 @@ object Library {
     private fun connected(ctx: Context) = Romm.status(ctx).optBoolean("connected")
 
     /**
-     * Per local game path: {inRomm, romId, save} with save = "none" (no save found), "synced" (RomM has the
+     * Per local game path: {inRomm, romId, uploaded, save} with uploaded = sent from this Thor, RomM has not scanned it yet; save = "none" (no save found), "synced" (RomM has the
      * current one), "pending" (changed since the last upload) or "local" (never uploaded).
      */
     fun status(ctx: Context, refresh: Boolean = false): JSONObject {
@@ -45,6 +45,7 @@ object Library {
         if (!out.getBoolean("connected")) return out.put("games", JSONObject())
         val rem = try { remote(ctx, refresh) } catch (e: Exception) { return out.put("error", e.message).put("games", JSONObject()) }
         val st = RommSync.state(ctx)
+        val led = RommSync.ledger(ctx)
         val saves = runCatching { RommSync.localSaves(ctx) }.getOrDefault(emptyList()).groupBy { it.rom.optString("path") }
         val games = JSONObject()
         val sys = Roms.scan(ctx, false).getJSONArray("systems")
@@ -62,7 +63,8 @@ object Library {
                     mine.any { st.has(RommSync.stateKey(ctx, it)) } -> "pending"
                     else -> "local"
                 }
-                games.put(r.getString("path"), JSONObject().put("inRomm", hit != null).put("romId", hit?.optInt("id")).put("save", save))
+                games.put(r.getString("path"), JSONObject().put("inRomm", hit != null).put("romId", hit?.optInt("id")).put("save", save)
+                    .put("uploaded", hit == null && RommSync.uploadedByUs(id, r, led)))
             }
         }
         return out.put("games", games)

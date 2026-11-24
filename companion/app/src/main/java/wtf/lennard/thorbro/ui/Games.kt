@@ -184,6 +184,27 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
             if (j.error != null) { msg = j.error!!; job = null } else { onChanged(); onClose() }
         }
     }
+    // single-game upload to RomM: picks up a running one for this game (dialog reopened, started from the web panel)
+    val paths = remember(group) { group.map { it.getString("path") }.toSet() }
+    var upJob by remember { mutableStateOf(wtf.lennard.thorbro.RommSync.current?.takeIf { !it.done && it.file in paths }) }
+    var upLabel by remember { mutableStateOf("") }
+    var uploaded by remember(lib) { mutableStateOf(lib?.optBoolean("uploaded") == true) }
+    upJob?.let { j ->
+        LaunchedEffect(j) {
+            while (!j.done) {
+                upLabel = "Lädt hoch … ${(j.progress * 100).toInt()} %"
+                msg = listOfNotNull(j.message.ifEmpty { null }, j.transfer()).joinToString(" · ")
+                kotlinx.coroutines.delay(500)
+            }
+            val res = j.result
+            msg = when {
+                j.error != null -> j.error!!
+                (res?.optJSONArray("errors")?.length() ?: 0) > 0 -> res!!.getJSONArray("errors").getString(0)
+                else -> { uploaded = true; onChanged(); "In RomM hochgeladen – erscheint dort nach dem nächsten Scan" }
+            }
+            upJob = null
+        }
+    }
     val cover = cover(sys, r, m)
     val hero by produceState<File?>(null, r.getString("path")) {
         value = withContext(Dispatchers.IO) { if (sys == "ports") null else runCatching { Cocoon.media(ctx, sys, r.getString("path"), "hero") }.getOrNull() }
@@ -211,6 +232,18 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
             val queued = Background.isQueued(r.getString("path"))
             if (sys != "ports" && lib != null && !queued) add(Triple(if (lib.optBoolean("inRomm")) "Auslagern" else "Hochladen + auslagern", Icons.Filled.CloudUpload, { confirm = true }))
             if (queued) add(Triple("Wird ausgelagert …", Icons.Filled.CloudUpload, {}))
+            if (sys != "ports" && lib != null && !lib.optBoolean("inRomm") && !queued) when {
+                upJob != null -> add(Triple(upLabel.ifEmpty { "Lädt hoch …" }, Icons.Filled.CloudUpload, {}))
+                uploaded -> add(Triple("In RomM hochgeladen ✓", Icons.Filled.CloudUpload, {}))
+                else -> add(Triple("Zu RomM hochladen", Icons.Filled.CloudUpload, {
+                    msg = "Verbinde mit RomM …"
+                    scope.launch {
+                        runCatching { withContext(Dispatchers.IO) { wtf.lennard.thorbro.RommSync.uploadGame(ctx, paths) } }
+                            .onSuccess { j -> if (j.name == "Zu RomM hochladen") upJob = j else msg = "RomM-Abgleich läuft schon – Fortschritt oben rechts" }
+                            .onFailure { msg = it.message ?: "Fehler" }
+                    }
+                }))
+            }
             add(Triple("Zurück", Icons.Filled.ArrowBack, onClose))
         }
         if (stacked) Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -258,7 +291,7 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
                         }
                         Spacer(Modifier.height(28.dp))
                         Buttons(stacked = false)
-                        if (msg.isNotEmpty()) Text(msg, color = if (job != null) Muted else Bad, modifier = Modifier.padding(top = 12.dp))
+                        if (msg.isNotEmpty()) Text(msg, color = if (job != null || upJob != null || uploaded) Muted else Bad, modifier = Modifier.padding(top = 12.dp))
                     }
                 }
             } else {
@@ -281,7 +314,7 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
                         Text(it, fontSize = 14.sp, color = Color(0xD9FFFFFF), maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 14.dp))
                     }
                     Spacer(Modifier.weight(1f))
-                    if (msg.isNotEmpty()) Text(msg, color = if (job != null) Muted else Bad, modifier = Modifier.padding(bottom = 10.dp))
+                    if (msg.isNotEmpty()) Text(msg, color = if (job != null || upJob != null || uploaded) Muted else Bad, modifier = Modifier.padding(bottom = 10.dp))
                     Buttons(stacked = true)
                 }
             }
