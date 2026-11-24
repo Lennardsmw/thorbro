@@ -10,7 +10,9 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.AddLink
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.History
@@ -105,6 +107,7 @@ fun SyncScreen() {
     var profiles by remember { mutableStateOf(emptyList<JSONObject>()) }
     var profileOpen by remember { mutableStateOf<JSONObject?>(null) }
     var profileAdd by remember { mutableStateOf(false) }
+    var serverOpen by remember { mutableStateOf(false) }
     LaunchedEffect(tick) { profiles = withContext(Dispatchers.IO) { wtf.lennard.thorbro.Profiles.json(ctx).optJSONArray("profiles").objs() } }
     LaunchedEffect(tick) { history = withContext(Dispatchers.IO) { History.list(ctx, 40) } }
     LaunchedEffect(tick / 8) { saves = withContext(Dispatchers.IO) { runCatching { Saves.overview(ctx) }.getOrNull() } }
@@ -117,7 +120,7 @@ fun SyncScreen() {
     TileGrid(first) {
         header("RomM", if (connected) st.optString("url").removePrefix("https://").removePrefix("http://") +
             (if (st.optBoolean("viaLan")) " · über Heimnetz (schnell)" else "") +
-            (lastSave?.let { " · letzter Spielstand-Sync ${ago(it.optLong("t"))}" } ?: "") else "nicht verbunden – im Browser unter Bibliothek koppeln")
+            (lastSave?.let { " · letzter Spielstand-Sync ${ago(it.optLong("t"))}" } ?: "") else "nicht verbunden – unten „RomM-Server hinzufügen“")
         item {
             ConsoleTile(if (busy.isNotEmpty()) busy else "Jetzt synchronisieren", note.ifEmpty { "Spielstände hoch und runter" },
                 Icons.Filled.Sync, accent = true, modifier = Modifier.firstFocus(first, true)) {
@@ -150,7 +153,10 @@ fun SyncScreen() {
             ConsoleTile(if (auto) "Auto-Sync an" else "Auto-Sync aus", if (auto) "lädt nach jedem Speichern hoch" else "nur per Knopf",
                 if (auto) Icons.Filled.CloudDone else Icons.Filled.SyncDisabled, accent = auto) { auto = !auto; RommSync.setAuto(ctx, auto) }
         }
-        if (!connected) item { ConsoleTile("Nicht verbunden", "", Icons.Filled.CloudOff) {} }
+        item {
+            if (connected) ConsoleTile("RomM-Server", st.optString("url").removePrefix("https://").removePrefix("http://"), Icons.Filled.Dns) { serverOpen = true }
+            else ConsoleTile("RomM-Server hinzufügen", "Adresse eingeben, Code in RomM bestätigen", Icons.Filled.AddLink, accent = true) { serverOpen = true }
+        }
 
         profileTiles(profiles) { p -> if (p == null) profileAdd = true else profileOpen = p }
 
@@ -174,6 +180,8 @@ fun SyncScreen() {
         }
 
     }
+
+    if (serverOpen) RommServerDialog(onDone = { note = it; serverOpen = false; tick++ }) { serverOpen = false; tick++ }
 
     ProfileDialogs(profileOpen, profileAdd, onDone = { note = it; tick++ }) { profileOpen = null; profileAdd = false }
 
