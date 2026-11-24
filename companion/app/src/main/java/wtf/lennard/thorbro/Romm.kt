@@ -269,7 +269,8 @@ object Romm {
         }
     }
 
-    fun uploadComplete(ctx: Context, uploadId: String) { read(open(ctx, "POST", "/api/roms/upload/$uploadId/complete")) }
+    /** RomM glues the chunks into the final file before it answers: on a busy server that takes minutes for a big game */
+    fun uploadComplete(ctx: Context, uploadId: String) { read(open(ctx, "POST", "/api/roms/upload/$uploadId/complete", readTimeout = 30 * 60_000)) }
 
     /** returns RomM's save object (id, updated_at …) */
     fun uploadSave(ctx: Context, romId: Int, f: File, emulator: String, contentHash: String, slot: String? = null): JSONObject {
@@ -316,11 +317,11 @@ object Romm {
     // ---------- HTTP ----------
 
     private fun open(ctx: Context, method: String, path: String, body: String? = null, auth: Boolean = true, rangeFrom: Long = 0,
-                     headers: Map<String, String> = emptyMap(), raw: ByteArray? = null, rawLen: Int = 0): HttpURLConnection {
+                     headers: Map<String, String> = emptyMap(), raw: ByteArray? = null, rawLen: Int = 0, readTimeout: Int = 120_000): HttpURLConnection {
         val base = (if (auth) fastBase(ctx) else null) ?: url(ctx).ifEmpty { error("Keine RomM-Adresse eingetragen") }
         val c = URL(if (path.startsWith("http")) path else base + path).openConnection() as HttpURLConnection
         c.requestMethod = method
-        c.connectTimeout = 10_000; c.readTimeout = 120_000
+        c.connectTimeout = 10_000; c.readTimeout = readTimeout
         c.setRequestProperty("User-Agent", "ThorBro")
         c.setRequestProperty("Accept", "application/json")
         if (auth) token(ctx).takeIf { it.isNotEmpty() }?.let { c.setRequestProperty("Authorization", "Bearer $it") }

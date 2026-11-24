@@ -36,7 +36,7 @@ object Jobs {
             if (rateFrom == null) rateFrom = System.currentTimeMillis() to done
             bytesDone = done; bytesTotal = total
         }
-        /** the current game's own bytes (a batch's [bytesDone]/[bytesTotal] cover all its games) */
+        /** the current game's own bytes; total -1 = all sent, the server is still busy with it (a batch's [bytesDone]/[bytesTotal] cover all its games) */
         @Volatile var gameDone = 0L
         @Volatile var gameTotal = 0L
         fun gameBytes(done: Long, total: Long) { gameDone = done; gameTotal = total }
@@ -47,6 +47,7 @@ object Jobs {
         }
         /** this game: "12.0 MB/s · 545 MB / 1.14 GB · noch 50 s" */
         fun transfer(): String? {
+            if (gameTotal < 0) return null // waiting for the server, nothing on the wire
             val (done, total) = if (gameTotal > 0) gameDone.coerceAtMost(gameTotal) to gameTotal else bytesDone.coerceAtMost(bytesTotal) to bytesTotal
             if (total <= 0) return null
             val bps = bps()
@@ -56,12 +57,12 @@ object Jobs {
         }
         /** the whole batch, only when it is more than this one game: "noch 163.3 GB · ca. 3 h 46 min" */
         fun batch(): String? {
-            if (gameTotal <= 0 || bytesTotal <= gameTotal) return null
+            if (gameTotal == 0L || bytesTotal <= gameTotal) return null
             val left = (bytesTotal - bytesDone).coerceAtLeast(0)
             val bps = bps()
             return "noch ${mb(left)} gesamt" + (if (bps > 0) " · ca. ${dur((left / bps).toLong())}" else "")
         }
-        fun gameProgress(): Double = if (gameTotal > 0) gameDone.toDouble() / gameTotal else progress
+        fun gameProgress(): Double = if (gameTotal > 0) gameDone.toDouble() / gameTotal else if (gameTotal < 0) 1.0 else progress
         fun json(): JSONObject = JSONObject().put("id", id).put("name", name).put("progress", progress)
             .put("message", message).put("done", done).put("error", error).put("result", result).put("index", index).put("total", total)
             .put("bytesDone", bytesDone).put("bytesTotal", bytesTotal).put("transfer", transfer())

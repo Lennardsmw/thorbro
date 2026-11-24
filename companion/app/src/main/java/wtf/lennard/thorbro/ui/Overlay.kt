@@ -65,7 +65,7 @@ fun BackgroundOverlay(modifier: Modifier = Modifier) {
 
 /** the game's picture: RomM cover for downloads, boxart (or the console icon) for local games */
 @Composable
-private fun gameImage(a: JSONObject): java.io.File? {
+internal fun gameImage(a: JSONObject): java.io.File? {
     val ctx = LocalContext.current
     val romId = a.optInt("romId"); val file = a.optString("file"); val sys = a.optString("system")
     val img by produceState<java.io.File?>(null, romId, file) {
@@ -84,7 +84,7 @@ private fun gameImage(a: JSONObject): java.io.File? {
 
 /** [icon] game title / kind n/m, then speed · size · time left, then the progress bar */
 @Composable
-private fun ActivityCard(a: JSONObject) {
+internal fun ActivityCard(a: JSONObject) {
     val done = a.optBoolean("done")
     val err = a.optString("error").takeIf { it.isNotEmpty() && it != "null" }
     val p = a.optDouble(if (a.has("gameProgress")) "gameProgress" else "progress", 0.0).toFloat().coerceIn(0f, 1f)

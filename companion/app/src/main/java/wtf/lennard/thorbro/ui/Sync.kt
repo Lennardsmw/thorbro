@@ -105,6 +105,9 @@ fun SyncScreen() {
     var profileOpen by remember { mutableStateOf<JSONObject?>(null) }
     var profileAdd by remember { mutableStateOf(false) }
     var serverOpen by remember { mutableStateOf(false) }
+    var live by remember { mutableStateOf(emptyList<JSONObject>()) }
+    WhileVisible { while (true) { live = wtf.lennard.thorbro.Background.list().objs(); delay(500) } }
+    LaunchedEffect(live.count { !it.optBoolean("done") }) { tick++ } // a finished game shows up in the list right away
     LaunchedEffect(tick) { profiles = withContext(Dispatchers.IO) { wtf.lennard.thorbro.Profiles.json(ctx).optJSONArray("profiles").objs() } }
     LaunchedEffect(tick) { history = withContext(Dispatchers.IO) { History.list(ctx, 200) } }
     LaunchedEffect(tick / 8) { saves = withContext(Dispatchers.IO) { runCatching { Saves.overview(ctx) }.getOrNull() } }
@@ -172,7 +175,14 @@ fun SyncScreen() {
             }
         }
         val transfers = entries.filter { it.optString("kind") in listOf("download", "rom_up") }
-        header("Downloads", if (transfers.isEmpty()) "noch keine Spiele geladen" else "die letzten ${minOf(transfers.size, 20)} Spiele · wie lange es gedauert hat")
+        val running = live.filter { !it.optBoolean("done") }
+        header("Downloads", when {
+            running.isNotEmpty() -> "läuft gerade · darunter die letzten Spiele mit Dauer"
+            transfers.isEmpty() -> "noch keine Spiele geladen"
+            else -> "die letzten ${minOf(transfers.size, 20)} Spiele · wie lange es gedauert hat"
+        })
+        // what is moving right now: the same card as the bubble top right (cover, title, speed + size, bar)
+        running.forEach { a -> item(span = { GridItemSpan(maxLineSpan) }) { ActivityCard(a) } }
         transfers.take(20).forEach { e ->
             item(span = { GridItemSpan(maxLineSpan) }) { TransferRow(e) }
         }
@@ -200,6 +210,14 @@ fun SyncScreen() {
     }
 }
 
+/** a game's path on the Thor by console and name (entries from before the history kept the path) */
+private fun localPath(ctx: android.content.Context, sys: String, name: String): String? {
+    val s = wtf.lennard.thorbro.Roms.scan(ctx, false).optJSONArray("systems").objs().firstOrNull { it.optString("id") == sys } ?: return null
+    val key = name.substringBefore(" (").lowercase()
+    val roms = s.optJSONArray("roms").objs()
+    return (roms.firstOrNull { it.optString("name") == name } ?: roms.firstOrNull { it.optString("file").lowercase().startsWith(key) })?.optString("path")
+}
+
 /** one downloaded (or uploaded) game: cover, name, size, how long it took */
 @Composable
 private fun TransferRow(e: JSONObject) {
@@ -213,6 +231,7 @@ private fun TransferRow(e: JSONObject) {
                 when {
                     romId > 0 -> wtf.lennard.thorbro.Library.coverFile(ctx, romId)
                     file.isNotEmpty() && sys.isNotEmpty() -> wtf.lennard.thorbro.Media.coverForFile(ctx, sys, File(file))
+                    sys.isNotEmpty() -> localPath(ctx, sys, e.optString("name"))?.let { wtf.lennard.thorbro.Media.coverForFile(ctx, sys, File(it)) }
                     else -> null
                 }
             }.getOrNull()
@@ -233,7 +252,7 @@ private fun TransferRow(e: JSONObject) {
             }
             Column(horizontalAlignment = Alignment.End) {
                 val ms = e.optLong("ms")
-                Text(if (ms > 0) "in ${wtf.lennard.thorbro.Jobs.dur((ms + 999) / 1000)}" else "–", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                if (ms > 0) Text("in ${wtf.lennard.thorbro.Jobs.dur((ms + 999) / 1000)}", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 Text(ago(e.optLong("t")), fontSize = 13.sp, color = Muted)
             }
         }

@@ -192,12 +192,13 @@ object RommSync {
             } }
             if (Romm.status(ctx).optBoolean("viaLan")) job.message = "Lade ${f.name} hoch · Heimnetz"
             val t0 = System.currentTimeMillis()
+            val assembling = { job.message = "RomM setzt ${f.name} zusammen …"; job.gameBytes(0, -1) }
             try {
                 if (f.isDirectory) {
                     job.message = "Packe ${f.name} …"
                     val zip = File(ctx.cacheDir, "romm-upload.zip")
-                    try { zipFolder(f, zip); upload(ctx, pid, f.name + ".zip", zip, report(zip)) } finally { zip.delete() }
-                } else upload(ctx, pid, f.name, f, report(f))
+                    try { zipFolder(f, zip); upload(ctx, pid, f.name + ".zip", zip, assembling, report(zip)) } finally { zip.delete() }
+                } else upload(ctx, pid, f.name, f, assembling, report(f))
                 romsUp++; History.add(ctx, "rom_up", rom.optString("name").ifEmpty { f.name }, sys, ms = System.currentTimeMillis() - t0, size = romSize, path = f.path)
             } catch (e: Exception) { errors.put("${f.name}: ${e.message}"); Logs.e("romm", "Upload ${f.name}", e) }
             done += romSize
@@ -308,7 +309,7 @@ object RommSync {
 
     /** uploads [f] in [CHUNK]-sized pieces, [PARALLEL] at a time (RomM stores each chunk by index);
      *  [progress] gets the bytes on the wire so far, updated every 256 KB */
-    internal fun upload(ctx: Context, platformId: Int, name: String, f: File, progress: (Long) -> Unit) {
+    internal fun upload(ctx: Context, platformId: Int, name: String, f: File, onAssemble: () -> Unit = {}, progress: (Long) -> Unit) {
         val size = f.length()
         val chunks = ((size + CHUNK - 1) / CHUNK).toInt()
         val id = Romm.uploadStart(ctx, platformId, name, size, chunks)
@@ -334,6 +335,7 @@ object RommSync {
         }
         workers.forEach { it.join() }
         failure.get()?.let { throw it }
+        onAssemble()
         Romm.uploadComplete(ctx, id)
     }
 
