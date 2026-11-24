@@ -122,7 +122,8 @@ fun CodePad(onClose: () -> Unit, onDone: (String) -> Unit) {
     var code by remember { mutableStateOf("") }
     val box = remember { FocusRequester() }
     LaunchedEffect(Unit) { delay(150); runCatching { box.requestFocus() } }
-    fun press(i: Int) { if (code.length < 8) { code += i; if (code.length == 8) onDone(code) } }
+    // handed on as digits 1–8 (what Online.normalize reads); the internal 0–7 lost every ↑
+    fun press(i: Int) { if (code.length < 8) { code += i; if (code.length == 8) onDone(code.map { (it - '0' + 1).toString() }.joinToString("")) } }
     Panel(onClose, Modifier.focusRequester(box).focusable().onPreviewKeyEvent { e ->
         val i = when (e.key) {
             Key.DirectionUp -> 0; Key.DirectionDown -> 1; Key.DirectionLeft -> 2; Key.DirectionRight -> 3
