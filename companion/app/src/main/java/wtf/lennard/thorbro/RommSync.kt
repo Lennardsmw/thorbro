@@ -124,6 +124,22 @@ object RommSync {
     private fun uploadedFile(ctx: Context) = File(ctx.filesDir, "romm-saves-uploaded.json")
     private fun uploaded(ctx: Context): JSONObject = runCatching { JSONObject(uploadedFile(ctx).readText()) }.getOrDefault(JSONObject())
 
+    // ---------- what RomM still needs ----------
+
+    /** games this Thor has uploaded ("slug/file" -> size): RomM only lists them after its next scan, so a restarted
+     *  batch would otherwise send them again */
+    private fun ledgerFile(ctx: Context) = File(ctx.filesDir, "romm-roms-uploaded.json")
+    private val ledgerLock = Any()
+    private fun ledger(ctx: Context): JSONObject = synchronized(ledgerLock) { runCatching { JSONObject(ledgerFile(ctx).readText()) }.getOrDefault(JSONObject()) }
+    private fun remember(ctx: Context, slug: String, file: String, size: Long) = synchronized(ledgerLock) {
+        val l = ledger(ctx).put("$slug/$file", size); ledgerFile(ctx).writeText(l.toString())
+    }
+    /** not in RomM, not uploaded by us already, and not an empty leftover file */
+    private fun missing(rom: JSONObject, slug: String, have: Map<String, Int>, led: JSONObject): Boolean {
+        val file = rom.getString("file"); val size = rom.optLong("size")
+        return size > 0 && file !in have && led.optLong("$slug/$file", -1L) != size
+    }
+
     // ---------- plan + run ----------
 
     fun plan(ctx: Context): JSONObject {
@@ -132,7 +148,8 @@ object RommSync {
         for ((sys, roms) in localSystems(ctx)) {
             val pid = bySlug[slugFor(sys)]
             val have = pid?.let { remoteFiles[it] } ?: emptyMap()
-            val missing = roms.filter { it.getString("file") !in have }
+            val led = ledger(ctx)
+            val missing = roms.filter { missing(it, slugFor(sys), have, led) }
             systems.put(JSONObject().put("system", sys).put("slug", slugFor(sys)).put("local", roms.size)
                 .put("missing", missing.size).put("missingSize", missing.sumOf { it.getLong("size") }).put("inRomm", roms.size - missing.size))
         }
@@ -148,10 +165,12 @@ object RommSync {
     @Volatile var current: Jobs.Job? = null
 
     /** starts the upload in the background service process; keeps running when you switch apps */
-    fun start(ctx: Context, systems: Set<String>, withSaves: Boolean): Jobs.Job {
+    /** [systems] null = every console RomM is missing games of; the job starts at once and works that out itself */
+    fun start(ctx: Context, systems: Set<String>?, withSaves: Boolean): Jobs.Job {
         current?.takeIf { !it.done }?.let { return it }
         val app = ctx.applicationContext
         val j = Jobs.start("RomM-Abgleich") { job ->
+            job.message = "Verbinde mit RomM …"
             Transfers.begin(app)
             val ticker = kotlin.concurrent.thread(isDaemon = true) {
                 while (!job.done) { Progress.show(app, "Spiele zu RomM", job.progress, job.message); runCatching { Thread.sleep(2000) } }
@@ -165,13 +184,17 @@ object RommSync {
         return j
     }
 
-    fun run(ctx: Context, systems: Set<String>, withSaves: Boolean, job: Jobs.Job): JSONObject {
+    fun run(ctx: Context, systems: Set<String>?, withSaves: Boolean, job: Jobs.Job): JSONObject {
         var romsUp = 0; var savesUp = 0; var savesDown = 0; val errors = JSONArray()
+        job.message = "Verbinde mit RomM …"
         var (bySlug, remoteFiles) = remote(ctx)
-        val todo = localSystems(ctx).filter { it.first in systems }.flatMap { (sys, roms) ->
+        job.message = "Prüfe, was RomM fehlt …"
+        val led = ledger(ctx)
+        val todo = localSystems(ctx).filter { systems == null || it.first in systems }.flatMap { (sys, roms) ->
             val have = bySlug[slugFor(sys)]?.let { remoteFiles[it] } ?: emptyMap()
-            roms.filter { it.getString("file") !in have }.map { sys to it }
+            roms.filter { missing(it, slugFor(sys), have, led) }.map { sys to it }
         }
+        if (todo.isEmpty()) job.message = "RomM hat schon alle Spiele"
         val total = todo.sumOf { it.second.getLong("size") }.coerceAtLeast(1)
         var done = 0L
         job.total = todo.size
@@ -199,6 +222,7 @@ object RommSync {
                     val zip = File(ctx.cacheDir, "romm-upload.zip")
                     try { zipFolder(f, zip); upload(ctx, pid, f.name + ".zip", zip, assembling, report(zip)) } finally { zip.delete() }
                 } else upload(ctx, pid, f.name, f, assembling, report(f))
+                remember(ctx, slug, rom.getString("file"), romSize)
                 romsUp++; History.add(ctx, "rom_up", rom.optString("name").ifEmpty { f.name }, sys, ms = System.currentTimeMillis() - t0, size = romSize, path = f.path)
             } catch (e: Exception) { errors.put("${f.name}: ${e.message}"); Logs.e("romm", "Upload ${f.name}", e) }
             done += romSize
@@ -307,36 +331,61 @@ object RommSync {
         }
     }
 
+    /** the unfinished upload, so a restart (app closed, Thor asleep) carries on at the next chunk; RomM keeps a session 24 h */
+    private fun sessionFile(ctx: Context) = File(ctx.filesDir, "romm-upload-session.json")
+
     /** uploads [f] in [CHUNK]-sized pieces, [PARALLEL] at a time (RomM stores each chunk by index);
      *  [progress] gets the bytes on the wire so far, updated every 256 KB */
     internal fun upload(ctx: Context, platformId: Int, name: String, f: File, onAssemble: () -> Unit = {}, progress: (Long) -> Unit) {
         val size = f.length()
         val chunks = ((size + CHUNK - 1) / CHUNK).toInt()
-        val id = Romm.uploadStart(ctx, platformId, name, size, chunks)
-        val sent = java.util.concurrent.atomic.AtomicLong()
-        val nextChunk = java.util.concurrent.atomic.AtomicInteger()
+        val key = "$platformId|$name|${f.path}|$size|${f.lastModified()}"
+        val old = runCatching { JSONObject(sessionFile(ctx).readText()) }.getOrNull()
+            ?.takeIf { it.optString("key") == key && System.currentTimeMillis() - it.optLong("t") < 20 * 3600_000L }
+        val done = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
+        val id = if (old != null) {
+            old.optJSONArray("done")?.let { a -> for (i in 0 until a.length()) done += a.getInt(i) }
+            old.getString("id")
+        } else Romm.uploadStart(ctx, platformId, name, size, chunks)
+        val sessionLock = Any()
+        fun saveSession() = synchronized(sessionLock) {
+            runCatching { sessionFile(ctx).writeText(JSONObject().put("key", key).put("id", id).put("t", old?.optLong("t") ?: System.currentTimeMillis())
+                .put("done", JSONArray(done.sorted())).toString()) }
+        }
+        saveSession()
+        fun len(i: Int) = minOf(CHUNK.toLong(), size - i.toLong() * CHUNK)
+        val sent = java.util.concurrent.atomic.AtomicLong(done.sumOf { len(it) })
+        if (sent.get() > 0) progress(sent.get())
+        val todo = java.util.concurrent.ConcurrentLinkedQueue((0 until chunks).filter { it !in done })
         val failure = java.util.concurrent.atomic.AtomicReference<Throwable>()
-        val workers = (1..minOf(PARALLEL, chunks)).map {
+        val workers = (1..minOf(PARALLEL, todo.size)).map {
             kotlin.concurrent.thread(name = "romm-up-$it") {
                 try {
                     RandomAccessFile(f, "r").use { r ->
                         val buf = ByteArray(CHUNK)
                         while (failure.get() == null) {
-                            val i = nextChunk.getAndIncrement()
-                            if (i >= chunks) break
+                            val i = todo.poll() ?: break
                             r.seek(i.toLong() * CHUNK)
-                            val n = minOf(CHUNK.toLong(), size - i.toLong() * CHUNK).toInt()
+                            val n = len(i).toInt()
                             r.readFully(buf, 0, n)
                             Romm.uploadChunk(ctx, id, i, buf, n) { d -> progress(sent.addAndGet(d.toLong())) }
+                            done += i; saveSession()
                         }
                     }
                 } catch (e: Throwable) { failure.compareAndSet(null, e) }
             }
         }
         workers.forEach { it.join() }
-        failure.get()?.let { throw it }
+        failure.get()?.let { e ->
+            // the server forgot the session (expired, RomM restarted): start this game over once
+            if (old != null && e.message?.contains("HTTP 404") == true) {
+                sessionFile(ctx).delete(); return upload(ctx, platformId, name, f, onAssemble, progress)
+            }
+            throw e
+        }
         onAssemble()
         Romm.uploadComplete(ctx, id)
+        sessionFile(ctx).delete()
     }
 
     internal fun zipFolder(dir: File, zip: File) = ZipOutputStream(zip.outputStream().buffered()).use { z ->

@@ -140,11 +140,7 @@ fun SyncScreen() {
                 Icons.Filled.CloudUpload) {
                 if (uploading || !connected) return@ConsoleTile
                 scope.launch {
-                    val systems = withContext(Dispatchers.IO) {
-                        runCatching { RommSync.plan(ctx).getJSONArray("systems").objs().filter { it.getInt("missing") > 0 }.map { it.getString("system") }.toSet() }
-                            .getOrDefault(emptySet())
-                    }
-                    if (systems.isEmpty()) note = "RomM hat schon alle Spiele" else RommSync.start(ctx, systems, true)
+                    RommSync.start(ctx, null, true)
                     tick++
                 }
             }
