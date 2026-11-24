@@ -39,7 +39,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import wtf.lennard.thorbro.Library
+import wtf.lennard.thorbro.Media
 import org.json.JSONObject
 import wtf.lennard.thorbro.Background
 
@@ -55,28 +63,58 @@ fun BackgroundOverlay(modifier: Modifier = Modifier) {
     }
 }
 
+/** the game's picture: RomM cover for downloads, boxart (or the console icon) for local games */
 @Composable
-private fun ActivityCard(a: JSONObject) {
+internal fun gameImage(a: JSONObject): java.io.File? {
+    val ctx = LocalContext.current
+    val romId = a.optInt("romId"); val file = a.optString("file"); val sys = a.optString("system")
+    val img by produceState<java.io.File?>(null, romId, file) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                when {
+                    romId > 0 -> Library.coverFile(ctx, romId)
+                    file.isNotEmpty() && sys.isNotEmpty() -> Media.coverForFile(ctx, sys, java.io.File(file)) ?: Media.icon(ctx, sys)
+                    else -> null
+                }
+            }.getOrNull()
+        }
+    }
+    return img
+}
+
+/** [icon] game title / kind n/m, then speed · size · time left, then the progress bar */
+@Composable
+internal fun ActivityCard(a: JSONObject) {
     val done = a.optBoolean("done")
     val err = a.optString("error").takeIf { it.isNotEmpty() && it != "null" }
-    val p = a.optDouble("progress", 0.0).toFloat().coerceIn(0f, 1f)
+    val p = a.optDouble(if (a.has("gameProgress")) "gameProgress" else "progress", 0.0).toFloat().coerceIn(0f, 1f)
     val total = a.optInt("total")
+    val game = a.optString("game").takeIf { !done && it.isNotEmpty() }
+    val img = if (game != null) gameImage(a) else null
     val shape = RoundedCornerShape(16.dp)
     Column(Modifier.fillMaxWidth().clip(shape).background(Color(0xE6101114)).border(1.dp, GlassLine, shape).padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(when { err != null && done -> Icons.Filled.ErrorOutline; done -> Icons.Filled.CheckCircle
-                a.optString("kind") == "download" -> Icons.Filled.CloudDownload; else -> Icons.Filled.CloudUpload },
-                null, Modifier.size(20.dp), tint = if (err != null && done) Bad else if (done) Ok else Color.White)
-            Spacer(Modifier.width(8.dp))
-            Text(a.optString("title"), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1)
-            if (total > 1 || (total == 1 && !done)) Text("${a.optInt("index")}/$total", fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        }
-        Text(a.optString("name"), fontSize = 13.sp, color = Color(0xD9FFFFFF), maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
-        if (!done) {
-            a.optString("step").takeIf { it.isNotEmpty() && it != a.optString("name") }?.let {
-                Text(it, fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Box(Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)).background(Color(0x22FFFFFF)), contentAlignment = Alignment.Center) {
+                if (img != null) Img(img, 160, Modifier.fillMaxSize(), ContentScale.Crop, game)
+                else Icon(when { err != null && done -> Icons.Filled.ErrorOutline; done -> Icons.Filled.CheckCircle
+                    a.optString("kind") == "download" -> Icons.Filled.CloudDownload; else -> Icons.Filled.CloudUpload },
+                    null, Modifier.size(24.dp), tint = if (err != null && done) Bad else if (done) Ok else Color.White)
             }
-            Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(game ?: a.optString("title"), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(if (game != null) a.optString("title") + (if (total > 1) " · ${a.optInt("index")}/$total" else "") +
+                    (a.optString("batch").takeIf { it.isNotEmpty() && it != "null" }?.let { " · $it" } ?: "")
+                    else a.optString("name"), fontSize = 12.sp, color = Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            if (game == null && (total > 1 || (total == 1 && !done))) Text("${a.optInt("index")}/$total", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        }
+        if (!done) {
+            val transfer = a.optString("transfer").takeIf { it.isNotEmpty() && it != "null" }
+            val step = a.optString("step").takeIf { it.isNotEmpty() && it != a.optString("name") }
+            Text(transfer ?: step ?: a.optString("name").takeIf { game != null && it != game } ?: "",
+                fontSize = 13.sp, color = Color(0xD9FFFFFF), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
+            Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f).height(5.dp).clip(RoundedCornerShape(3.dp)).background(Color(0x33FFFFFF))) {
                     Box(Modifier.fillMaxWidth(p).height(5.dp).background(Accent))
                 }

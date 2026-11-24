@@ -37,7 +37,7 @@ object Library {
     private fun connected(ctx: Context) = Romm.status(ctx).optBoolean("connected")
 
     /**
-     * Per local game path: {inRomm, romId, save} with save = "none" (no save found), "synced" (RomM has the
+     * Per local game path: {inRomm, romId, uploaded, save} with uploaded = sent from this Thor, RomM has not scanned it yet; save = "none" (no save found), "synced" (RomM has the
      * current one), "pending" (changed since the last upload) or "local" (never uploaded).
      */
     fun status(ctx: Context, refresh: Boolean = false): JSONObject {
@@ -45,6 +45,7 @@ object Library {
         if (!out.getBoolean("connected")) return out.put("games", JSONObject())
         val rem = try { remote(ctx, refresh) } catch (e: Exception) { return out.put("error", e.message).put("games", JSONObject()) }
         val st = RommSync.state(ctx)
+        val led = RommSync.ledger(ctx)
         val saves = runCatching { RommSync.localSaves(ctx) }.getOrDefault(emptyList()).groupBy { it.rom.optString("path") }
         val games = JSONObject()
         val sys = Roms.scan(ctx, false).getJSONArray("systems")
@@ -62,7 +63,8 @@ object Library {
                     mine.any { st.has(RommSync.stateKey(ctx, it)) } -> "pending"
                     else -> "local"
                 }
-                games.put(r.getString("path"), JSONObject().put("inRomm", hit != null).put("romId", hit?.optInt("id")).put("save", save))
+                games.put(r.getString("path"), JSONObject().put("inRomm", hit != null).put("romId", hit?.optInt("id")).put("save", save)
+                    .put("uploaded", hit == null && RommSync.uploadedByUs(id, r, led)))
             }
         }
         return out.put("games", games)
@@ -88,6 +90,7 @@ object Library {
         var rem = remote(ctx, true)
         for ((sys, rom) in items) {
             val f = File(rom.getString("path"))
+            job.game(rom.optString("name").ifEmpty { f.nameWithoutExtension }, sys, file = f.path)
             if (rem.find(sys, f.name) != null) { done += rom.getLong("size"); continue }
             val slug = RommSync.slugFor(sys)
             val pid = rem.bySlug[slug] ?: Romm.createPlatform(ctx, slug)
@@ -95,8 +98,8 @@ object Library {
             if (f.isDirectory) {
                 val zip = File(ctx.cacheDir, "offload.zip")
                 RommSync.zipFolder(f, zip)
-                try { RommSync.upload(ctx, pid, f.name + ".zip", zip) { n -> job.progress = 0.9 * (done + n) / total } } finally { zip.delete() }
-            } else RommSync.upload(ctx, pid, f.name, f) { n -> job.progress = 0.9 * (done + n) / total }
+                try { RommSync.upload(ctx, pid, f.name + ".zip", zip) { n -> job.progress = 0.9 * (done + n) / total; job.bytes(done + n, total); job.gameBytes(n, zip.length()) } } finally { zip.delete() }
+            } else RommSync.upload(ctx, pid, f.name, f) { n -> job.progress = 0.9 * (done + n) / total; job.bytes(done + n, total); job.gameBytes(n, f.length()) }
             done += rom.getLong("size")
         }
         job.message = "Spielstände hochladen"; job.progress = 0.92
@@ -177,7 +180,11 @@ object Library {
         downloads[romId]?.takeIf { !it.done }?.let { return it }
         val app = ctx.applicationContext
         val j = Jobs.start("RomM-Download") { job ->
-            try { Romm.download(app, romId, romsRoot(app), job).also { invalidate(); History.add(app, "download", job.message, it.optString("system")) } }
+            val t0 = System.currentTimeMillis()
+            job.romId = romId
+            try { Romm.download(app, romId, romsRoot(app), job).also { invalidate()
+                History.add(app, "download", it.optString("name").ifEmpty { job.message }, it.optString("system"),
+                    ms = System.currentTimeMillis() - t0, romId = romId, size = job.bytesTotal) } }
             finally { Progress.done(app, "Download fertig", job.message) }
         }
         downloads[romId] = j

@@ -1,6 +1,13 @@
 package wtf.lennard.thorbro.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -10,7 +17,9 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.AddLink
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.History
@@ -57,16 +66,6 @@ private fun ago(t: Long): String {
     }
 }
 
-private val kinds = mapOf(
-    "save_up" to Triple(Icons.Filled.CloudUpload, "Spielstand hochgeladen", true),
-    "save_down" to Triple(Icons.Filled.CloudDownload, "Spielstand von RomM geholt", true),
-    "rom_up" to Triple(Icons.Filled.Upload, "Spiel zu RomM hochgeladen", false),
-    "offload" to Triple(Icons.Filled.Inventory2, "Ausgelagert", false),
-    "download" to Triple(Icons.Filled.Download, "Aus RomM geladen", false),
-    "restore" to Triple(Icons.Filled.Restore, "Spielstand zurückgesetzt", true),
-    "save_install" to Triple(Icons.Filled.Download, "Spielstand installiert", true),
-)
-
 /** "Ordner „Saves“ (SD)" means nothing to a player; name it after the console/emulator instead */
 private fun friendly(l: JSONObject): String {
     val emu = l.optString("emulator"); val name = l.optString("name"); val id = l.optString("id")
@@ -105,8 +104,12 @@ fun SyncScreen() {
     var profiles by remember { mutableStateOf(emptyList<JSONObject>()) }
     var profileOpen by remember { mutableStateOf<JSONObject?>(null) }
     var profileAdd by remember { mutableStateOf(false) }
+    var serverOpen by remember { mutableStateOf(false) }
+    var live by remember { mutableStateOf(emptyList<JSONObject>()) }
+    WhileVisible { while (true) { live = wtf.lennard.thorbro.Background.list().objs(); delay(500) } }
+    LaunchedEffect(live.count { !it.optBoolean("done") }) { tick++ } // a finished game shows up in the list right away
     LaunchedEffect(tick) { profiles = withContext(Dispatchers.IO) { wtf.lennard.thorbro.Profiles.json(ctx).optJSONArray("profiles").objs() } }
-    LaunchedEffect(tick) { history = withContext(Dispatchers.IO) { History.list(ctx, 40) } }
+    LaunchedEffect(tick) { history = withContext(Dispatchers.IO) { History.list(ctx, 200) } }
     LaunchedEffect(tick / 8) { saves = withContext(Dispatchers.IO) { runCatching { Saves.overview(ctx) }.getOrNull() } }
     val st = remember(tick) { Romm.status(ctx) }
     val connected = st.optBoolean("connected")
@@ -117,7 +120,7 @@ fun SyncScreen() {
     TileGrid(first) {
         header("RomM", if (connected) st.optString("url").removePrefix("https://").removePrefix("http://") +
             (if (st.optBoolean("viaLan")) " · über Heimnetz (schnell)" else "") +
-            (lastSave?.let { " · letzter Spielstand-Sync ${ago(it.optLong("t"))}" } ?: "") else "nicht verbunden – im Browser unter Bibliothek koppeln")
+            (lastSave?.let { " · letzter Spielstand-Sync ${ago(it.optLong("t"))}" } ?: "") else "nicht verbunden – unten „RomM-Server hinzufügen“")
         item {
             ConsoleTile(if (busy.isNotEmpty()) busy else "Jetzt synchronisieren", note.ifEmpty { "Spielstände hoch und runter" },
                 Icons.Filled.Sync, accent = true, modifier = Modifier.firstFocus(first, true)) {
@@ -137,11 +140,7 @@ fun SyncScreen() {
                 Icons.Filled.CloudUpload) {
                 if (uploading || !connected) return@ConsoleTile
                 scope.launch {
-                    val systems = withContext(Dispatchers.IO) {
-                        runCatching { RommSync.plan(ctx).getJSONArray("systems").objs().filter { it.getInt("missing") > 0 }.map { it.getString("system") }.toSet() }
-                            .getOrDefault(emptySet())
-                    }
-                    if (systems.isEmpty()) note = "RomM hat schon alle Spiele" else RommSync.start(ctx, systems, true)
+                    RommSync.start(ctx, null, true)
                     tick++
                 }
             }
@@ -150,7 +149,10 @@ fun SyncScreen() {
             ConsoleTile(if (auto) "Auto-Sync an" else "Auto-Sync aus", if (auto) "lädt nach jedem Speichern hoch" else "nur per Knopf",
                 if (auto) Icons.Filled.CloudDone else Icons.Filled.SyncDisabled, accent = auto) { auto = !auto; RommSync.setAuto(ctx, auto) }
         }
-        if (!connected) item { ConsoleTile("Nicht verbunden", "", Icons.Filled.CloudOff) {} }
+        item {
+            if (connected) ConsoleTile("RomM-Server", st.optString("url").removePrefix("https://").removePrefix("http://"), Icons.Filled.Dns) { serverOpen = true }
+            else ConsoleTile("RomM-Server hinzufügen", "Adresse eingeben, Code in RomM bestätigen", Icons.Filled.AddLink, accent = true) { serverOpen = true }
+        }
 
         profileTiles(profiles) { p -> if (p == null) profileAdd = true else profileOpen = p }
 
@@ -168,12 +170,22 @@ fun SyncScreen() {
                 scope.launch { withContext(Dispatchers.IO) { runCatching { Saves.backup(ctx, null) } }; note = "gesichert"; tick += 8 }
             }
         }
-        header("Verlauf", if (entries.isEmpty()) "noch nichts passiert" else "die letzten ${minOf(entries.size, 12)} Vorgänge")
-        entries.take(12).forEach { e ->
-            item(span = { GridItemSpan(maxLineSpan) }) { HistoryRow(e) }
+        val transfers = entries.filter { it.optString("kind") in listOf("download", "rom_up") }
+        val running = live.filter { !it.optBoolean("done") }
+        header("Downloads", when {
+            running.isNotEmpty() -> "läuft gerade · darunter die letzten Spiele mit Dauer"
+            transfers.isEmpty() -> "noch keine Spiele geladen"
+            else -> "die letzten ${minOf(transfers.size, 20)} Spiele · wie lange es gedauert hat"
+        })
+        // what is moving right now: the same card as the bubble top right (cover, title, speed + size, bar)
+        running.forEach { a -> item(span = { GridItemSpan(maxLineSpan) }) { ActivityCard(a) } }
+        transfers.take(20).forEach { e ->
+            item(span = { GridItemSpan(maxLineSpan) }) { TransferRow(e) }
         }
 
     }
+
+    if (serverOpen) RommServerDialog(onDone = { note = it; serverOpen = false; tick++ }) { serverOpen = false; tick++ }
 
     ProfileDialogs(profileOpen, profileAdd, onDone = { note = it; tick++ }) { profileOpen = null; profileAdd = false }
 
@@ -194,18 +206,51 @@ fun SyncScreen() {
     }
 }
 
+/** a game's path on the Thor by console and name (entries from before the history kept the path) */
+private fun localPath(ctx: android.content.Context, sys: String, name: String): String? {
+    val s = wtf.lennard.thorbro.Roms.scan(ctx, false).optJSONArray("systems").objs().firstOrNull { it.optString("id") == sys } ?: return null
+    val key = name.substringBefore(" (").lowercase()
+    val roms = s.optJSONArray("roms").objs()
+    return (roms.firstOrNull { it.optString("name") == name } ?: roms.firstOrNull { it.optString("file").lowercase().startsWith(key) })?.optString("path")
+}
+
+/** one downloaded (or uploaded) game: cover, name, size, how long it took */
 @Composable
-private fun HistoryRow(e: JSONObject) {
-    val (icon, label, _) = kinds[e.optString("kind")] ?: Triple(Icons.Filled.History, e.optString("kind"), false)
+private fun TransferRow(e: JSONObject) {
+    val ctx = LocalContext.current
+    val down = e.optString("kind") == "download"
+    val romId = e.optInt("romId")
+    val file = e.optString("file"); val sys = e.optString("system")
+    val cover by androidx.compose.runtime.produceState<File?>(null, romId, file) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                when {
+                    romId > 0 -> wtf.lennard.thorbro.Library.coverFile(ctx, romId)
+                    file.isNotEmpty() && sys.isNotEmpty() -> wtf.lennard.thorbro.Media.coverForFile(ctx, sys, File(file))
+                    sys.isNotEmpty() -> localPath(ctx, sys, e.optString("name"))?.let { wtf.lennard.thorbro.Media.coverForFile(ctx, sys, File(it)) }
+                    else -> null
+                }
+            }.getOrNull()
+        }
+    }
     FocusCard(Modifier.fillMaxWidth(), onClick = {}) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null, Modifier.size(26.dp))
+            Box(Modifier.size(52.dp).clip(RoundedCornerShape(10.dp)).background(Color(0x22FFFFFF)), contentAlignment = Alignment.Center) {
+                if (cover != null) Img(cover, 160, Modifier.fillMaxSize(), ContentScale.Crop, e.optString("name"))
+                else Icon(if (down) Icons.Filled.Download else Icons.Filled.Upload, null, Modifier.size(26.dp))
+            }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(e.optString("name").substringBefore(" (").ifEmpty { "–" }, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(label + (e.optString("system").takeIf { it.isNotEmpty() }?.let { " · $it" } ?: ""), fontSize = 13.sp, color = Muted, maxLines = 1)
+                Text((if (down) "Aus RomM geladen" else "Zu RomM hochgeladen") +
+                    (e.optString("system").takeIf { it.isNotEmpty() }?.let { " · $it" } ?: "") +
+                    (e.optLong("size").takeIf { it > 0 }?.let { " · ${fmtBytes(it)}" } ?: ""), fontSize = 13.sp, color = Muted, maxLines = 1)
             }
-            Text(ago(e.optLong("t")), fontSize = 13.sp, color = Muted)
+            Column(horizontalAlignment = Alignment.End) {
+                val ms = e.optLong("ms")
+                if (ms > 0) Text("in ${wtf.lennard.thorbro.Jobs.dur((ms + 999) / 1000)}", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text(ago(e.optLong("t")), fontSize = 13.sp, color = Muted)
+            }
         }
     }
 }

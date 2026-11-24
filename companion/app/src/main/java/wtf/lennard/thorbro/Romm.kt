@@ -29,22 +29,41 @@ object Romm {
     @Volatile private var pending: JSONObject? = null
 
     // ---------- home network shortcut ----------
-    /** RomM's address inside the home network (e.g. http://192.168.178.159:6664); used whenever it answers, so
-     *  uploads and downloads do not go out to the internet and back */
-    fun lanUrl(ctx: Context) = (Prefs.of(ctx).getString("rommLanUrl", "") ?: "").trimEnd('/')
+    /** RomM's address inside the home network; used whenever it answers and is the same server as [url], so
+     *  uploads and downloads do not go out to the internet and back. Unset = the home RomM on the vm;
+     *  an empty string turns the shortcut off. */
+    private const val DEFAULT_LAN = "http://192.168.178.159:6664"
+    fun lanUrl(ctx: Context) = (Prefs.of(ctx).getString("rommLanUrl", null) ?: DEFAULT_LAN).trimEnd('/')
     fun setLanUrl(ctx: Context, u: String) { Prefs.of(ctx).edit().putString("rommLanUrl", u.trim().trimEnd('/')).apply(); lanCheck = 0L to false }
     @Volatile private var lanCheck = 0L to false
+    /** the public server's heartbeat fingerprint, so a stranger's box at the same LAN address never gets the token */
+    @Volatile private var publicPrint: String? = null
+
+    private fun heartbeatPrint(base: String, timeout: Int, read: Int = timeout): String? = runCatching {
+        (URL("$base/api/heartbeat").openConnection() as HttpURLConnection).run {
+            connectTimeout = timeout; readTimeout = read
+            if (responseCode != 200) return@run null
+            val j = JSONObject(inputStream.bufferedReader().use { it.readText() })
+            j.getJSONObject("SYSTEM").optString("VERSION") + "|" + j.optJSONObject("METADATA_SOURCES")?.toString()
+        }
+    }.getOrNull()
 
     private fun fastBase(ctx: Context): String? {
         val lan = lanUrl(ctx).ifEmpty { return null }
+        val pub = url(ctx)
+        if (lan == pub) return null
         val (at, ok) = lanCheck
         if (System.currentTimeMillis() - at < 60_000) return if (ok) lan else null
-        val reach = runCatching {
-            (URL("$lan/api/heartbeat").openConnection() as HttpURLConnection).run { connectTimeout = 1500; readTimeout = 1500; responseCode == 200 }
-        }.getOrDefault(false)
+        val reach = heartbeatPrint(lan, 1500, 6000)?.let { local ->
+            val remote = publicPrint ?: heartbeatPrint(pub, 5000)?.also { publicPrint = it }
+            remote != null && remote == local
+        } ?: false
         lanCheck = System.currentTimeMillis() to reach
         return if (reach) lan else null
     }
+
+    /** forget the LAN check, e.g. after a failed request when the device just left home */
+    fun recheckLan() { lanCheck = 0L to false }
 
     fun status(ctx: Context): JSONObject = JSONObject().put("url", url(ctx)).put("connected", token(ctx).isNotEmpty())
         .put("lanUrl", lanUrl(ctx)).put("viaLan", lanCheck.second && lanUrl(ctx).isNotEmpty())
@@ -167,6 +186,7 @@ object Romm {
         if (c.responseCode !in listOf(200, 206)) error("RomM antwortet mit HTTP ${c.responseCode}")
         val append = c.responseCode == 206
         job.message = name
+        job.game(r.optString("name").ifEmpty { name }, system, romId)
         Transfers.begin(ctx)
         try {
             c.inputStream.use { inp ->
@@ -176,7 +196,7 @@ object Romm {
                     while (true) {
                         val n = inp.read(buf); if (n < 0) break
                         out.write(buf, 0, n); done += n
-                        if (total > 0) job.progress = done.toDouble() / total * (if (multi) 0.9 else 1.0)
+                        if (total > 0) { job.progress = done.toDouble() / total * (if (multi) 0.9 else 1.0); job.bytes(done, total); job.gameBytes(done, total) }
                     }
                 }
             }
@@ -189,6 +209,7 @@ object Romm {
         }
         Roms.invalidate()
         return JSONObject().put("path", if (multi) File(dir, name).path else target.path).put("system", system)
+            .put("name", r.optString("name").ifEmpty { name })
     }
 
     // ---------- raw API for syncing ----------
@@ -219,12 +240,37 @@ object Romm {
         return j.optString("upload_id").ifEmpty { j.optString("id") }.ifEmpty { error("RomM: keine upload_id") }
     }
 
-    fun uploadChunk(ctx: Context, uploadId: String, index: Int, data: ByteArray, len: Int) {
-        val c = open(ctx, "PUT", "/api/roms/upload/$uploadId", headers = mapOf("x-chunk-index" to "$index"), raw = data, rawLen = len)
-        read(c)
+    /** sends one chunk in small slices so [sent] can report progress while it is on the wire; retries a dropped
+     *  connection (e.g. leaving home mid-upload: the retry goes out over the public address) */
+    fun uploadChunk(ctx: Context, uploadId: String, index: Int, data: ByteArray, len: Int, sent: (Int) -> Unit = {}) {
+        var attempt = 0
+        while (true) {
+            var reported = 0
+            try {
+                val c = open(ctx, "PUT", "/api/roms/upload/$uploadId", headers = mapOf("x-chunk-index" to "$index",
+                    "Content-Type" to "application/octet-stream"))
+                c.doOutput = true
+                c.setFixedLengthStreamingMode(len)
+                c.outputStream.use { o ->
+                    var off = 0
+                    while (off < len) {
+                        val n = minOf(256 * 1024, len - off)
+                        o.write(data, off, n); off += n; reported += n; sent(n)
+                    }
+                }
+                read(c)
+                return
+            } catch (e: java.io.IOException) {
+                if (reported > 0) sent(-reported)
+                if (++attempt >= 4) throw e
+                recheckLan()
+                Thread.sleep(1000L * attempt)
+            }
+        }
     }
 
-    fun uploadComplete(ctx: Context, uploadId: String) { read(open(ctx, "POST", "/api/roms/upload/$uploadId/complete")) }
+    /** RomM glues the chunks into the final file before it answers: on a busy server that takes minutes for a big game */
+    fun uploadComplete(ctx: Context, uploadId: String) { read(open(ctx, "POST", "/api/roms/upload/$uploadId/complete", readTimeout = 30 * 60_000)) }
 
     /** returns RomM's save object (id, updated_at …) */
     fun uploadSave(ctx: Context, romId: Int, f: File, emulator: String, contentHash: String, slot: String? = null): JSONObject {
@@ -271,11 +317,11 @@ object Romm {
     // ---------- HTTP ----------
 
     private fun open(ctx: Context, method: String, path: String, body: String? = null, auth: Boolean = true, rangeFrom: Long = 0,
-                     headers: Map<String, String> = emptyMap(), raw: ByteArray? = null, rawLen: Int = 0): HttpURLConnection {
+                     headers: Map<String, String> = emptyMap(), raw: ByteArray? = null, rawLen: Int = 0, readTimeout: Int = 120_000): HttpURLConnection {
         val base = (if (auth) fastBase(ctx) else null) ?: url(ctx).ifEmpty { error("Keine RomM-Adresse eingetragen") }
         val c = URL(if (path.startsWith("http")) path else base + path).openConnection() as HttpURLConnection
         c.requestMethod = method
-        c.connectTimeout = 10_000; c.readTimeout = 120_000
+        c.connectTimeout = 10_000; c.readTimeout = readTimeout
         c.setRequestProperty("User-Agent", "ThorBro")
         c.setRequestProperty("Accept", "application/json")
         if (auth) token(ctx).takeIf { it.isNotEmpty() }?.let { c.setRequestProperty("Authorization", "Bearer $it") }

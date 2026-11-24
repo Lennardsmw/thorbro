@@ -161,6 +161,16 @@ object Media {
         return if (download("$THUMBS/${enc(sys)}/Named_Boxarts/${enc(name)}.png", f)) f else null
     }
 
+    /** a local game's picture, same order as the Games screen: the frontend's scraped icon, then libretro boxart */
+    fun coverForFile(ctx: Context, systemId: String, f: File): File? = runCatching {
+        if (systemId == "ports") return@runCatching null
+        Cocoon.media(ctx, systemId, f.path, "icon") ?: run {
+            val r = JSONObject().put("file", f.name).put("dir", f.isDirectory).put("path", f.path)
+            val n = metaFor(ctx, systemId, listOf(r)).optJSONObject(f.path)?.optString("cover")?.takeIf { it.isNotEmpty() }
+            n?.let { cover(ctx, systemId, it) }
+        }
+    }.getOrNull()
+
     fun icon(ctx: Context, systemId: String): File? {
         // RomM's console icons first (crisp SVG, same look as the library), libretro's PNG as fallback
         val svg = File(dir(ctx, "icons"), "romm-$systemId.svg")
