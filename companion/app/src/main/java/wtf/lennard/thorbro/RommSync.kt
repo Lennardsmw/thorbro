@@ -20,6 +20,8 @@ object RommSync {
     fun slugFor(system: String) = toSlug[system] ?: system
 
     private const val CHUNK = 8 * 1024 * 1024
+    /** chunks in flight at once: one connection alone does not fill Wi-Fi 6 */
+    private const val PARALLEL = 4
 
     private fun localSystems(ctx: Context): List<Pair<String, List<JSONObject>>> {
         val s = Roms.scan(ctx, false).getJSONArray("systems")
@@ -173,21 +175,40 @@ object RommSync {
         val total = todo.sumOf { it.second.getLong("size") }.coerceAtLeast(1)
         var done = 0L
         job.total = todo.size
+        val started = System.currentTimeMillis()
+        var lastMsg = 0L
         for ((n, pair) in todo.withIndex()) {
             val (sys, rom) = pair
             job.index = n + 1
             val slug = slugFor(sys)
             val pid = bySlug[slug] ?: Romm.createPlatform(ctx, slug).also { bySlug = bySlug + (slug to it) }
             val f = File(rom.getString("path"))
+            val romSize = rom.getLong("size")
             job.message = "Lade ${f.name} hoch"
+            /** the file actually sent can differ from the listed size (zipped folders): scale it onto the rom's share */
+            fun report(file: File): (Long) -> Unit { val len = file.length().coerceAtLeast(1); return { sent ->
+                val now = done + sent * romSize / len
+                job.progress = now.toDouble() / total
+                val t = System.currentTimeMillis()
+                if (t - lastMsg > 1000) {
+                    lastMsg = t
+                    val bps = now * 1000.0 / (t - started).coerceAtLeast(1)
+                    val eta = if (bps > 0) ((total - now) / bps).toLong() else 0L
+                    job.message = "Lade ${f.name} hoch · ${"%.1f".format(bps / 1_000_000)} MB/s" +
+                        (if (Romm.status(ctx).optBoolean("viaLan")) " · Heimnetz" else "") +
+                        " · noch ${if (eta >= 3600) "${eta / 3600} h ${eta % 3600 / 60} min" else if (eta >= 60) "${eta / 60} min" else "$eta s"}"
+                }
+            } }
             try {
                 if (f.isDirectory) {
+                    job.message = "Packe ${f.name} …"
                     val zip = File(ctx.cacheDir, "romm-upload.zip")
-                    zipFolder(f, zip); upload(ctx, pid, f.name + ".zip", zip) { n -> job.progress = (done + n).toDouble() / total }; zip.delete()
-                } else upload(ctx, pid, f.name, f) { n -> job.progress = (done + n).toDouble() / total }
+                    try { zipFolder(f, zip); upload(ctx, pid, f.name + ".zip", zip, report(zip)) } finally { zip.delete() }
+                } else upload(ctx, pid, f.name, f, report(f))
                 romsUp++; History.add(ctx, "rom_up", rom.optString("name").ifEmpty { f.name }, sys)
             } catch (e: Exception) { errors.put("${f.name}: ${e.message}"); Logs.e("romm", "Upload ${f.name}", e) }
-            done += rom.getLong("size")
+            done += romSize
+            job.progress = done.toDouble() / total
         }
         if (withSaves) {
             // fetch first, then upload: a newer save from another device must not be overwritten
@@ -292,22 +313,39 @@ object RommSync {
         }
     }
 
+    /** uploads [f] in [CHUNK]-sized pieces, [PARALLEL] at a time (RomM stores each chunk by index);
+     *  [progress] gets the bytes on the wire so far, updated every 256 KB */
     internal fun upload(ctx: Context, platformId: Int, name: String, f: File, progress: (Long) -> Unit) {
-        val chunks = ((f.length() + CHUNK - 1) / CHUNK).toInt().coerceAtLeast(1)
-        val id = Romm.uploadStart(ctx, platformId, name, f.length(), chunks)
-        RandomAccessFile(f, "r").use { r ->
-            val buf = ByteArray(CHUNK)
-            for (i in 0 until chunks) {
-                r.seek(i.toLong() * CHUNK)
-                val n = r.read(buf).coerceAtLeast(0)
-                Romm.uploadChunk(ctx, id, i, buf, n)
-                progress(i.toLong() * CHUNK + n)
+        val size = f.length()
+        val chunks = ((size + CHUNK - 1) / CHUNK).toInt()
+        val id = Romm.uploadStart(ctx, platformId, name, size, chunks)
+        val sent = java.util.concurrent.atomic.AtomicLong()
+        val nextChunk = java.util.concurrent.atomic.AtomicInteger()
+        val failure = java.util.concurrent.atomic.AtomicReference<Throwable>()
+        val workers = (1..minOf(PARALLEL, chunks)).map {
+            kotlin.concurrent.thread(name = "romm-up-$it") {
+                try {
+                    RandomAccessFile(f, "r").use { r ->
+                        val buf = ByteArray(CHUNK)
+                        while (failure.get() == null) {
+                            val i = nextChunk.getAndIncrement()
+                            if (i >= chunks) break
+                            r.seek(i.toLong() * CHUNK)
+                            val n = minOf(CHUNK.toLong(), size - i.toLong() * CHUNK).toInt()
+                            r.readFully(buf, 0, n)
+                            Romm.uploadChunk(ctx, id, i, buf, n) { d -> progress(sent.addAndGet(d.toLong())) }
+                        }
+                    }
+                } catch (e: Throwable) { failure.compareAndSet(null, e) }
             }
         }
+        workers.forEach { it.join() }
+        failure.get()?.let { throw it }
         Romm.uploadComplete(ctx, id)
     }
 
     internal fun zipFolder(dir: File, zip: File) = ZipOutputStream(zip.outputStream().buffered()).use { z ->
+        z.setLevel(java.util.zip.Deflater.NO_COMPRESSION)
         dir.walkTopDown().filter { it.isFile }.forEach { f ->
             z.putNextEntry(ZipEntry(dir.name + "/" + f.relativeTo(dir).path)); f.inputStream().use { it.copyTo(z) }; z.closeEntry()
         }

@@ -962,7 +962,7 @@ async function loadLibrary() {
   renderRommPlatforms(); loadRommRoms(); loadSyncPlan();
 }
 async function loadSyncPlan() {
-  const { body: p } = await api('/api/romm/sync');
+  const [{ body: p }, { body: st }] = await Promise.all([api('/api/romm/sync'), api('/api/romm')]);
   if (p.error) { $('#syncBody').textContent = p.error; return; }
   const missing = p.systems.filter((s) => s.missing > 0);
   $('#syncSummary').textContent = `· ${missing.reduce((a, s) => a + s.missing, 0)} Spiele fehlen in RomM · ${p.saves} Spielstände erkannt`;
@@ -972,11 +972,13 @@ async function loadSyncPlan() {
     ${p.canWrite ? '' : '<p class="err">Für das Hochladen von Spielen braucht ThorBro Schreibrechte in RomM. <button id="rommRepair">Neu koppeln</button></p>'}
     <h4 style="margin:12px 0 4px">Spiele, die RomM noch nicht hat</h4>
     ${missing.length ? missing.map((s) => `<label style="display:block"><input type="checkbox" data-sync-sys="${s.system}"> ${esc((romData?.systems.find((x) => x.id === s.system) || {}).name || s.system)}: ${s.missing} Spiele, ${fmt(s.missingSize)}</label>`).join('') : '<span class="ok">✓ RomM hat alle Spiele vom Thor</span>'}
+    <div class="row"><label class="muted">Heimnetz-Adresse (direkt statt übers Internet):</label><input id="rommLan" value="${esc(st.lanUrl || '')}" placeholder="aus" style="flex:1"><button id="rommLanSave">Speichern</button><span class="muted">${st.viaLan ? '✓ gerade im Heimnetz' : 'zuletzt nicht erreichbar'}</span></div>
     <div class="row"><button id="syncRun" class="primary">Jetzt abgleichen</button><span id="syncState" class="muted"></span></div>`;
 }
 document.addEventListener('change', (e) => { if (e.target.id === 'syncAuto') api('/api/romm/sync/config?' + q({ auto: e.target.checked ? 1 : 0 }), { method: 'POST' }); });
 document.addEventListener('click', async (e) => {
   if (e.target.id === 'rommRepair') { $('#rommSetup').hidden = false; $('#rommConnect').click(); }
+  if (e.target.id === 'rommLanSave') { await api('/api/romm/lan?' + q({ url: $('#rommLan').value }), { method: 'POST' }); loadSyncPlan(); return; }
   if (e.target.id !== 'syncRun') return;
   const systems = [...document.querySelectorAll('[data-sync-sys]:checked')].map((x) => x.dataset.syncSys).join(',');
   e.target.disabled = true;
