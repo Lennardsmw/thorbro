@@ -87,7 +87,7 @@ private fun gameImage(a: JSONObject): java.io.File? {
 private fun ActivityCard(a: JSONObject) {
     val done = a.optBoolean("done")
     val err = a.optString("error").takeIf { it.isNotEmpty() && it != "null" }
-    val p = a.optDouble("progress", 0.0).toFloat().coerceIn(0f, 1f)
+    val p = a.optDouble(if (a.has("gameProgress")) "gameProgress" else "progress", 0.0).toFloat().coerceIn(0f, 1f)
     val total = a.optInt("total")
     val game = a.optString("game").takeIf { !done && it.isNotEmpty() }
     val img = if (game != null) gameImage(a) else null
@@ -103,7 +103,8 @@ private fun ActivityCard(a: JSONObject) {
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(game ?: a.optString("title"), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(if (game != null) a.optString("title") + (if (total > 1) " · ${a.optInt("index")}/$total" else "")
+                Text(if (game != null) a.optString("title") + (if (total > 1) " · ${a.optInt("index")}/$total" else "") +
+                    (a.optString("batch").takeIf { it.isNotEmpty() && it != "null" }?.let { " · $it" } ?: "")
                     else a.optString("name"), fontSize = 12.sp, color = Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             if (game == null && (total > 1 || (total == 1 && !done))) Text("${a.optInt("index")}/$total", fontSize = 14.sp, fontWeight = FontWeight.Bold)

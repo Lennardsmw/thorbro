@@ -39,9 +39,9 @@ object Romm {
     /** the public server's heartbeat fingerprint, so a stranger's box at the same LAN address never gets the token */
     @Volatile private var publicPrint: String? = null
 
-    private fun heartbeatPrint(base: String, timeout: Int): String? = runCatching {
+    private fun heartbeatPrint(base: String, timeout: Int, read: Int = timeout): String? = runCatching {
         (URL("$base/api/heartbeat").openConnection() as HttpURLConnection).run {
-            connectTimeout = timeout; readTimeout = timeout
+            connectTimeout = timeout; readTimeout = read
             if (responseCode != 200) return@run null
             val j = JSONObject(inputStream.bufferedReader().use { it.readText() })
             j.getJSONObject("SYSTEM").optString("VERSION") + "|" + j.optJSONObject("METADATA_SOURCES")?.toString()
@@ -54,7 +54,7 @@ object Romm {
         if (lan == pub) return null
         val (at, ok) = lanCheck
         if (System.currentTimeMillis() - at < 60_000) return if (ok) lan else null
-        val reach = heartbeatPrint(lan, 1500)?.let { local ->
+        val reach = heartbeatPrint(lan, 1500, 6000)?.let { local ->
             val remote = publicPrint ?: heartbeatPrint(pub, 5000)?.also { publicPrint = it }
             remote != null && remote == local
         } ?: false
@@ -196,7 +196,7 @@ object Romm {
                     while (true) {
                         val n = inp.read(buf); if (n < 0) break
                         out.write(buf, 0, n); done += n
-                        if (total > 0) { job.progress = done.toDouble() / total * (if (multi) 0.9 else 1.0); job.bytes(done, total) }
+                        if (total > 0) { job.progress = done.toDouble() / total * (if (multi) 0.9 else 1.0); job.bytes(done, total); job.gameBytes(done, total) }
                     }
                 }
             }

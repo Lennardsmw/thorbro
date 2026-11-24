@@ -23,9 +23,12 @@ object Jobs {
         @Volatile var system = ""
         @Volatile var romId = 0
         @Volatile var file = ""
-        fun game(name: String, system: String, romId: Int = 0, file: String = "") { game = name; this.system = system; this.romId = romId; this.file = file }
+        fun game(name: String, system: String, romId: Int = 0, file: String = "") {
+            game = name; this.system = system; this.romId = romId; this.file = file; gameDone = 0; gameTotal = 0
+        }
         /** game fields for Background.list */
         fun gameJson(o: JSONObject): JSONObject = o.put("game", game).put("system", system).put("romId", romId).put("file", file).put("transfer", transfer())
+            .put("batch", batch()).put("gameProgress", gameProgress())
         @Volatile var bytesDone = 0L
         @Volatile var bytesTotal = 0L
         @Volatile private var rateFrom: Pair<Long, Long>? = null
@@ -33,16 +36,32 @@ object Jobs {
             if (rateFrom == null) rateFrom = System.currentTimeMillis() to done
             bytesDone = done; bytesTotal = total
         }
-        fun transfer(): String? {
-            val total = bytesTotal.takeIf { it > 0 } ?: return null
-            val done = bytesDone.coerceAtMost(total)
-            val (at, from) = rateFrom ?: return null
+        /** the current game's own bytes (a batch's [bytesDone]/[bytesTotal] cover all its games) */
+        @Volatile var gameDone = 0L
+        @Volatile var gameTotal = 0L
+        fun gameBytes(done: Long, total: Long) { gameDone = done; gameTotal = total }
+        private fun bps(): Double {
+            val (at, from) = rateFrom ?: return 0.0
             val ms = System.currentTimeMillis() - at
-            val bps = if (ms > 1500) (done - from) * 1000.0 / ms else 0.0
+            return if (ms > 1500) (bytesDone - from) * 1000.0 / ms else 0.0
+        }
+        /** this game: "12.0 MB/s · 545 MB / 1.14 GB · noch 50 s" */
+        fun transfer(): String? {
+            val (done, total) = if (gameTotal > 0) gameDone.coerceAtMost(gameTotal) to gameTotal else bytesDone.coerceAtMost(bytesTotal) to bytesTotal
+            if (total <= 0) return null
+            val bps = bps()
             val eta = if (bps > 0) ((total - done) / bps).toLong() else -1L
             return (if (bps > 0) "${"%.1f".format(bps / 1e6)} MB/s · " else "") + "${mb(done)} / ${mb(total)}" +
                 (if (eta >= 0) " · noch ${dur(eta)}" else "")
         }
+        /** the whole batch, only when it is more than this one game: "noch 163.3 GB · ca. 3 h 46 min" */
+        fun batch(): String? {
+            if (gameTotal <= 0 || bytesTotal <= gameTotal) return null
+            val left = (bytesTotal - bytesDone).coerceAtLeast(0)
+            val bps = bps()
+            return "noch ${mb(left)} gesamt" + (if (bps > 0) " · ca. ${dur((left / bps).toLong())}" else "")
+        }
+        fun gameProgress(): Double = if (gameTotal > 0) gameDone.toDouble() / gameTotal else progress
         fun json(): JSONObject = JSONObject().put("id", id).put("name", name).put("progress", progress)
             .put("message", message).put("done", done).put("error", error).put("result", result).put("index", index).put("total", total)
             .put("bytesDone", bytesDone).put("bytesTotal", bytesTotal).put("transfer", transfer())

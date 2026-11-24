@@ -206,8 +206,17 @@ private fun TransferRow(e: JSONObject) {
     val ctx = LocalContext.current
     val down = e.optString("kind") == "download"
     val romId = e.optInt("romId")
-    val cover by androidx.compose.runtime.produceState<File?>(null, romId) {
-        value = if (romId > 0) withContext(Dispatchers.IO) { runCatching { wtf.lennard.thorbro.Library.coverFile(ctx, romId) }.getOrNull() } else null
+    val file = e.optString("file"); val sys = e.optString("system")
+    val cover by androidx.compose.runtime.produceState<File?>(null, romId, file) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                when {
+                    romId > 0 -> wtf.lennard.thorbro.Library.coverFile(ctx, romId)
+                    file.isNotEmpty() && sys.isNotEmpty() -> wtf.lennard.thorbro.Media.coverForFile(ctx, sys, File(file))
+                    else -> null
+                }
+            }.getOrNull()
+        }
     }
     FocusCard(Modifier.fillMaxWidth(), onClick = {}) {
         Row(verticalAlignment = Alignment.CenterVertically) {

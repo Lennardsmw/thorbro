@@ -96,8 +96,8 @@ object Library {
             if (f.isDirectory) {
                 val zip = File(ctx.cacheDir, "offload.zip")
                 RommSync.zipFolder(f, zip)
-                try { RommSync.upload(ctx, pid, f.name + ".zip", zip) { n -> job.progress = 0.9 * (done + n) / total; job.bytes(done + n, total) } } finally { zip.delete() }
-            } else RommSync.upload(ctx, pid, f.name, f) { n -> job.progress = 0.9 * (done + n) / total; job.bytes(done + n, total) }
+                try { RommSync.upload(ctx, pid, f.name + ".zip", zip) { n -> job.progress = 0.9 * (done + n) / total; job.bytes(done + n, total); job.gameBytes(n, zip.length()) } } finally { zip.delete() }
+            } else RommSync.upload(ctx, pid, f.name, f) { n -> job.progress = 0.9 * (done + n) / total; job.bytes(done + n, total); job.gameBytes(n, f.length()) }
             done += rom.getLong("size")
         }
         job.message = "Spielstände hochladen"; job.progress = 0.92

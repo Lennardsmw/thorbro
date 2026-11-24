@@ -188,7 +188,7 @@ object RommSync {
             fun report(file: File): (Long) -> Unit { val len = file.length().coerceAtLeast(1); return { sent ->
                 val now = done + sent * romSize / len
                 job.progress = now.toDouble() / total
-                job.bytes(now, total)
+                job.bytes(now, total); job.gameBytes(sent, len)
             } }
             if (Romm.status(ctx).optBoolean("viaLan")) job.message = "Lade ${f.name} hoch · Heimnetz"
             val t0 = System.currentTimeMillis()
@@ -198,7 +198,7 @@ object RommSync {
                     val zip = File(ctx.cacheDir, "romm-upload.zip")
                     try { zipFolder(f, zip); upload(ctx, pid, f.name + ".zip", zip, report(zip)) } finally { zip.delete() }
                 } else upload(ctx, pid, f.name, f, report(f))
-                romsUp++; History.add(ctx, "rom_up", rom.optString("name").ifEmpty { f.name }, sys, ms = System.currentTimeMillis() - t0, size = romSize)
+                romsUp++; History.add(ctx, "rom_up", rom.optString("name").ifEmpty { f.name }, sys, ms = System.currentTimeMillis() - t0, size = romSize, path = f.path)
             } catch (e: Exception) { errors.put("${f.name}: ${e.message}"); Logs.e("romm", "Upload ${f.name}", e) }
             done += romSize
             job.progress = done.toDouble() / total
