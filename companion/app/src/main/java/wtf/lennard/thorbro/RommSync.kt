@@ -137,10 +137,19 @@ object RommSync {
     /** uploaded from this Thor and waiting for RomM's next scan */
     fun uploadedByUs(system: String, rom: JSONObject, led: JSONObject): Boolean =
         rom.optLong("size") > 0 && led.optLong("${slugFor(system)}/${rom.getString("file")}", -1L) == rom.optLong("size")
+    /** "Game (EU).3ds" -> "game (eu)": a short extension off, lowercase; folders without one stay as they are */
+    private fun baseOf(name: String): String =
+        name.lowercase().let { n -> val e = n.substringAfterLast('.', ""); if (e.length in 1..5 && e.all { it.isLetterOrDigit() }) n.dropLast(e.length + 1) else n }
+
+    /** RomM's name for the local game [file], or null. Same game also when the name differs only by extension or case:
+     *  folders go up zipped ("X" -> "X.zip") and RomM keeps some single files as a folder ("X.3ds" -> "X") */
+    fun rommName(file: String, names: Collection<String>): String? =
+        names.firstOrNull { it == file } ?: baseOf(file).let { b -> names.firstOrNull { baseOf(it) == b } }
+
     /** not in RomM, not uploaded by us already, and not an empty leftover file */
     private fun missing(rom: JSONObject, slug: String, have: Map<String, Int>, led: JSONObject): Boolean {
         val file = rom.getString("file"); val size = rom.optLong("size")
-        return size > 0 && file !in have && led.optLong("$slug/$file", -1L) != size
+        return size > 0 && rommName(file, have.keys) == null && led.optLong("$slug/$file", -1L) != size
     }
 
     // ---------- plan + run ----------
