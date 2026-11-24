@@ -186,6 +186,7 @@ object Romm {
         if (c.responseCode !in listOf(200, 206)) error("RomM antwortet mit HTTP ${c.responseCode}")
         val append = c.responseCode == 206
         job.message = name
+        job.game(r.optString("name").ifEmpty { name }, system, romId)
         Transfers.begin(ctx)
         try {
             c.inputStream.use { inp ->

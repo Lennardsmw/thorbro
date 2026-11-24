@@ -18,6 +18,14 @@ object Jobs {
         @Volatile var total = 0
         @Volatile var finishedAt = 0L
         /** bytes moved so far / to move, for transfers; [transfer] turns them into "x / y · speed · time left" */
+        /** the game being worked on, for the progress bubble (name, console, RomM id or local file for its cover) */
+        @Volatile var game = ""
+        @Volatile var system = ""
+        @Volatile var romId = 0
+        @Volatile var file = ""
+        fun game(name: String, system: String, romId: Int = 0, file: String = "") { game = name; this.system = system; this.romId = romId; this.file = file }
+        /** game fields for Background.list */
+        fun gameJson(o: JSONObject): JSONObject = o.put("game", game).put("system", system).put("romId", romId).put("file", file).put("transfer", transfer())
         @Volatile var bytesDone = 0L
         @Volatile var bytesTotal = 0L
         @Volatile private var rateFrom: Pair<Long, Long>? = null
@@ -32,7 +40,7 @@ object Jobs {
             val ms = System.currentTimeMillis() - at
             val bps = if (ms > 1500) (done - from) * 1000.0 / ms else 0.0
             val eta = if (bps > 0) ((total - done) / bps).toLong() else -1L
-            return "${mb(done)} / ${mb(total)}" + (if (bps > 0) " · ${"%.1f".format(bps / 1e6)} MB/s" else "") +
+            return (if (bps > 0) "${"%.1f".format(bps / 1e6)} MB/s · " else "") + "${mb(done)} / ${mb(total)}" +
                 (if (eta >= 0) " · noch ${dur(eta)}" else "")
         }
         fun json(): JSONObject = JSONObject().put("id", id).put("name", name).put("progress", progress)

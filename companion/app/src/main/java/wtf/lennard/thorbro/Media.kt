@@ -161,6 +161,13 @@ object Media {
         return if (download("$THUMBS/${enc(sys)}/Named_Boxarts/${enc(name)}.png", f)) f else null
     }
 
+    /** boxart of a local game by its file (same match as the library), or null */
+    fun coverForFile(ctx: Context, systemId: String, f: File): File? = runCatching {
+        val r = JSONObject().put("file", f.name).put("dir", f.isDirectory).put("path", f.path)
+        val n = metaFor(ctx, systemId, listOf(r)).optJSONObject(f.path)?.optString("cover")?.takeIf { it.isNotEmpty() }
+        n?.let { cover(ctx, systemId, it) }
+    }.getOrNull()
+
     fun icon(ctx: Context, systemId: String): File? {
         // RomM's console icons first (crisp SVG, same look as the library), libretro's PNG as fallback
         val svg = File(dir(ctx, "icons"), "romm-$systemId.svg")

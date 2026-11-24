@@ -181,6 +181,7 @@ object RommSync {
             val slug = slugFor(sys)
             val pid = bySlug[slug] ?: Romm.createPlatform(ctx, slug).also { bySlug = bySlug + (slug to it) }
             val f = File(rom.getString("path"))
+            job.game(rom.optString("name").ifEmpty { f.nameWithoutExtension }, sys, file = f.path)
             val romSize = rom.getLong("size")
             job.message = "Lade ${f.name} hoch"
             /** the file actually sent can differ from the listed size (zipped folders): scale it onto the rom's share */

@@ -88,6 +88,7 @@ object Library {
         var rem = remote(ctx, true)
         for ((sys, rom) in items) {
             val f = File(rom.getString("path"))
+            job.game(rom.optString("name").ifEmpty { f.nameWithoutExtension }, sys, file = f.path)
             if (rem.find(sys, f.name) != null) { done += rom.getLong("size"); continue }
             val slug = RommSync.slugFor(sys)
             val pid = rem.bySlug[slug] ?: Romm.createPlatform(ctx, slug)
@@ -178,6 +179,7 @@ object Library {
         val app = ctx.applicationContext
         val j = Jobs.start("RomM-Download") { job ->
             val t0 = System.currentTimeMillis()
+            job.romId = romId
             try { Romm.download(app, romId, romsRoot(app), job).also { invalidate()
                 History.add(app, "download", it.optString("name").ifEmpty { job.message }, it.optString("system"),
                     ms = System.currentTimeMillis() - t0, romId = romId, size = job.bytesTotal) } }

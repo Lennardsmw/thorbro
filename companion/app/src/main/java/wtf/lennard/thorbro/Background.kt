@@ -85,7 +85,7 @@ object Background {
         val job = currentJob
         val cur = current
         if (cur != null && job != null) out.put(JSONObject().put("kind", "offload").put("title", "In RomM auslagern")
-            .put("name", cur.name).put("step", job.message).put("progress", job.progress).put("transfer", job.transfer())
+            .put("name", cur.name).put("step", job.message).put("progress", job.progress).also { job.gameJson(it) }
             .put("index", batchDone + 1).put("total", batchTotal).put("done", false))
         else if (batchEndedAt > 0 && now - batchEndedAt < SHOW_DONE_MS) out.put(JSONObject().put("kind", "offload").put("title", "Auslagern fertig")
             .put("name", summary()).put("progress", 1.0).put("index", batchDone).put("total", batchTotal).put("done", true)
@@ -97,7 +97,7 @@ object Background {
             val finished = dl.count { it.second.done }
             val lastEnd = dl.maxOf { it.second.finishedAt }
             if (active != null) out.put(JSONObject().put("kind", "download").put("title", "Aus RomM laden")
-                .put("name", active.second.message.ifEmpty { "…" }).put("progress", active.second.progress).put("transfer", active.second.transfer())
+                .put("name", active.second.message.ifEmpty { "…" }).put("progress", active.second.progress).also { active.second.gameJson(it) }
                 .put("index", finished + 1).put("total", dl.size).put("done", false))
             else if (now - lastEnd < SHOW_DONE_MS) out.put(JSONObject().put("kind", "download").put("title", "Download fertig")
                 .put("name", "${dl.count { it.second.error == null }}/${dl.size} auf dem Thor").put("progress", 1.0)
@@ -106,7 +106,7 @@ object Background {
 
         RommSync.current?.let { j ->
             if (!j.done || now - j.finishedAt < SHOW_DONE_MS) out.put(JSONObject().put("kind", "upload")
-                .put("title", if (j.done) "Upload zu RomM fertig" else "Spiele zu RomM").put("name", j.message).put("progress", j.progress).put("transfer", j.transfer())
+                .put("title", if (j.done) "Upload zu RomM fertig" else "Spiele zu RomM").put("name", j.message).put("progress", j.progress).also { if (!j.done) j.gameJson(it) }
                 .put("index", j.index).put("total", j.total).put("done", j.done).put("error", j.error))
         }
         return out
