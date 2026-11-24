@@ -1,6 +1,22 @@
 package wtf.lennard.thorbro.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.composed
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -98,6 +114,48 @@ fun ThorTheme(content: @Composable () -> Unit) {
     }
 }
 
+/**
+ * One look for everything you can select with the D-pad, mouse or finger:
+ * the element lifts a little, gets a white frame and is drawn above its neighbours.
+ * Exactly ONE focus stop per element (clickable is already focusable; never add .focusable() too).
+ */
+class Fx(val src: MutableInteractionSource, val active: Boolean, val pressed: Boolean)
+
+@Composable
+fun rememberFx(): Fx {
+    val src = remember { MutableInteractionSource() }
+    val focused by src.collectIsFocusedAsState()
+    val hovered by src.collectIsHoveredAsState()
+    val pressed by src.collectIsPressedAsState()
+    return Fx(src, focused || hovered, pressed)
+}
+
+/**
+ * Applies the focus look and the click. Put size/padding-free modifiers BEFORE it and
+ * background/content AFTER it (it clips to [shape]).
+ * [lift] = scale while active, [frame] = draw the white border, [restLine] = border when idle.
+ */
+fun Modifier.fx(
+    fx: Fx,
+    shape: Shape,
+    lift: Float = 1.06f,
+    frame: Boolean = true,
+    restLine: Boolean = true,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+): Modifier = composed {
+    val target = when { !enabled -> 1f; fx.pressed -> lift - (lift - 1f) * 0.6f - 0.02f; fx.active -> lift; else -> 1f }
+    val scale by animateFloatAsState(target, spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow), label = "fx")
+    val line by animateDpAsState(if (fx.active && frame) 3.dp else if (restLine) 1.dp else 0.dp, tween(140), label = "fxLine")
+    val color by animateColorAsState(if (fx.active && frame) Color(0xF2FFFFFF) else if (restLine) GlassLine else Color.Transparent, tween(140), label = "fxColor")
+    this.zIndex(if (fx.active) 1f else 0f)
+        .graphicsLayer { scaleX = scale; scaleY = scale }
+        .border(line, color, shape)
+        .clip(shape)
+        .hoverable(fx.src, enabled)
+        .clickable(interactionSource = fx.src, indication = null, enabled = enabled, onClick = onClick)
+}
+
 /** A panel that shows a clear frame when the gamepad focus is on it (or on something inside). */
 @Composable
 fun FocusCard(
@@ -105,16 +163,16 @@ fun FocusCard(
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val src = remember { MutableInteractionSource() }
-    val focused by src.collectIsFocusedAsState()
+    val fx = rememberFx()
+    var inside by remember { mutableStateOf(false) }
+    val on = fx.active || inside
     val shape = RoundedCornerShape(20.dp)
-    val scale by androidx.compose.animation.core.animateFloatAsState(if (focused) 1.015f else 1f, label = "card")
-    var m = modifier.scale(scale)
-        .then(if (focused) Modifier.shadow(18.dp, shape, ambientColor = Color.White, spotColor = Color.White) else Modifier)
-        .clip(shape).background(GlassFill)
-        .border(BorderStroke(if (focused) 2.dp else 1.dp, if (focused) Color(0xD9FFFFFF) else GlassLine), shape)
-    if (onClick != null) m = m.clickable(interactionSource = src, indication = null, onClick = onClick)
-    Column(m.padding(16.dp), content = content)
+    val line by animateDpAsState(if (on) 2.dp else 1.dp, tween(140), label = "cardLine")
+    val color by animateColorAsState(if (on) Color(0xD9FFFFFF) else GlassLine, tween(140), label = "cardColor")
+    var m = modifier.zIndex(if (on) 1f else 0f).onFocusChanged { inside = it.hasFocus && !it.isFocused }
+    m = if (onClick != null) m.fx(fx, shape, lift = 1.015f, frame = false, restLine = false, onClick = onClick)
+        else m.clip(shape)
+    Column(m.background(GlassFill).border(line, color, shape).padding(16.dp), content = content)
 }
 
 @Composable

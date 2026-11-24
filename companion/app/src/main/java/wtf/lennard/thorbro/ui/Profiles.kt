@@ -81,12 +81,9 @@ fun ProfilePicker(profiles: List<JSONObject>, onPick: (String) -> Unit, onClose:
             Spacer(Modifier.height(32.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
                 profiles.forEachIndexed { i, p ->
-                    val src = remember { MutableInteractionSource() }
-                    val focused by src.collectIsFocusedAsState()
-                    val scale by animateFloatAsState(if (focused) 1.12f else 1f, label = "pick")
-                    Column(Modifier.firstFocus(first, i == 0).scale(scale).clip(RoundedCornerShape(20.dp))
-                        .border(if (focused) 3.dp else 0.dp, if (focused) Color.White else Color.Transparent, RoundedCornerShape(20.dp))
-                        .clickable(interactionSource = src, indication = null) { onPick(p.getString("id")) }.focusable(interactionSource = src)
+                    val fx = rememberFx()
+                    Column(Modifier.firstFocus(first, i == 0)
+                        .fx(fx, RoundedCornerShape(20.dp), lift = 1.1f, restLine = false) { onPick(p.getString("id")) }
                         .padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         ProfileDot(p, 96)
                         Spacer(Modifier.height(10.dp))

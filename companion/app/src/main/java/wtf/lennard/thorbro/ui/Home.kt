@@ -219,10 +219,8 @@ fun HomeScreen(open: (Screen) -> Unit, showDetail: (HomeGame) -> Unit) {
 @Composable
 private fun GameTile(g: HomeGame, modifier: Modifier, onFocus: () -> Unit, onStart: () -> Unit, onDetail: () -> Unit) {
     val ctx = LocalContext.current
-    val src = remember { MutableInteractionSource() }
-    val focused by src.collectIsFocusedAsState()
-    if (focused) LaunchedEffect(Unit) { onFocus() }
-    val scale by animateFloatAsState(if (focused) 1.1f else 1f, label = "tile")
+    val fx = rememberFx()
+    if (fx.active) LaunchedEffect(Unit) { onFocus() }
     val img by produceState<File?>(null, g.rom.getString("path")) {
         value = withContext(Dispatchers.IO) {
             if (g.system == "ports") return@withContext wtf.lennard.thorbro.Ports.icon(ctx, g.rom.optString("package"))
@@ -232,11 +230,10 @@ private fun GameTile(g: HomeGame, modifier: Modifier, onFocus: () -> Unit, onSta
     }
     val shape = RoundedCornerShape(18.dp)
     Box(
-        modifier.size(210.dp).scale(scale).clip(shape).background(Panel)
-            .border(if (focused) 3.dp else 1.dp, if (focused) Color(0xF2FFFFFF) else GlassLine, shape)
+        modifier.size(210.dp)
             .onKeyEvent { e -> if (e.type == KeyEventType.KeyDown && (e.key == Key.ButtonX || e.key == Key.ButtonY)) { onDetail(); true } else false }
-            .clickable(interactionSource = src, indication = null, onClick = onStart)
-            .focusable(interactionSource = src),
+            .fx(fx, shape, lift = 1.08f, onClick = onStart)
+            .background(Panel),
         contentAlignment = Alignment.Center,
     ) {
         if (img != null) Img(img, 400, Modifier.fillMaxSize(), ContentScale.Crop, g.title)
@@ -250,13 +247,10 @@ private fun GameTile(g: HomeGame, modifier: Modifier, onFocus: () -> Unit, onSta
 
 @Composable
 private fun MoreTile(modifier: Modifier, onFocus: () -> Unit, onClick: () -> Unit) {
-    val src = remember { MutableInteractionSource() }
-    val focused by src.collectIsFocusedAsState()
-    if (focused) LaunchedEffect(Unit) { onFocus() }
-    val scale by animateFloatAsState(if (focused) 1.1f else 1f, label = "more")
+    val fx = rememberFx()
+    if (fx.active) LaunchedEffect(Unit) { onFocus() }
     val shape = RoundedCornerShape(18.dp)
-    Box(modifier.size(210.dp).scale(scale).clip(shape).background(GlassFill).border(if (focused) 3.dp else 1.dp, if (focused) Color(0xF2FFFFFF) else GlassLine, shape)
-        .clickable(interactionSource = src, indication = null, onClick = onClick).focusable(interactionSource = src), contentAlignment = Alignment.Center) {
+    Box(modifier.size(210.dp).fx(fx, shape, lift = 1.08f, onClick = onClick).background(GlassFill), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Filled.ViewModule, null, Modifier.size(54.dp))
             Text("Alle Spiele", fontSize = 16.sp)
@@ -266,12 +260,11 @@ private fun MoreTile(modifier: Modifier, onFocus: () -> Unit, onClick: () -> Uni
 
 @Composable
 private fun RoundButton(label: String, icon: ImageVector, onClick: () -> Unit) {
-    val src = remember { MutableInteractionSource() }
-    val focused by src.collectIsFocusedAsState()
-    val scale by animateFloatAsState(if (focused) 1.12f else 1f, label = "round")
+    val fx = rememberFx()
+    val focused = fx.active
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(64.dp).scale(scale).clip(CircleShape).then(if (focused) Modifier.background(Accent) else Modifier.background(GlassFill)).border(1.dp, GlassLine, CircleShape)
-            .clickable(interactionSource = src, indication = null, onClick = onClick).focusable(interactionSource = src),
+        Box(Modifier.size(64.dp).fx(fx, CircleShape, lift = 1.12f, frame = false, onClick = onClick)
+            .then(if (focused) Modifier.background(Accent) else Modifier.background(GlassFill)),
             contentAlignment = Alignment.Center) { Icon(icon, label, Modifier.size(30.dp), tint = if (focused) OnAccent else Color.White) }
         Spacer(Modifier.height(6.dp))
         Text(if (focused) label else "", fontSize = 13.sp, color = Muted)

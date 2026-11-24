@@ -71,16 +71,12 @@ fun ConsoleTile(
     badges: @Composable (BoxScope.() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
-    val src = remember { MutableInteractionSource() }
-    val focused by src.collectIsFocusedAsState()
-    val scale by animateFloatAsState(if (focused) 1.06f else 1f, label = "tile")
+    val fx = rememberFx()
     val shape = RoundedCornerShape(18.dp)
     Box(
-        modifier.fillMaxWidth().aspectRatio(1f).scale(scale).clip(shape)
-            .then(if (accent) Modifier.background(Color(0x33FFFFFF)) else Modifier.background(GlassFill))
-            .border(if (focused) 3.dp else 1.dp, if (focused) Color(0xF2FFFFFF) else GlassLine, shape)
-            .clickable(interactionSource = src, indication = null, onClick = onClick)
-            .focusable(interactionSource = src),
+        modifier.fillMaxWidth().aspectRatio(1f)
+            .fx(fx, shape, onClick = onClick)
+            .then(if (accent) Modifier.background(Color(0x33FFFFFF)) else Modifier.background(GlassFill)),
     ) {
         if (image != null) {
             Img(image, 400, Modifier.fillMaxSize(), ContentScale.Crop, title)
@@ -161,13 +157,11 @@ fun ConsoleMenu(title: String, text: String = "", mono: Boolean = false, options
 /** big console button: white when focused, optional icon; [primary] is white-ish even without focus */
 @Composable
 fun BigButton(label: String, icon: ImageVector? = null, primary: Boolean = false, enabled: Boolean = true, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    val src = remember { MutableInteractionSource() }
-    val focused by src.collectIsFocusedAsState()
-    val scale by animateFloatAsState(if (focused) 1.05f else 1f, label = "btn")
+    val fx = rememberFx()
+    val focused = fx.active
     val shape = RoundedCornerShape(14.dp)
     val bg = when { focused -> Modifier.background(Accent); primary -> Modifier.background(Color(0x40FFFFFF)); else -> Modifier.background(GlassFill) }
-    Box(modifier.height(56.dp).scale(scale).clip(shape).then(bg).border(if (focused) 2.dp else 1.dp, if (focused) Color.White else GlassLine, shape)
-        .clickable(interactionSource = src, indication = null, enabled = enabled, onClick = onClick).focusable(interactionSource = src),
+    Box(modifier.height(56.dp).fx(fx, shape, lift = 1.04f, frame = false, enabled = enabled, onClick = onClick).then(bg),
         contentAlignment = Alignment.Center) {
         androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 18.dp)) {
             val fg = if (focused) OnAccent else if (enabled) Color.White else Muted

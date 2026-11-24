@@ -328,20 +328,14 @@ private val swatches = listOf(0xFF2020, 0xFF7A00, 0xFFD000, 0x20E040, 0x00D0FF, 
 private fun Swatches(onPick: (Int) -> Unit, offLabel: String, onOff: () -> Unit) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         swatches.forEach { c ->
-            val src = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-            val focused by src.collectIsFocusedAsState()
-            Box(Modifier.size(40.dp).clip(CircleShape).background(androidx.compose.ui.graphics.Color(0xFF000000.toInt() or c))
-                .then(if (focused) Modifier.background(androidx.compose.ui.graphics.Color.Transparent) else Modifier)
-                .androidx_border(focused)
-                .clickable(interactionSource = src, indication = null) { onPick(c) }
-                .focusable(interactionSource = src))
+            val fx = rememberFx()
+            Box(Modifier.size(40.dp).fx(fx, CircleShape, lift = 1.15f, restLine = false) { onPick(c) }
+                .background(androidx.compose.ui.graphics.Color(0xFF000000.toInt() or c)))
         }
         Act(offLabel, onClick = onOff)
     }
 }
 
-private fun Modifier.androidx_border(on: Boolean) =
-    if (on) this.then(Modifier.border(3.dp, androidx.compose.ui.graphics.Color.White, CircleShape)) else this
 
 @Composable
 private fun LedCard(tick: Int, changed: () -> Unit) {
@@ -490,14 +484,11 @@ fun ControllerScreen() {
 /** left menu entry: wide rounded pill, icon left, white when focused */
 @Composable
 private fun MenuPill(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, modifier: Modifier, onClick: () -> Unit) {
-    val src = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-    val focused by src.collectIsFocusedAsState()
-    val scale by androidx.compose.animation.core.animateFloatAsState(if (focused) 1.03f else 1f, label = "pill")
+    val fx = rememberFx()
+    val focused = fx.active
     val shape = RoundedCornerShape(50)
-    Row(modifier.fillMaxWidth().height(62.dp).scale(scale).clip(shape)
+    Row(modifier.fillMaxWidth().height(62.dp).fx(fx, shape, lift = 1.03f, frame = false, onClick = onClick)
         .then(if (focused) Modifier.background(Accent) else Modifier.background(GlassFill))
-        .border(if (focused) 2.dp else 1.dp, if (focused) androidx.compose.ui.graphics.Color.White else GlassLine, shape)
-        .clickable(interactionSource = src, indication = null, onClick = onClick).focusable(interactionSource = src)
         .padding(horizontal = 22.dp), verticalAlignment = Alignment.CenterVertically) {
         val fg = if (focused) OnAccent else androidx.compose.ui.graphics.Color.White
         Icon(icon, null, Modifier.size(26.dp), tint = fg)
