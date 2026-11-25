@@ -130,7 +130,16 @@ object Pals {
         if (old == null) Logs.i("pals", "neuer Freund: ${f.optString("name")} ($via)")
     }
 
+    /** removed or declined ids with the time: older messages from them (ntfy replays 12 h after a restart) are ignored */
+    private fun tombstone(ctx: Context, id: String) {
+        val o = runCatching { JSONObject(Prefs.of(ctx).getString("pals.removed", "{}")) }.getOrDefault(JSONObject())
+        o.put(id, System.currentTimeMillis())
+        Prefs.of(ctx).edit().putString("pals.removed", o.toString()).apply()
+    }
+    private fun removedAt(ctx: Context, id: String) = runCatching { JSONObject(Prefs.of(ctx).getString("pals.removed", "{}")).optLong(id) }.getOrDefault(0L)
+
     fun remove(ctx: Context, id: String) {
+        tombstone(ctx, id)
         friends(ctx).firstOrNull { it.optString("id") == id }?.let { send(ctx, it.optString("pub"), JSONObject().put("t", "bye")) }
         writeList(ctx, "pals.friends", friends(ctx).filter { it.optString("id") != id })
     }
@@ -142,7 +151,7 @@ object Pals {
         return true
     }
 
-    fun decline(ctx: Context, id: String) = writeList(ctx, "pals.requests", requests(ctx).filter { it.optString("id") != id })
+    fun decline(ctx: Context, id: String) = tombstone(ctx, id).let { writeList(ctx, "pals.requests", requests(ctx).filter { it.optString("id") != id }) }
 
     /** asks someone whose card we have (nearby, imported file) to be friends; [token] from a .thorfriend file */
     fun request(ctx: Context, card: JSONObject, token: String? = null, via: String = "Anfrage"): String? {
@@ -219,6 +228,7 @@ object Pals {
         val id = from.optString("id")
         val t = m.optString("t")
         val friend = isFriend(ctx, id)
+        if (!friend && m.optLong("ts") <= removedAt(ctx, id)) return // from before we removed / declined them
         when {
             t == "req" -> when {
                 friend -> { addFriend(ctx, from, "Anfrage"); send(ctx, from.optString("pub"), JSONObject().put("t", "acc")) }
