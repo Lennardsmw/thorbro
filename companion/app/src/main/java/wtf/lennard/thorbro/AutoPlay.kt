@@ -59,7 +59,7 @@ object AutoPlay {
 
     /** one round; returns how long to wait before the next one */
     private fun tick(ctx: Context): Long {
-        if ((!Friends.any(ctx) && !Netplay.serverOn) || !Power.interactive(ctx)) { hostNotice(ctx); return 15_000L }
+        if ((!Friends.any(ctx) && !Netplay.serverOn && !Party.leading(ctx)) || !Power.interactive(ctx)) { hostNotice(ctx); return 15_000L }
         val top = if (Shell.ready()) topActivity() else null
         val emu = top?.let { t -> Emulators.all.firstOrNull { it.pkg == t.first } }
 
@@ -67,7 +67,7 @@ object AutoPlay {
         val lobby = Netplay.lobby
         if (lobby != null && lobby.auto) {
             if (running(lobby.pkg)) goneTicks = 0 else if (++goneTicks >= 2) { Netplay.close(ctx); lastGame = null }
-        } else if (emu != null && (Friends.auto(ctx) || Netplay.serverOn) && lobby == null) {
+        } else if (emu != null && (Friends.auto(ctx) || Netplay.serverOn || Party.leading(ctx)) && lobby == null) {
             val game = findGame(ctx, emu, top.second)
             val key = game?.let { "${emu.id}:${it.second.path}" }
             if (game != null && key != lastGame && Netplay.mode(ctx, game.first) == emu.id) {

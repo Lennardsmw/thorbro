@@ -351,6 +351,7 @@ object Netplay {
         lobby = l
         Logs.i("netplay", "Lobby offen: ${rom.name} ($mode), PIN gesetzt")
         Direct.refreshInvite(ctx)
+        Party.lobbyChanged(ctx) // the party sees the game in our status and joins
         return l
     }
 
@@ -366,6 +367,7 @@ object Netplay {
         lobby?.let { Logs.i("netplay", "Lobby geschlossen: ${it.rom.name}") }
         lobby = null
         val c = ctx ?: appCtx
+        c?.let { Party.lobbyChanged(it) }
         if (serverOn) { c?.let { Direct.refreshInvite(it) }; return } // the server keeps room and Wi-Fi Direct up
         Room.stop()
         Online.stopHost() // the online room needs the local room behind it

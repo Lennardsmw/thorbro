@@ -27,12 +27,53 @@ object Party {
 
     fun isLeader(ctx: Context) = mine(ctx)?.optString("leader") == Pals.myId(ctx)
 
+    /** leading a party with at least one more member: a game started anywhere opens a lobby for them ([AutoPlay]) */
+    fun leading(ctx: Context) = mine(ctx)?.let { it.optString("leader") == Pals.myId(ctx) && (it.optJSONArray("members")?.length() ?: 0) > 1 } == true
+
+    // ---------- playing together ----------
+
+    /** the lobby opened or closed: as leader, tell the party (one status post) */
+    fun lobbyChanged(ctx: Context) { if (leading(ctx)) publish(ctx) }
+
+    /** the open lobby as the party sees it: game, PIN and where to reach us */
+    private fun gameInfo(): JSONObject? {
+        val l = Netplay.lobby ?: return null
+        val addrs = listOfNotNull(Device.ip(), Direct.ownIp().takeIf { Direct.active() }).distinct()
+        return JSONObject().put("system", l.system).put("title", l.rom.name.substringBeforeLast('.')).put("mode", l.mode)
+            .put("pin", l.pin).put("addrs", JSONArray(addrs))
+    }
+
+    @Volatile private var lastJoin = ""
+
+    /** the leader started a game: join it (ROM from the leader if missing, emulator as guest) */
+    private fun followGame(ctx: Context, leader: JSONObject, g: JSONObject) {
+        val key = g.optString("pin") + g.optString("title")
+        if (key == lastJoin || Netplay.lobby != null) return
+        lastJoin = key
+        val title = g.optString("title")
+        thread(name = "party-join", isDaemon = true) {
+            val addrs = g.optJSONArray("addrs")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
+            // the first address that answers (same WLAN, or the leader's Wi-Fi Direct net)
+            val reach = addrs.firstOrNull { a -> runCatching { Netplay.peer(a).optBoolean("reachable") }.getOrDefault(false) }
+            if (reach == null) {
+                Pals.notify(ctx, "${leader.optString("name").take(24)} spielt $title", "Nicht im gleichen Netz – übers Internet kommt noch")
+                return@thread
+            }
+            Pals.notify(ctx, "Party: ${leader.optString("name").take(24)} startet $title", "Du trittst bei …")
+            val job = Jobs.start("Party: $title") { j -> Netplay.join(ctx, reach, g.optString("pin"), j) }
+            Logs.i("party", "Trete $title bei (${reach})")
+            while (!job.done) Thread.sleep(500)
+            job.error?.let { Pals.notify(ctx, "Party: $title ging nicht", it.take(80)); Logs.i("party", "Beitritt: $it") }
+        }
+    }
+
     /** what this device tells its friends */
     fun status(ctx: Context): JSONObject {
         val st = JSONObject().put("on", true).put("app", "ThorBro")
         val p = mine(ctx)
         if (p != null) st.put("party", if (p.optString("leader") == Pals.myId(ctx))
             JSONObject().put("id", p.optString("id")).put("leader", Pals.myId(ctx)).put("open", Pals.partyOpen(ctx)).put("members", p.optJSONArray("members") ?: JSONArray())
+                .apply { gameInfo()?.let { put("game", it) } }
             else JSONObject().put("id", p.optString("id")).put("leader", p.optString("leader")))
         else if (Pals.partyOpen(ctx)) st.put("open", true) // alone, but friends may join
         return st
@@ -149,7 +190,11 @@ object Party {
         if (p.optString("leader") != friend.optString("id") || p.optString("leader") == Pals.myId(ctx)) return
         val lp = st.optJSONObject("party")
         val inIt = lp != null && lp.optString("id") == p.optString("id") && lp.optJSONArray("members").objs().any { it.optString("id") == Pals.myId(ctx) }
-        if (inIt) { if (!p.optBoolean("in")) { p.put("in", true); save(ctx, p) } ; return }
+        if (inIt) {
+            if (!p.optBoolean("in")) { p.put("in", true); save(ctx, p) }
+            lp!!.optJSONObject("game")?.let { followGame(ctx, friend, it) }
+            return
+        }
         // not in it (yet): a join just sent may not be in the leader's status yet
         if (p.optBoolean("in") || System.currentTimeMillis() - p.optLong("since") > 90_000) {
             save(ctx, null); publish(ctx)
