@@ -170,3 +170,19 @@ dialog.profilepick::backdrop { background: rgba(0, 0, 0, .6); }
 .gsave .card .t { font-size: 18px; font-weight: 700; margin: 2px 0; }
 .cmpchip { display: inline-block; font-size: 12px; padding: 2px 10px; border-radius: 999px; border: 1px solid currentColor; margin-left: 8px; vertical-align: middle; }
 @media (max-width: 560px) { .gsave { grid-template-columns: 1fr; } }
+
+/* friends menu (Pals.kt): a panel on the right */
+.friendsbtn { margin-left: 12px; position: relative; }
+#friendsBadge { position: absolute; top: -6px; right: -6px; background: #e5484d; color: #fff; border-radius: 9px; font-size: 11px; padding: 1px 6px; }
+dialog.friends { margin: 12px 12px 12px auto; height: calc(100vh - 24px); max-height: none; width: min(420px, calc(100vw - 24px)); border: 1px solid var(--line);
+  border-radius: 18px; background: var(--panel); color: var(--text); padding: 18px; overflow: auto; }
+dialog.friends::backdrop { background: rgba(0, 0, 0, .45); }
+dialog.friends .me { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+.avatar { width: 40px; height: 40px; border-radius: 50%; background: #5a5e68; display: grid; place-items: center; font-weight: 700; flex: none; }
+.avatar.big { width: 52px; height: 52px; }
+dialog.friends h4 { margin: 16px 0 6px; color: var(--muted); font-size: 13px; }
+.person { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 12px; background: rgba(255,255,255,.05); margin-bottom: 6px; }
+.person .grow { flex: 1; min-width: 0; }
+.keycode { font-size: 28px; letter-spacing: 6px; margin: 8px 0; }
+#friendAdd { max-height: calc(100vh - 48px); overflow: auto; }
+.avatar.on { box-shadow: 0 0 0 2px #3fb950; }

@@ -25,6 +25,7 @@
     <button data-tab="device">Gerät</button>
   </nav>
   <span id="conn" class="muted"></span>
+  <button id="friendsBtn" class="friendsbtn" title="Freunde">👥 Freunde<span id="friendsBadge" hidden></span></button>
 </header>
 
 <main>
@@ -158,56 +159,19 @@
   <section id="netplay" class="tab" hidden>
     <div class="panel">
       <h3>Zusammen spielen</h3>
-      <div class="sub">Spiel wählen → „Spielen“. ThorBro öffnet die Lobby und Wi-Fi Direct; ein Thor in der Nähe bekommt eine Einladung und tritt mit einem Druck bei – ohne Router, ohne Internet. Beide Thors spielen selbst, nur die Eingaben gehen übers Netz. Für 3DS läuft der Azahar-Raum auf diesem Thor.</div>
-      <div class="row"><span id="npStatus" class="muted grow">Lade …</span><button id="npClose" hidden>Beenden</button></div>
+      <div class="sub">Mitspielen geht über die Party: oben rechts das Freunde-Menü öffnen (am Thor L2), Freunde einladen. Startet der Leiter ein Spiel, startet es bei allen. 3DS (Azahar) und Switch (Eden) treten immer 127.0.0.1 bei – ThorBro führt das zum Raum des Leiters, im WLAN, über NetBird oder übers Internet (verschlüsselt, ohne Adresse oder Code).</div>
+      <div class="row"><span id="npStatus" class="muted grow">Lade …</span><button id="npFriends" class="primary">Freunde &amp; Party</button><button id="npClose" hidden>Spiel für die Party beenden</button></div>
       <div id="npLobby"></div>
+      <pre id="npHow"></pre>
     </div>
     <div class="panel">
-      <h3>Einladungen in der Nähe</h3>
-      <div class="sub">Thors mit ThorBro laden per Funk ein (Wi-Fi Direct). Beitreten verbindet automatisch, holt das Spiel und startet es.</div>
-      <div class="row"><button id="invScan" class="primary">In der Nähe suchen</button><span id="invInfo" class="muted grow"></span></div>
-      <div id="invList" class="cards"></div>
-    </div>
-    <div class="panel">
-      <h3>Spielserver</h3>
-      <div class="sub" id="npSupported"></div>
-      <div class="row"><button id="svToggle" class="primary">Spielserver starten</button><span id="svState" class="muted grow"></span></div>
-      <pre id="svInfo" hidden></pre>
-    </div>
-    <div class="panel">
-      <h3>Online spielen</h3>
-      <div class="sub">Freunde überall: Code zeigen, sie geben ihn bei sich ein, ThorBro verbindet direkt und verschlüsselt. In Azahar bleibt alles gleich (127.0.0.1). Bis zu 7 Gäste. Wer einmal drin war, kommt ohne Code wieder.</div>
-      <div class="row"><button id="onInvite" class="primary">Online einladen</button><span id="onState" class="muted grow"></span></div>
-      <div id="onBox" hidden>
-        <p id="onCode" style="font-size:2em;font-family:monospace;letter-spacing:.15em"></p>
-        <div class="muted" id="onCodeSub"></div>
-        <div class="row"><button id="onNew">Neuer Code</button><button id="onClose">Online schließen</button><button id="onReset">Alle aussperren</button></div>
-      </div>
-      <div class="row"><input id="onJoinCode" class="grow" placeholder="Code eines Freundes: 8 Ziffern 1–8 oder U D L R A B X Y"><button id="onJoin">Beitreten</button></div>
-      <div id="onKnown" class="row"></div>
-      <div id="onJoinInfo" class="muted"></div>
-    </div>
-    <div class="panel">
-      <h3>Freunde</h3>
-      <div class="sub">Einmal eine Einladung annehmen, dann kennen sich die Thors: Einladungen kommen als Benachrichtigung (auch in ES-DE &amp; Co.), und ein Spiel, das du in irgendeinem Frontend startest, lädt deine Freunde von selbst ein (braucht Shizuku).</div>
-      <div id="frList" class="cards"></div>
-      <div class="row"><label><input type="checkbox" id="frAuto"> Automatisch einladen, wenn ein Spiel startet</label><button id="frPrepare">Emulatoren einrichten</button><span id="frInfo" class="muted grow"></span></div>
-    </div>
-    <div class="panel">
-      <h3>Ein Bildschirm, zwei Spieler</h3>
-      <div class="sub">Dolphin und melonDS haben am Thor keinen Mehrspieler übers Netz. Stattdessen: am zweiten Thor ThorBro → Multiplayer → „Thor als Controller“ – er wird zum Bluetooth-Gamepad für diesen Thor (oder einen Fernseher), beide spielen auf einem Bildschirm.</div>
-    </div>
-    <details class="panel">
-      <summary><h3 style="display:inline">Erweitert</h3> <span class="muted">gleiches WLAN, PIN, Wi-Fi Direct von Hand, NetBird</span></summary>
-      <p class="muted" id="npAddrs"></p>
-      <div class="row"><label><input type="checkbox" id="npWlan"> Nur WLAN (kein Wi-Fi Direct): beide Thors im selben WLAN oder über NetBird</label></div>
-      <h3>Einem Thor beitreten</h3>
-      <div class="row"><button id="npScan" class="primary">Thors suchen</button><input id="npAddr" placeholder="oder IP, z. B. 100.116.x.x (NetBird)" size="24"><button id="npAddrGo">Prüfen</button><span id="npScanInfo" class="muted grow"></span></div>
-      <div id="npPeers" class="cards"></div>
-      <h3>Wi-Fi Direct von Hand</h3>
-      <div class="sub">Startet sonst automatisch beim Spielen. Andere Geräte (auch ohne ThorBro) verbinden sich in den normalen WLAN-Einstellungen und können dort ThorBro herunterladen.</div>
+      <h3>Werkzeuge</h3>
+      <div class="row"><button id="npPrepare">Emulatoren einrichten</button><span id="npInfo" class="muted grow"></span></div>
+      <div class="sub">Thor als Controller: am zweiten Thor ThorBro → Multiplayer → „Thor als Controller“ – er wird zum Bluetooth-Gamepad für diesen Thor oder einen Fernseher.</div>
+      <h3>ThorBro weitergeben</h3>
+      <div class="sub">Im selben WLAN per Link/QR-Code, sonst über Wi-Fi Direct: andere Geräte verbinden sich in den WLAN-Einstellungen und laden ThorBro dort herunter.</div>
       <div class="row"><button id="dxStart">Wi-Fi Direct starten</button><button id="dxStop" hidden>Beenden</button><span id="dxInfo" class="muted grow"></span></div>
-    </details>
+    </div>
   </section>
 
   <section id="drivers" class="tab" hidden>
@@ -252,6 +216,8 @@
 </main>
 <dialog id="romDetail"></dialog>
 <dialog id="profilePick" class="profilepick"></dialog>
+<dialog id="friendsDlg" class="friends"></dialog>
+<dialog id="friendAdd" class="profilepick"></dialog>
 <script src="app.js"></script>
 </body>
 </html>

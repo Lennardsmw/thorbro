@@ -70,6 +70,8 @@ import org.json.JSONObject
 import wtf.lennard.thorbro.AppActivity
 import wtf.lennard.thorbro.Device
 import wtf.lennard.thorbro.MainActivity
+import androidx.compose.material.icons.filled.Folder
+import wtf.lennard.thorbro.Library
 import wtf.lennard.thorbro.Prefs
 import wtf.lennard.thorbro.Romm
 import wtf.lennard.thorbro.RommSync
@@ -97,7 +99,9 @@ class ThorActivity : ComponentActivity() {
         setContent { ThorTheme { Box(Modifier.fillMaxSize()) {
             Root(screen.value) { screen.value = it }
             BackgroundOverlay(Modifier.align(Alignment.TopEnd))
+            FriendsPanel()
         } } }
+        if (intent?.getBooleanExtra("friends", false) == true) FriendsUi.open = true
     }
 
     // full screen like a console: bars come back only with a swipe from the edge
@@ -109,6 +113,7 @@ class ThorActivity : ComponentActivity() {
     // moving between the two screens no longer recreates the activity (configChanges) – just note where we are
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) { super.onConfigurationChanged(newConfig); rememberDisplay() }
     override fun onResume() { super.onResume(); rememberDisplay() }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); if (intent.getBooleanExtra("friends", false)) FriendsUi.open = true }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         // the live tester and player assignment only matter on the controller page
@@ -126,6 +131,8 @@ class ThorActivity : ComponentActivity() {
                 return true
             }
             KeyEvent.KEYCODE_BUTTON_R1 -> if (screen.value == null) { screen.value = Screen.GAMES; return true }
+            // L2 opens the friends menu from every page (inside the menu, L2 closes it again)
+            KeyEvent.KEYCODE_BUTTON_L2 -> if (openDialogs <= 0) { FriendsUi.open = true; return true }
         }
         return super.dispatchKeyEvent(event)
     }
@@ -211,6 +218,9 @@ private fun SettingsScreen() {
     var updMsg by remember { mutableStateOf("") }
     var menu by remember { mutableStateOf(false) }
     var dataTick by remember { mutableIntStateOf(0) }
+    var romMenu by remember { mutableStateOf(false) }
+    var romRoot by remember { mutableStateOf("") }
+    LaunchedEffect(tick / 10) { romRoot = withContext(Dispatchers.IO) { Library.romsRoot(ctx).path } }
     fun open(action: String) = ctx.startActivity(Intent(action, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     val (lan, mesh) = remember(tick) { ipv4() }
     val version = remember { Updater.current(ctx) }
@@ -254,6 +264,8 @@ private fun SettingsScreen() {
                 wtf.lennard.thorbro.DataSaver.setKeep(ctx, c[(c.indexOf(keep) + 1) % c.size]); dataTick++
             }
         }
+        header("Speicher", "wohin Downloads und empfangene Spiele kommen")
+        item { ConsoleTile("ROM-Ordner", romRoot, androidx.compose.material.icons.Icons.Filled.Folder) { romMenu = true } }
         header("Weitergeben", "ThorBro an einen anderen Thor schicken – auch ohne gemeinsames WLAN")
         directTiles(ctx, direct, scope, share = true)
 
@@ -272,5 +284,20 @@ private fun SettingsScreen() {
     if (menu) ConsoleMenu("Im Browser öffnen",
         listOfNotNull(lan?.let { "http://$it:${ThorService.PORT}" }, mesh?.let { "http://$it:${ThorService.PORT}  (NetBird)" }).joinToString("\n") + "\nCode: ${Prefs.token(ctx)}",
         mono = true, options = emptyList()) { menu = false }
+    if (romMenu) {
+        val choices = remember { mutableStateOf<List<Pair<String, java.io.File>>>(emptyList()) }
+        LaunchedEffect(Unit) { choices.value = withContext(Dispatchers.IO) { Library.romsRootChoices(ctx) } }
+        ConsoleMenu("ROM-Ordner", "Jetzt: $romRoot\nNeue Downloads und empfangene Spiele landen dort (je Konsole ein Unterordner). Spiele in anderen Ordnern bleiben, wo sie sind.",
+            options = choices.value.map { (label, f) ->
+                (if (f.path == romRoot) "✓ " else "") + "$label · ${f.path}" to {
+                    scope.launch {
+                        val err = withContext(Dispatchers.IO) { Library.setRomsRoot(ctx, f.path) }
+                        romRoot = withContext(Dispatchers.IO) { Library.romsRoot(ctx).path }
+                        if (err != null) android.widget.Toast.makeText(ctx, err, android.widget.Toast.LENGTH_LONG).show()
+                    }
+                    romMenu = false
+                }
+            }) { romMenu = false }
+    }
     DirectDialog(direct)
 }
