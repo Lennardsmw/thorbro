@@ -23,6 +23,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -190,7 +197,7 @@ fun ButtonHints(vararg hints: Pair<String, String>) {
         Row(Modifier.align(Alignment.CenterEnd), horizontalArrangement = Arrangement.spacedBy(22.dp)) {
             hints.forEach { (btn, what) ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(24.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
+                    Box(Modifier.height(24.dp).widthIn(min = 24.dp).clip(RoundedCornerShape(12.dp)).background(Color.White).padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
                         Text(btn, color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                     Text("  $what", fontSize = 14.sp)
@@ -200,47 +207,96 @@ fun ButtonHints(vararg hints: Pair<String, String>) {
     }
 }
 
+/** Start: the focused favorite fills the screen as artwork, its facts and state sit on top, the favorites run along the bottom */
 @Composable
 fun HomeScreen(open: (Screen) -> Unit, showDetail: (HomeGame) -> Unit) {
     val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
     LaunchedEffect(Favorites.paths.size) { HomeData.load(ctx) }
     Favorites.load(ctx)
     val favs = HomeData.games.filter { it.rom.getString("path") in Favorites.paths }
     val first = remember { FocusRequester() }
-    var focusedTitle by remember { mutableStateOf("") }
+    var focused by remember { mutableStateOf<HomeGame?>(null) }
     var message by remember { mutableStateOf("") }
     val start = rememberPlay(onError = { message = it })
     LaunchedEffect(Unit) { delay(300); runCatching { first.requestFocus() } }
 
-    Column(Modifier.fillMaxSize().glassBackground()) {
-        StatusBar("ThorBro")
-        Spacer(Modifier.height(18.dp))
-        Text(focusedTitle, Modifier.padding(start = 40.dp).height(30.dp), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        run {
-            LazyRow(contentPadding = PaddingValues(horizontal = 40.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                item { MoreTile(Modifier.focusRequester(first), onFocus = { focusedTitle = "Alle Spiele" }) { open(Screen.GAMES) } }
+    var tick by remember { mutableIntStateOf(0) }
+    WhileVisible { while (true) { delay(5000); tick++ } }
+    val romm = remember(tick) { wtf.lennard.thorbro.Romm.status(ctx).optBoolean("connected") }
+    val autoSync = remember(tick) { wtf.lennard.thorbro.RommSync.auto(ctx) }
+
+    val g = focused
+    val hero by produceState<File?>(null, g?.rom?.optString("path")) {
+        value = if (g == null) null else withContext(Dispatchers.IO) {
+            if (g.system == "ports") return@withContext null
+            runCatching { Cocoon.media(ctx, g.system, g.rom.getString("path"), "hero") }.getOrNull()
+        }
+    }
+    val cover by produceState<File?>(null, g?.rom?.optString("path")) {
+        value = if (g == null) null else withContext(Dispatchers.IO) {
+            if (g.system == "ports") return@withContext wtf.lennard.thorbro.Ports.icon(ctx, g.rom.optString("package"))
+            Cocoon.media(ctx, g.system, g.rom.getString("path"), "icon")
+                ?: g.meta.optString("cover").takeIf { it.isNotEmpty() }?.let { runCatching { Media.cover(ctx, g.system, it) }.getOrNull() }
+        }
+    }
+
+    CockpitActions(g?.title ?: "Start") {
+        if (g == null) listOf(CockpitAction("Alle Spiele", Icons.Filled.ViewModule, primary = true) { open(Screen.GAMES) })
+        else {
+            val path = g.rom.getString("path")
+            listOf(
+                CockpitAction("Spielen", Icons.Filled.PlayArrow, primary = true) { start(g.system, File(path)) },
+                CockpitAction("Details", Icons.Filled.Info) { showDetail(g) },
+                CockpitAction(if (path in Favorites.paths) "Favorit entfernen" else "Favorit", if (path in Favorites.paths) Icons.Filled.Star else Icons.Filled.StarBorder) { Favorites.toggle(ctx, path) },
+            )
+        }
+    }
+
+    Box(Modifier.fillMaxSize().glassBackground()) {
+        val back = hero ?: cover
+        if (back != null) Img(back, 1280, Modifier.fillMaxSize().then(if (hero == null) Modifier.blur(40.dp) else Modifier), ContentScale.Crop)
+        Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Color(0xF2050608), 0.55f to Color(0x99050608), 1f to Color(0x33050608))))
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.35f to Color.Transparent, 1f to Color(0xF2050608))))
+        Column(Modifier.fillMaxSize()) {
+            TopBar(Area.START)
+            Spacer(Modifier.weight(1f))
+            Column(Modifier.padding(start = 40.dp, end = 40.dp, bottom = 6.dp)) {
+                if (g == null) {
+                    Text("Alle Spiele", fontSize = 40.sp, fontWeight = FontWeight.Bold)
+                    Text("Deine Bibliothek, Store und Sync", fontSize = 16.sp, color = Muted)
+                } else {
+                    val facts = listOf(g.meta.optString("year"), g.meta.optString("developer"), g.meta.optString("genre")).filter { it.isNotEmpty() }
+                    if (facts.isNotEmpty()) Text(facts.joinToString("  ·  "), fontSize = 16.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(g.title, fontSize = 44.sp, lineHeight = 48.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    StatusChip(if (romm) "RomM verbunden" else "RomM nicht verbunden", if (romm) Tone.OK else Tone.NEUTRAL)
+                    if (romm) StatusChip(if (autoSync) "Auto-Sync an" else "Auto-Sync aus", if (autoSync) Tone.OK else Tone.WARN)
+                    StatusChip(if (wtf.lennard.thorbro.ThorService.running) "Server läuft" else "Server gestoppt", if (wtf.lennard.thorbro.ThorService.running) Tone.OK else Tone.BAD)
+                }
+                if (message.isNotEmpty()) Text(message, color = Bad, modifier = Modifier.padding(top = 6.dp))
+            }
+            LazyRow(contentPadding = PaddingValues(horizontal = 40.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                item { MoreTile(Modifier.focusRequester(first), onFocus = { focused = null }) { open(Screen.GAMES) } }
                 if (favs.isEmpty()) item {
-                    Box(Modifier.size(420.dp, 210.dp).clip(RoundedCornerShape(18.dp)).background(Panel).padding(24.dp), contentAlignment = Alignment.CenterStart) {
-                        Text("Noch keine Favoriten.\nIn „Alle Spiele“ ein Spiel öffnen und „☆ Zu Favoriten“ wählen.", color = Muted, fontSize = 16.sp)
+                    Box(Modifier.size(380.dp, TILE).clip(RoundedCornerShape(18.dp)).background(Panel).padding(24.dp), contentAlignment = Alignment.CenterStart) {
+                        Text("Noch keine Favoriten.\nIn „Alle Spiele“ ein Spiel öffnen und „Favorit“ wählen.", color = Muted, fontSize = 16.sp)
                     }
                 }
-                items(favs, key = { it.rom.getString("path") }) { g ->
-                    GameTile(g, Modifier,
-                        onFocus = { focusedTitle = g.title },
-                        onStart = { start(g.system, File(g.rom.getString("path"))) },
-                        onDetail = { showDetail(g) })
+                items(favs, key = { it.rom.getString("path") }) { fg ->
+                    GameTile(fg, Modifier,
+                        onFocus = { focused = fg },
+                        onStart = { start(fg.system, File(fg.rom.getString("path"))) },
+                        onDetail = { showDetail(fg) })
                 }
             }
+            ButtonHints("A" to "Starten", "X" to "Details", "L1 R1" to "Bereich")
         }
-        if (message.isNotEmpty()) Text(message, Modifier.padding(start = 40.dp), color = Bad)
-        Spacer(Modifier.weight(1f))
-        Row(Modifier.fillMaxWidth().padding(bottom = 22.dp), horizontalArrangement = Arrangement.Center) {
-            Screen.entries.forEach { s -> RoundButton(s.label, s.icon) { open(s) }; Spacer(Modifier.width(22.dp)) }
-        }
-        ButtonHints("A" to "Starten", "X" to "Details", "R1" to "Alle Spiele")
     }
 }
+
+private val TILE = 168.dp
 
 @Composable
 private fun GameTile(g: HomeGame, modifier: Modifier, onFocus: () -> Unit, onStart: () -> Unit, onDetail: () -> Unit) {
@@ -256,7 +312,7 @@ private fun GameTile(g: HomeGame, modifier: Modifier, onFocus: () -> Unit, onSta
     }
     val shape = RoundedCornerShape(18.dp)
     Box(
-        modifier.size(210.dp)
+        modifier.size(TILE)
             .onKeyEvent { e -> if (e.type == KeyEventType.KeyDown && (e.key == Key.ButtonX || e.key == Key.ButtonY)) { onDetail(); true } else false }
             .fx(fx, shape, lift = 1.08f, onClick = onStart)
             .background(Panel),
@@ -276,23 +332,10 @@ private fun MoreTile(modifier: Modifier, onFocus: () -> Unit, onClick: () -> Uni
     val fx = rememberFx()
     if (fx.active) LaunchedEffect(Unit) { onFocus() }
     val shape = RoundedCornerShape(18.dp)
-    Box(modifier.size(210.dp).fx(fx, shape, lift = 1.08f, onClick = onClick).background(GlassFill), contentAlignment = Alignment.Center) {
+    Box(modifier.size(TILE).fx(fx, shape, lift = 1.08f, onClick = onClick).background(GlassFill), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Filled.ViewModule, null, Modifier.size(54.dp))
             Text("Alle Spiele", fontSize = 16.sp)
         }
-    }
-}
-
-@Composable
-private fun RoundButton(label: String, icon: ImageVector, onClick: () -> Unit) {
-    val fx = rememberFx()
-    val focused = fx.active
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(64.dp).fx(fx, CircleShape, lift = 1.12f, frame = false, onClick = onClick)
-            .then(if (focused) Modifier.background(Accent) else Modifier.background(GlassFill)),
-            contentAlignment = Alignment.Center) { Icon(icon, label, Modifier.size(30.dp), tint = if (focused) OnAccent else Color.White) }
-        Spacer(Modifier.height(6.dp))
-        Text(if (focused) label else "", fontSize = 13.sp, color = Muted)
     }
 }

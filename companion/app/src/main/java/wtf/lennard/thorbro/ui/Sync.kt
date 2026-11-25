@@ -2,6 +2,9 @@ package wtf.lennard.thorbro.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -119,22 +122,40 @@ fun SyncScreen() {
     val entries = history.objs()
     val lastSave = entries.firstOrNull { it.optString("kind").startsWith("save") }
 
+    fun syncNow() {
+        if (busy.isNotEmpty() || !connected) return
+        busy = "Synchronisiert …"
+        scope.launch {
+            val d = withContext(Dispatchers.IO) { runCatching { RommSync.pullSaves(ctx) }.getOrElse { JSONObject().put("error", it.message) } }
+            val r = withContext(Dispatchers.IO) { runCatching { RommSync.syncSaves(ctx, null) }.getOrElse { JSONObject().put("error", it.message) } }
+            busy = ""
+            note = if (r.has("error")) "Fehler: ${r.optString("error")}" else "${r.optInt("uploaded")} hoch · ${d.optInt("downloaded")} runter"
+            tick++
+        }
+    }
+    CockpitActions("Sync") {
+        listOf(CockpitAction("Jetzt synchronisieren", Icons.Filled.Sync, primary = true) { syncNow() },
+            CockpitAction(if (auto) "Auto-Sync aus" else "Auto-Sync an", Icons.Filled.CloudDone) { auto = !auto; RommSync.setAuto(ctx, auto) })
+    }
+
     TileGrid(first) {
-        header("RomM", if (connected) st.optString("url").removePrefix("https://").removePrefix("http://") +
-            (if (st.optBoolean("viaLan")) " · über Heimnetz (schnell)" else "") +
-            (lastSave?.let { " · letzter Spielstand-Sync ${ago(it.optLong("t"))}" } ?: "") else "nicht verbunden – unten „RomM-Server hinzufügen“")
-        item {
-            ConsoleTile(if (busy.isNotEmpty()) busy else "Jetzt synchronisieren", note.ifEmpty { "Spielstände hoch und runter" },
-                Icons.Filled.Sync, accent = true, modifier = Modifier.firstFocus(first, true)) {
-                if (busy.isNotEmpty() || !connected) return@ConsoleTile
-                busy = "Synchronisiert …"
-                scope.launch {
-                    val d = withContext(Dispatchers.IO) { runCatching { RommSync.pullSaves(ctx) }.getOrElse { JSONObject().put("error", it.message) } }
-                    val r = withContext(Dispatchers.IO) { runCatching { RommSync.syncSaves(ctx, null) }.getOrElse { JSONObject().put("error", it.message) } }
-                    busy = ""
-                    note = if (r.has("error")) "Fehler: ${r.optString("error")}" else "${r.optInt("uploaded")} hoch · ${d.optInt("downloaded")} runter"
-                    tick++
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(GlassFill).border(1.dp, GlassLine, RoundedCornerShape(20.dp)).padding(20.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        StatusChip(if (connected) "RomM verbunden" else "RomM nicht verbunden", if (connected) Tone.OK else Tone.BAD)
+                        StatusChip(if (auto) "Auto-Sync an" else "Auto-Sync aus", if (auto) Tone.OK else Tone.WARN)
+                        if (connected && st.optBoolean("viaLan")) StatusChip("Heimnetz (schnell)", Tone.OK)
+                    }
+                    Text(if (connected) st.optString("url").removePrefix("https://").removePrefix("http://") else "Unten „RomM-Server hinzufügen“",
+                        fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(note.ifEmpty { lastSave?.let { "Letzter Spielstand-Sync ${ago(it.optLong("t"))}" } ?: "Noch kein Spielstand-Sync" },
+                        fontSize = 14.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
+                Spacer(Modifier.width(20.dp))
+                BigButton(if (busy.isNotEmpty()) busy else "Jetzt synchronisieren", Icons.Filled.Sync, primary = true, enabled = connected && busy.isEmpty(),
+                    modifier = Modifier.width(300.dp).firstFocus(first, true)) { syncNow() }
             }
         }
         item {
@@ -147,10 +168,8 @@ fun SyncScreen() {
                 }
             }
         }
-        item {
-            ConsoleTile(if (auto) "Auto-Sync an" else "Auto-Sync aus", if (auto) "lädt nach jedem Speichern hoch" else "nur per Knopf",
-                if (auto) Icons.Filled.CloudDone else Icons.Filled.SyncDisabled, accent = auto) { auto = !auto; RommSync.setAuto(ctx, auto) }
-        }
+        item { ToggleTile("Auto-Sync", auto, if (auto) "lädt nach jedem Speichern hoch" else "nur per Knopf",
+            if (auto) Icons.Filled.CloudDone else Icons.Filled.SyncDisabled) { auto = it; RommSync.setAuto(ctx, it) } }
         item {
             if (connected) ConsoleTile("RomM-Server", st.optString("url").removePrefix("https://").removePrefix("http://"), Icons.Filled.Dns) { serverOpen = true }
             else ConsoleTile("RomM-Server hinzufügen", "Adresse eingeben, Code in RomM bestätigen", Icons.Filled.AddLink, accent = true) { serverOpen = true }

@@ -29,3 +29,5 @@ Code, Versionen oder den Thor kaputtmacht, gelten diese Regeln für **jeden** Ch
    (`ui/*.kt`, Konsolen-Stil: Kacheln/`ConsoleTile`, `TileGrid`, `Shelves`, `ConsoleMenu`, `BigButton`).
 
 7. Commits und Repo-Dateien ohne Claude-/Anthropic-Hinweise.
+
+8. Neue Seiten und UI-Änderungen folgen `DESIGN.md` (Bereiche, Bausteine, Cockpit, Checkliste).

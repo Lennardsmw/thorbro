@@ -53,6 +53,9 @@ import wtf.lennard.thorbro.Library
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ArrowBack
@@ -101,22 +104,66 @@ fun GamesScreen() {
     val list = systems
     if (list == null) { Line("Suche Spiele …", Muted); return }
     if (list.isEmpty()) { Line("Keine Spiele gefunden. Lege sie unter ROMs/<Konsole> ab.", Muted); return }
-    val selId = GamesNav.system.value
-    val cur = list.firstOrNull { it.id == selId }
-    if (cur == null) { ConsoleGrid(list) { GamesNav.system.value = it }; return }
+    val cur = list.firstOrNull { it.id == GamesNav.system.value } ?: list.first()
     val meta by produceState<JSONObject?>(null, cur.id) { value = withContext(Dispatchers.IO) { runCatching { Media.metaFor(ctx, cur.id, cur.roms) }.getOrNull() } }
+    var filter by remember { mutableIntStateOf(0) }
+    var focusedGame by remember { mutableStateOf<JSONObject?>(null) }
+    val start = rememberPlay(onError = {})
+    val railFirst = remember { androidx.compose.ui.focus.FocusRequester() }
+    FocusOnStart(railFirst, cur.id.isEmpty())
+    Favorites.load(ctx)
+    val all = remember(cur.id, systems) { entries(cur) }
+    val games = lib?.optJSONObject("games")
+    val items = when (filter) {
+        1 -> all.filter { it.getString("path") in Favorites.paths }
+        2 -> all.filter { games?.optJSONObject(it.getString("path"))?.let { g -> !g.optBoolean("inRomm") } == true }
+        else -> all
+    }
+    val fg = focusedGame?.takeIf { f -> items.any { it.getString("path") == f.getString("path") } }
+
+    CockpitActions(fg?.let { title(it, meta?.optJSONObject(it.getString("path")) ?: JSONObject()) } ?: cur.name) {
+        if (fg == null) listOf(CockpitAction("Start", Icons.Filled.PlayArrow) { Nav.go(null) })
+        else {
+            val path = fg.getString("path")
+            val fav = path in Favorites.paths
+            listOf(
+                CockpitAction("Spielen", Icons.Filled.PlayArrow, primary = true) { start(cur.id, File(path)) },
+                CockpitAction("Details", Icons.Filled.Info) { open = fg },
+                CockpitAction(if (fav) "Favorit entfernen" else "Favorit", if (fav) Icons.Filled.Star else Icons.Filled.StarBorder) { Favorites.toggle(ctx, path) },
+            )
+        }
+    }
 
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        // console rail: focusing a console shows its games
+        androidx.compose.foundation.lazy.LazyColumn(Modifier.width(230.dp).fillMaxHeight(), contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp, horizontal = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(list, key = { it.id }) { s ->
+                ConsoleRailItem(s.id, s.name, entries(s).size, s.id == cur.id, Modifier.then(if (s.id == cur.id) Modifier.focusRequester(railFirst) else Modifier)) { GamesNav.system.value = s.id }
+            }
+        }
         Column(Modifier.weight(1f)) {
-            Title(cur.name)
-            val items = remember(cur.id) { entries(cur) }
+            Row(Modifier.padding(start = 12.dp, top = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(cur.name, fontSize = 24.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, modifier = Modifier.padding(end = 8.dp))
+                listOf("Alle", "Favoriten", "Nicht in RomM").forEachIndexed { i, l -> FilterChip(l, filter == i) { filter = i } }
+            }
+            if (items.isEmpty()) Text(if (filter == 1) "Noch keine Favoriten in dieser Konsole." else "Nichts gefunden.", color = Muted, modifier = Modifier.padding(16.dp))
             val (gst, gfl) = snapGrid()
-            CenteredFocus { LazyVerticalGrid(GridCells.Adaptive(150.dp), state = gst, flingBehavior = gfl, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            CenteredFocus { LazyVerticalGrid(GridCells.Adaptive(150.dp), state = gst, flingBehavior = gfl, modifier = Modifier.weight(1f),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(items, key = { it.getString("path") }) { r ->
                     val m = meta?.optJSONObject(r.getString("path")) ?: JSONObject()
-                    GameCard(cur.id, r, m, lib?.optJSONObject("games")?.optJSONObject(r.getString("path"))) { open = r }
+                    GameCard(cur.id, r, m, games?.optJSONObject(r.getString("path")), Modifier.onFocusChanged { if (it.hasFocus) focusedGame = r }) { open = r }
                 }
             } }
+            // facts of the focused game
+            val fm = fg?.let { meta?.optJSONObject(it.getString("path")) } ?: JSONObject()
+            val info = fg?.let { f ->
+                val l = games?.optJSONObject(f.getString("path"))
+                listOfNotNull(title(f, fm), fmtBytes(f.optLong("size")), fm.optString("year").ifEmpty { null }, fm.optString("developer").ifEmpty { null },
+                    fm.optString("genre").ifEmpty { null }, if (l != null) (if (l.optBoolean("inRomm")) "in RomM" else "nicht in RomM") else null).joinToString("  ·  ")
+            } ?: "${items.size} Spiele"
+            Text(info, fontSize = 14.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 12.dp, top = 4.dp, bottom = 2.dp))
         }
     }
     open?.let { r ->
@@ -144,8 +191,8 @@ private fun cover(sys: String, r: JSONObject, m: JSONObject): File? {
 private fun title(r: JSONObject, m: JSONObject) = m.optString("title").ifEmpty { r.getString("name").substringBefore(" (").substringBefore(" [") }
 
 @Composable
-private fun GameCard(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject?, onOpen: () -> Unit) {
-    FocusCard(Modifier.fillMaxWidth(), onClick = onOpen) {
+private fun GameCard(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject?, modifier: Modifier = Modifier, onOpen: () -> Unit) {
+    FocusCard(modifier.fillMaxWidth(), onClick = onOpen) {
         val img = cover(sys, r, m)
         Box(Modifier.fillMaxWidth().aspectRatio(3f / 4f).clip(RoundedCornerShape(8.dp)).background(Bg), contentAlignment = Alignment.Center) {
             // every cover fills the same 3:4 frame (cropped), app icons of ports sit centered instead
@@ -174,6 +221,8 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
     val canPlay = remember(sys) { Emulators.forSystem(ctx, sys) }
     var confirm by remember { mutableStateOf(false) }
     var savesOpen by remember { mutableStateOf(false) }
+    var more by remember { mutableStateOf(false) }
+    var upProg by remember { mutableStateOf(0f) }
     var job by remember { mutableStateOf<Jobs.Job?>(null) }
     val start = rememberPlay(onError = { msg = it }, onStarted = onClose)
     val size = group.sumOf { it.optLong("size") }
@@ -194,6 +243,7 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
         LaunchedEffect(j) {
             while (!j.done) {
                 upLabel = "Lädt hoch … ${(j.progress * 100).toInt()} %"
+                upProg = j.progress.toFloat()
                 msg = listOfNotNull(j.message.ifEmpty { null }, j.transfer()).joinToString(" · ")
                 kotlinx.coroutines.delay(500)
             }
@@ -260,17 +310,31 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
             }
             add(Triple("Zurück", Icons.Filled.ArrowBack, onClose))
         }
-        if (stacked) Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            list.chunked(2).forEachIndexed { row, pair -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                pair.forEachIndexed { i, (l, ic, a) ->
-                    BigButton(l, ic, primary = row == 0 && i == 0 && play != null, modifier = Modifier.weight(1f).firstFocus(first, row == 0 && i == 0), onClick = a)
+        // first = the one main action (wide), next two beside it, everything else behind "Mehr"
+        val shown = list.filter { it.first != "Zurück" }
+        val head = shown.take(3)
+        val rest = shown.drop(3)
+        CockpitActions(title(r, m)) { shown.mapIndexed { i, (l, ic, a) -> CockpitAction(l, ic, primary = i == 0 && play != null, onClick = a) } + CockpitAction("Zurück", Icons.Filled.ArrowBack, onClick = onClose) }
+        @Composable
+        fun Btn(i: Int, mod: Modifier) { val (l, ic, a) = head[i]; BigButton(l, ic, primary = i == 0 && play != null, modifier = mod.firstFocus(first, i == 0), onClick = a) }
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (stacked) {
+                if (head.isNotEmpty()) Btn(0, Modifier.fillMaxWidth())
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    for (i in 1 until head.size) Btn(i, Modifier.weight(1f))
+                    BigButton("⋯ Mehr", modifier = Modifier.weight(1f)) { more = true }
                 }
-            } }
-        } else Row(Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 6.dp, horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            list.forEachIndexed { i, (l, ic, a) ->
-                BigButton(l, ic, primary = i == 0 && play != null, modifier = (if (i == 0 && play != null) Modifier.width(220.dp) else Modifier).firstFocus(first, i == 0), onClick = a)
+            } else Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (head.isNotEmpty()) Btn(0, Modifier.width(240.dp))
+                for (i in 1 until head.size) Btn(i, Modifier)
+                BigButton("⋯ Mehr") { more = true }
+            }
+            // inline progress under the buttons while the upload runs
+            if (upJob != null) Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(Color(0x33FFFFFF))) {
+                Box(Modifier.fillMaxWidth(upProg.coerceIn(0.02f, 1f)).height(6.dp).background(Accent))
             }
         }
+        if (more) ConsoleMenu(title(r, m), options = rest.map { (l, _, a) -> l to { more = false; a() } }) { more = false }
     }
 
     DialogOpen()
@@ -355,24 +419,29 @@ private fun OffloadConfirm(name: String, size: Long, inRomm: Boolean, onYes: () 
         options = listOf("Auslagern" to onYes), onClose = onClose)
 
 @Composable
-private fun ConsoleGrid(list: List<Sys>, pick: (String) -> Unit) {
+private fun ConsoleRailItem(id: String, name: String, count: Int, selected: Boolean, modifier: Modifier, onFocus: () -> Unit) {
     val ctx = LocalContext.current
-    val first = remember { androidx.compose.ui.focus.FocusRequester() }
-    LaunchedEffect(Unit) { kotlinx.coroutines.delay(200); runCatching { first.requestFocus() } }
-    val (cst, cfl) = snapGrid()
-    CenteredFocus { LazyVerticalGrid(GridCells.Adaptive(190.dp), state = cst, flingBehavior = cfl, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        items(list.size) { i ->
-            val s = list[i]
-            FocusCard(if (i == 0) Modifier.fillMaxWidth().focusRequester(first) else Modifier.fillMaxWidth(), onClick = { pick(s.id) }) {
-                val icon by produceState<File?>(null, s.id) {
-                    value = withContext(Dispatchers.IO) { runCatching { Media.icon(ctx, s.id) }.getOrNull() }
-                }
-                Box(Modifier.fillMaxWidth().height(110.dp), contentAlignment = Alignment.Center) {
-                    if (icon != null) Img(icon, 200, Modifier.size(90.dp)) else Text(s.name.take(2), fontSize = 40.sp, color = Muted)
-                }
-                Text(s.name, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("${entries(s).size} Spiele · ${fmtBytes(s.roms.sumOf { it.optLong("size") })}", color = Muted, fontSize = 13.sp)
-            }
+    val fx = rememberFx()
+    if (fx.active) LaunchedEffect(id) { onFocus() }
+    val icon by produceState<File?>(null, id) { value = withContext(Dispatchers.IO) { runCatching { Media.icon(ctx, id) }.getOrNull() } }
+    val shape = RoundedCornerShape(16.dp)
+    Row(modifier.fillMaxWidth().fx(fx, shape, lift = 1.03f, restLine = false) { onFocus() }
+        .background(if (selected) Color(0x33FFFFFF) else Color.Transparent).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) {
+            if (icon != null) Img(icon, 96, Modifier.fillMaxSize()) else Text(name.take(2), color = Muted, fontSize = 16.sp)
         }
-    } }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(name, fontSize = 15.sp, fontWeight = if (selected) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("$count Spiele", fontSize = 12.sp, color = Muted)
+        }
+    }
+}
+
+@Composable
+private fun FilterChip(text: String, on: Boolean, onClick: () -> Unit) {
+    val fx = rememberFx()
+    Text(text, fontSize = 14.sp, color = if (on) Color.Black else Color.White, maxLines = 1,
+        modifier = Modifier.fx(fx, RoundedCornerShape(50), lift = 1.06f, restLine = !on, onClick = onClick)
+            .background(if (on) Color(0xE6FFFFFF) else Color(0x1AFFFFFF)).padding(horizontal = 14.dp, vertical = 6.dp))
 }

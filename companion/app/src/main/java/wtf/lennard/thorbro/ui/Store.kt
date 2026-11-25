@@ -60,7 +60,7 @@ fun StoreScreen() {
             value = if (g.optBoolean("hasCover")) withContext(Dispatchers.IO) { Library.coverFile(ctx, id) } else null
         }
         val sub = when {
-            job == null -> fmtBytes(g.optLong("size"))
+            job == null -> fmtBytes(g.optLong("size")) + (if (free < 0) "" else if (g.optLong("size") <= free) " · passt" else " · passt nicht")
             job.error != null -> "Fehler"
             job.done -> "auf dem Thor"
             else -> "${(job.progress * 100).toInt()} %"

@@ -77,7 +77,8 @@ import java.net.NetworkInterface
 
 /** Native ThorBro on the device: gamepad first, only what matters. */
 class ThorActivity : ComponentActivity() {
-    private val screen = androidx.compose.runtime.mutableStateOf<Screen?>(null)
+    // shared with the second screen (cockpit), which switches areas by touch
+    private val screen = Nav.screen
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -98,16 +99,21 @@ class ThorActivity : ComponentActivity() {
     // full screen like a console: bars come back only with a swipe from the edge
     override fun onWindowFocusChanged(hasFocus: Boolean) { super.onWindowFocusChanged(hasFocus); if (hasFocus) immersive(window) }
 
+    // two-screen mode: the cockpit lives exactly as long as ThorBro is in front
+    override fun onStart() { super.onStart(); SecondScreen.show(this) }
+    override fun onStop() { SecondScreen.hide(); super.onStop() }
+
     // L1 / R1 switch sections; every key and stick move also feeds the controller tester
     private fun rememberDisplay() { runCatching { wtf.lennard.thorbro.Emulators.display = display?.displayId ?: 0 } }
 
     // moving between the two screens no longer recreates the activity (configChanges) – just note where we are
-    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) { super.onConfigurationChanged(newConfig); rememberDisplay() }
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) { super.onConfigurationChanged(newConfig); rememberDisplay(); SecondScreen.refresh(this) }
     override fun onResume() { super.onResume(); rememberDisplay() }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         // the live tester and player assignment only matter on the controller page
         if (screen.value == Screen.CONTROLLER) Pads.onKey(event)
+        if (event.action == KeyEvent.ACTION_DOWN && openDialogs <= 0 && navKey(event.keyCode)) return true
         if (event.action == KeyEvent.ACTION_DOWN) when (event.keyCode) {
             KeyEvent.KEYCODE_BUTTON_B, KeyEvent.KEYCODE_BACK -> if (openDialogs <= 0) {
                 // on the start screen B does nothing (a console does not quit with B); only the system back gesture leaves
@@ -123,6 +129,24 @@ class ThorActivity : ComponentActivity() {
             KeyEvent.KEYCODE_BUTTON_R1 -> if (screen.value == null) { screen.value = Screen.GAMES; return true }
         }
         return super.dispatchKeyEvent(event)
+    }
+
+    /** L1/R1 = previous/next area, Select = activity drawer, B on the library = back to Start (DESIGN.md: Tasten) */
+    private fun navKey(code: Int): Boolean {
+        val s = screen.value
+        // the controller tester and the L+R player order need the shoulder buttons themselves
+        val padBusy = s == Screen.CONTROLLER && (Pads.lrMode || ControllerNav.panel.value != null)
+        return when (code) {
+            KeyEvent.KEYCODE_BUTTON_R1 -> !padBusy && run { Nav.step(1); true }
+            KeyEvent.KEYCODE_BUTTON_L1 -> !padBusy && run { Nav.step(-1); true }
+            KeyEvent.KEYCODE_BUTTON_SELECT -> { ActivityUi.open = !ActivityUi.open; true }
+            KeyEvent.KEYCODE_BUTTON_B, KeyEvent.KEYCODE_BACK -> when {
+                ActivityUi.open -> { ActivityUi.open = false; true }
+                s == Screen.GAMES -> { Nav.go(null); true }  // the console list sits beside the games, there is no level above
+                else -> false
+            }
+            else -> false
+        }
     }
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
@@ -142,7 +166,7 @@ class ThorActivity : ComponentActivity() {
 }
 
 @Composable
-private fun Root(screen: Screen?, open: (Screen?) -> Unit) {
+private fun Root(screen: Screen?, @Suppress("UNUSED_PARAMETER") open: (Screen?) -> Unit) {
     val page = when {
         screen == null -> "Start"
         screen == Screen.GAMES && GamesNav.system.value != null -> "Spiele: " + GamesNav.system.value
@@ -151,24 +175,26 @@ private fun Root(screen: Screen?, open: (Screen?) -> Unit) {
     if (wtf.lennard.thorbro.FrameStats.page != page) { wtf.lennard.thorbro.Logs.i("ui", "Seite: $page"); wtf.lennard.thorbro.FrameStats.page = page }
     var detail by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<HomeGame?>(null) }
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    val area = Area.of(screen)
     if (screen == null) {
-        HomeScreen(open = { open(it) }, showDetail = { detail = it })
+        HomeScreen(open = { Nav.go(it) }, showDetail = { detail = it })
     } else {
         Column(Modifier.fillMaxSize().glassBackground()) {
-            StatusBar(screen.label)
+            TopBar(area)
+            PageRow(area, screen)
             Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 32.dp, vertical = 8.dp)) {
                 when (screen) {
                     Screen.GAMES -> GamesScreen()
                     Screen.SYNC -> SyncScreen()
                     Screen.CONTROLLER -> ControllerScreen()
-                    Screen.SETTINGS -> SettingsScreen()
+                    Screen.SETTINGS -> SystemScreen()
                     Screen.STORE -> StoreScreen()
                     Screen.STREAM -> StreamScreen()
                     Screen.NETPLAY -> NetplayScreen()
                     Screen.DRIVERS -> DriversScreen()
                 }
             }
-            ButtonHints("A" to "Auswählen", "B" to "Zurück")
+            ButtonHints("A" to "Auswählen", "B" to "Start", "L1 R1" to "Bereich")
         }
     }
     detail?.let { g ->
