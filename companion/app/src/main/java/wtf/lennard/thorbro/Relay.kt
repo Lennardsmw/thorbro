@@ -83,9 +83,10 @@ class UdpRelay(val port: Int, val ownRoom: Int, val what: String) {
 
     private fun listen(name: String, to: InetSocketAddress?, t: Tunnel.Guest?, newUp: (SocketAddress, DatagramSocket) -> Up): String? {
         stop()
-        val s = runCatching {
-            DatagramSocket(null).apply { reuseAddress = true; bind(InetSocketAddress(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), port)) }
-        }.getOrElse { return "Port $port belegt (Raum im Emulator-Menü erstellt?)" }
+        // (not inside DatagramSocket.apply: there `port` would be the socket's own, -1)
+        val local = InetSocketAddress(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), port)
+        val s = runCatching { DatagramSocket(null).apply { reuseAddress = true; bind(local) } }
+            .getOrElse { return "Port $port: ${it.message ?: "belegt"} (Raum im Emulator-Menü erstellt?)" }
         sock = s; target = to; tunnel = t; hostName = name; lastTraffic = 0
         Logs.i("relay", "$what: 127.0.0.1:$port → $name (${to?.address?.hostAddress ?: "Party-Tunnel"})")
         thread(name = "relay-in", isDaemon = true) {
