@@ -56,6 +56,7 @@ fun StreamScreen() {
     var live by remember { mutableStateOf(wtf.lennard.thorbro.Screen.running) }
     var starting by remember { mutableStateOf(wtf.lennard.thorbro.Screen.starting) }
     WhileVisible { while (true) { live = wtf.lennard.thorbro.Screen.running; starting = wtf.lennard.thorbro.Screen.starting; delay(500) } }
+    WhileVisible { while (true) { delay(2000); st = st?.let { o -> JSONObject(o.toString()).put("usb", Streaming.usbAdb(ctx)).put("tunnel", wtf.lennard.thorbro.MoonTunnel.status()) } } }
     val s = st
     val installed = s?.optBoolean("installed") == true
     val update = s?.optBoolean("updateAvailable") == true
@@ -73,8 +74,8 @@ fun StreamScreen() {
             when {
                 j != null -> ConsoleTile(if (j.done) (j.error ?: "Am Thor bestätigen") else "Lädt …", "${(prog * 100).toInt()} %",
                     Icons.Filled.Download, progress = prog, modifier = Modifier.firstFocus(first, true)) {}
-                installed -> ConsoleTile("Moonlight", "Version ${s?.optString("version")}", Icons.Filled.PlayArrow, accent = true,
-                    modifier = Modifier.firstFocus(first, true)) { Apps.launch(ctx, Streaming.MOONLIGHT) }
+                installed -> ConsoleTile("Moonlight", moonlightVia(s), Icons.Filled.PlayArrow, accent = true,
+                    modifier = Modifier.firstFocus(first, true)) { runCatching { Streaming.moonlightOpen(ctx) } }
                 else -> ConsoleTile("Moonlight installieren", s?.optString("latest")?.let { "Version $it" } ?: "", Icons.Filled.Download,
                     accent = true, modifier = Modifier.firstFocus(first, true)) { install() }
             }
@@ -142,9 +143,17 @@ fun StreamScreen() {
         else -> {
             val h = JSONObject(m.removePrefix("host:"))
             ConsoleMenu(h.optString("name"), "In Moonlight antippen, dann die PIN am PC unter ${h.optString("web")} eingeben.",
-                options = if (installed) listOf("Moonlight öffnen" to { Apps.launch(ctx, Streaming.MOONLIGHT); menu = null }) else emptyList()) { menu = null }
+                options = if (installed) listOf("Moonlight öffnen" to { runCatching { Streaming.moonlightOpen(ctx) }; menu = null }) else emptyList()) { menu = null }
         }
     }
+}
+
+/** "über USB" / "über WLAN" for the Moonlight tile: a cable beats the air (RomBro runs the tunnel then) */
+private fun moonlightVia(s: JSONObject?): String {
+    val v = "Version ${s?.optString("version")}"
+    if (s?.optBoolean("usb") != true) return "$v · über WLAN"
+    val t = s.optJSONObject("tunnel")
+    return "$v · über USB" + when { t?.optBoolean("connected") == true -> " ✓"; t?.optBoolean("running") == true -> " (wartet auf Mac)"; else -> "" }
 }
 
 /** GPU drivers (Turnip / Qualcomm) for Eden, Azahar, Dolphin, as tiles */
