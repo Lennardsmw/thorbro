@@ -204,7 +204,7 @@ fun ControllerPanels(panel: String) {
                         if (Pads.assigning == slot) Text("Jetzt eine Taste auf dem Controller drücken …", Modifier.weight(1f), color = Accent)
                         else {
                             if (!p.isNull("name")) StatusDot(p.optBoolean("connected"))
-                            Text(if (p.isNull("name")) "—" else p.optString("name") + if (p.optBoolean("connected")) "" else " (nicht verbunden)", Modifier.weight(1f), color = if (p.isNull("name")) Muted else androidx.compose.ui.graphics.Color.White)
+                            Text(if (p.isNull("name")) "—" else p.optString("name") + if (p.optBoolean("connected")) "" else " (nicht verbunden)", Modifier.weight(1f), color = if (p.isNull("name")) Muted else Ink)
                         }
                         Act("Zuweisen") { Pads.assigning = slot; Pads.assignArmedAt = System.currentTimeMillis() }
                         Spacer(Modifier.width(8.dp))
@@ -223,7 +223,7 @@ fun ControllerPanels(panel: String) {
                     buttons.forEach { (code, label) ->
                         val on = Pads.pressed[code] == true
                         Box(Modifier.clip(RoundedCornerShape(10.dp)).background(if (on) Accent else Panel).padding(horizontal = 12.dp, vertical = 8.dp)) {
-                            Text(label, fontSize = 15.sp, color = if (on) OnAccent else androidx.compose.ui.graphics.Color.White)
+                            Text(label, fontSize = 15.sp, color = if (on) OnAccent else Ink)
                         }
                     }
                 }
@@ -490,7 +490,7 @@ private fun MenuPill(label: String, icon: androidx.compose.ui.graphics.vector.Im
     Row(modifier.fillMaxWidth().height(62.dp).fx(fx, shape, lift = 1.03f, frame = false, onClick = onClick)
         .then(if (focused) Modifier.background(Accent) else Modifier.background(GlassFill))
         .padding(horizontal = 22.dp), verticalAlignment = Alignment.CenterVertically) {
-        val fg = if (focused) OnAccent else androidx.compose.ui.graphics.Color.White
+        val fg = if (focused) OnAccent else Ink
         Icon(icon, null, Modifier.size(26.dp), tint = fg)
         Spacer(Modifier.width(16.dp))
         Text(label, fontSize = 18.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, color = fg, maxLines = 1,
@@ -534,7 +534,7 @@ private fun PlayerLights(slot: Int) {
         for (i in 1..4) {
             val on = i <= slot && slot > 0 && (i == slot)
             Box(Modifier.size(14.dp, 6.dp).clip(RoundedCornerShape(3.dp))
-                .background(if (on) androidx.compose.ui.graphics.Color(0xFF7CFF9C) else androidx.compose.ui.graphics.Color(0x33FFFFFF)))
+                .background(if (on) androidx.compose.ui.graphics.Color(0xFF7CFF9C) else Soft))
         }
         if (slot > 0) Text("  P$slot", fontSize = 13.sp, color = Muted)
     }

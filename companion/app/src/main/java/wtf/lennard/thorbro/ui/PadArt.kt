@@ -19,7 +19,7 @@ import wtf.lennard.thorbro.PadModel
  * Own drawings, one per family: Xbox, PlayStation 4/5, Switch Pro, Joy-Con, Steam Controller, 8BitDo, Thor.
  */
 @Composable
-fun PadArt(model: PadModel, modifier: Modifier, light: Color? = null, tint: Color = Color.White) {
+fun PadArt(model: PadModel, modifier: Modifier, light: Color? = null, tint: Color = Ink) {
     Canvas(modifier) {
         val ar = when (model) { PadModel.JOYCON_L, PadModel.JOYCON_R -> 0.5f; PadModel.THOR -> 1.0f; else -> 1.45f }
         val w0 = minOf(size.width, size.height * ar); val h0 = w0 / ar

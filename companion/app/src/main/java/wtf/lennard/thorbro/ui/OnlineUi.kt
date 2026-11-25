@@ -63,7 +63,7 @@ internal fun KeyCap(sym: String?, size: Int = 64, onClick: (() -> Unit)? = null)
     }
     val shape = if (face != null) CircleShape else RoundedCornerShape(14.dp)
     Box(Modifier.size(size.dp).clip(shape)
-        .background(face ?: if (sym != null) Color(0xFF3A3D45) else Color(0xFF1C1E23))
+        .background(face ?: if (sym != null) Color(0xFF3A3D45) else Card)
         .border(2.dp, if (sym == null) Color(0xFF33363E) else Color.White.copy(alpha = 0.18f), shape)
         .let { if (onClick != null) it.clickable { onClick() } else it },
         contentAlignment = Alignment.Center) {
@@ -89,7 +89,7 @@ private fun Panel(onClose: () -> Unit, modifier: Modifier = Modifier, content: @
     DialogOpen()
     Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         ImmersiveDialog()
-        Column(modifier.width(780.dp).clip(RoundedCornerShape(22.dp)).background(Color(0xF0141519)).padding(horizontal = 28.dp, vertical = 22.dp),
+        Column(modifier.width(780.dp).clip(RoundedCornerShape(22.dp)).background(Sheet).padding(horizontal = 28.dp, vertical = 22.dp),
             horizontalAlignment = Alignment.CenterHorizontally) { content() }
     }
 }
@@ -185,7 +185,7 @@ fun FriendsDialog(
 
 @Composable
 private fun FriendRow(name: String, sub: String, buttons: @Composable () -> Unit) {
-    Row(Modifier.width(720.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xFF1C1E23)).padding(horizontal = 16.dp, vertical = 10.dp),
+    Row(Modifier.width(720.dp).clip(RoundedCornerShape(14.dp)).background(Card).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(40.dp).clip(CircleShape).background(Color(0xFF3A3D45)), contentAlignment = Alignment.Center) {
             Text(name.take(1).uppercase(), fontSize = 18.sp, fontWeight = FontWeight.Bold)

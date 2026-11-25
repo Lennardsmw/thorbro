@@ -88,7 +88,7 @@ fun FriendsButton() {
     Box {
         Box(Modifier.size(38.dp).fx(fx, CircleShape, lift = 1.1f) { FriendsUi.open = true }
             .then(if (fx.active) Modifier.background(Accent) else Modifier.background(GlassFill)), contentAlignment = Alignment.Center) {
-            Icon(Icons.Filled.Group, "Freunde (L2)", Modifier.size(22.dp), tint = if (fx.active) OnAccent else Color.White)
+            Icon(Icons.Filled.Group, "Freunde (L2)", Modifier.size(22.dp), tint = if (fx.active) OnAccent else Ink)
         }
         if (waiting > 0) Box(Modifier.align(Alignment.TopEnd).size(16.dp).clip(CircleShape).background(Color(0xFFE5484D)), contentAlignment = Alignment.Center) {
             Text("$waiting", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
@@ -105,17 +105,17 @@ private fun Section(text: String) = Text(text, fontSize = 13.sp, color = Muted, 
 private fun PersonRow(name: String, sub: String, modifier: Modifier = Modifier, trailing: String = "", online: Boolean = false, onClick: () -> Unit) {
     val fx = rememberFx()
     val shape = RoundedCornerShape(14.dp)
-    Row(modifier.fillMaxWidth().fx(fx, shape, lift = 1.02f, onClick = onClick).background(if (fx.active) Color(0x33FFFFFF) else Color(0xFF1C1E23))
+    Row(modifier.fillMaxWidth().fx(fx, shape, lift = 1.02f, onClick = onClick).background(if (fx.active) Soft else Card)
         .padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
         Box {
             Avatar(name, 38)
-            if (online) Box(Modifier.align(Alignment.BottomEnd).size(12.dp).clip(CircleShape).background(Color(0xFF3FB950)).border(2.dp, Color(0xFF1C1E23), CircleShape))
+            if (online) Box(Modifier.align(Alignment.BottomEnd).size(12.dp).clip(CircleShape).background(Color(0xFF3FB950)).border(2.dp, Card, CircleShape))
         }
         Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
             Text(name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (sub.isNotEmpty()) Text(sub, fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (trailing.isNotEmpty()) Text(trailing, fontSize = 13.sp, color = if (fx.active) Color.White else Muted)
+        if (trailing.isNotEmpty()) Text(trailing, fontSize = 13.sp, color = if (fx.active) Ink else Muted)
     }
 }
 
@@ -175,7 +175,7 @@ fun FriendsPanel() {
             }
         }, contentAlignment = Alignment.TopEnd) {
             val s = st
-            Column(Modifier.padding(14.dp).width(430.dp).fillMaxHeight().clip(RoundedCornerShape(22.dp)).background(Color(0xF2141519))
+            Column(Modifier.padding(14.dp).width(430.dp).fillMaxHeight().clip(RoundedCornerShape(22.dp)).background(Sheet)
                 .border(1.dp, GlassLine, RoundedCornerShape(22.dp))) {
                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 16.dp)) {
                     // me
@@ -292,7 +292,7 @@ private fun Hint(btn: String, what: String, onClick: () -> Unit) {
         Box(Modifier.size(24.dp).clip(CircleShape).background(if (btn == "Y") Color(0xFF3FB950) else Color.White), contentAlignment = Alignment.Center) {
             Text(btn, color = if (btn == "Y") Color.White else Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         }
-        androidx.compose.material3.TextButton(onClick) { Text(what, fontSize = 14.sp, color = Color.White) }
+        androidx.compose.material3.TextButton(onClick) { Text(what, fontSize = 14.sp, color = Ink) }
     }
 }
 
@@ -314,7 +314,7 @@ private fun AddFriendPopup(onClose: () -> Unit) {
     Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         ImmersiveDialog()
         Box(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 24.dp), contentAlignment = Alignment.Center) {
-            Column(Modifier.width(820.dp).heightIn(max = 520.dp).clip(RoundedCornerShape(22.dp)).background(Color(0xF7141519))
+            Column(Modifier.width(820.dp).heightIn(max = 520.dp).clip(RoundedCornerShape(22.dp)).background(Sheet)
                 .border(1.dp, GlassLine, RoundedCornerShape(22.dp)).verticalScroll(rememberScrollState()).padding(horizontal = 28.dp, vertical = 22.dp),
                 horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("Freunde hinzufügen", fontSize = 24.sp, fontWeight = FontWeight.Bold)
@@ -361,7 +361,7 @@ private fun NameDialog(current: String, onClose: () -> Unit, onSave: (String) ->
     DialogOpen()
     Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         ImmersiveDialog()
-        Column(Modifier.width(520.dp).clip(RoundedCornerShape(22.dp)).background(Color(0xF0141519)).padding(24.dp)) {
+        Column(Modifier.width(520.dp).clip(RoundedCornerShape(22.dp)).background(Sheet).padding(24.dp)) {
             Text("Dein Name", fontSize = 22.sp, fontWeight = FontWeight.Bold)
             Text("So sehen dich deine Freunde.", fontSize = 14.sp, color = Muted, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
             OutlinedTextField(name, { name = it.take(24) }, Modifier.fillMaxWidth().focusRequester(f), singleLine = true,
@@ -385,7 +385,7 @@ private fun GiftRow(g: JSONObject, modifier: Modifier = Modifier, onClick: () ->
     val from = g.optJSONObject("from")?.optString("name") ?: "Freund"
     val state = g.optString("state")
     val live = g.optJSONObject("live")
-    Column(modifier.fillMaxWidth().fx(fx, shape, lift = 1.02f, onClick = onClick).background(if (fx.active) Color(0x33FFFFFF) else Color(0xFF1C1E23))
+    Column(modifier.fillMaxWidth().fx(fx, shape, lift = 1.02f, onClick = onClick).background(if (fx.active) Soft else Card)
         .padding(horizontal = 12.dp, vertical = 9.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Avatar(from, 38)
@@ -407,12 +407,12 @@ private fun GiftRow(g: JSONObject, modifier: Modifier = Modifier, onClick: () ->
                 }, fontSize = 12.sp, color = if (state == "failed") Bad else Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             Text(when (state) { "new" -> "neu"; "loading" -> live?.let { l -> if (l.optLong("total") > 0) "${l.optLong("done") * 100 / l.optLong("total")} %" else "…" } ?: "…"
-                "failed", "wifi" -> "A: nochmal"; else -> "" }, fontSize = 13.sp, color = if (state == "new") Ok else if (fx.active) Color.White else Muted)
+                "failed", "wifi" -> "A: nochmal"; else -> "" }, fontSize = 13.sp, color = if (state == "new") Ok else if (fx.active) Ink else Muted)
         }
         if (state == "loading" && live != null && live.optLong("total") > 0) {
             val p = live.optLong("done").toFloat() / live.optLong("total")
             Box(Modifier.padding(top = 8.dp).fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color(0x22FFFFFF))) {
-                Box(Modifier.fillMaxWidth(p.coerceIn(0f, 1f)).height(4.dp).background(Color.White))
+                Box(Modifier.fillMaxWidth(p.coerceIn(0f, 1f)).height(4.dp).background(Ink))
             }
         }
     }

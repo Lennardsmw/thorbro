@@ -84,7 +84,7 @@ fun ProfilePicker(profiles: List<JSONObject>, onPick: (String) -> Unit, onClose:
     DialogOpen()
     Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         ImmersiveDialog()
-        Column(Modifier.fillMaxSize().background(Color(0xF2050608)), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Column(Modifier.fillMaxSize().background(Bg.copy(alpha = 0.95f)), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             Text("Wer spielt?", fontSize = 30.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(32.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
@@ -167,7 +167,7 @@ fun GameSaves(sys: String, path: String, title: String, onClose: () -> Unit) {
     DialogOpen()
     Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         ImmersiveDialog()
-        Column(Modifier.fillMaxSize().background(Color(0xFF07080A)).padding(horizontal = 40.dp, vertical = 28.dp)) {
+        Column(Modifier.fillMaxSize().background(Bg).padding(horizontal = 40.dp, vertical = 28.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Spielstände" + (g?.takeIf { it.optBoolean("multiProfile") }?.let { " · Profil ${it.optString("profile")}" } ?: ""), fontSize = 15.sp, color = Muted)
@@ -399,7 +399,7 @@ fun ProfileNameDialog(title: String, initial: String, onDone: (String) -> Unit, 
     DialogOpen()
     Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         ImmersiveDialog()
-        Column(Modifier.width(520.dp).clip(RoundedCornerShape(22.dp)).background(Color(0xF0141519)).padding(24.dp)) {
+        Column(Modifier.width(520.dp).clip(RoundedCornerShape(22.dp)).background(Sheet).padding(24.dp)) {
             Text(title, fontSize = 22.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(14.dp))
             OutlinedTextField(name, { name = it.take(24) }, singleLine = true, label = { Text("Name") },

@@ -5,10 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ThorBro</title>
 <link rel="stylesheet" href="style.css">
+<script>try { document.documentElement.dataset.theme = localStorage.getItem('thorbro.theme') || 'glass'; } catch (e) {}</script>
 </head>
 <body>
 <header>
-  <strong class="logo">ThorBro</strong>
+  <span class="brand"><img id="mascot" class="mascot" src="mascot/base.svg" alt=""><strong class="logo">ThorBro</strong><span id="mood" class="mood"></span></span>
   <nav>
     <button data-tab="upload" class="active">Upload</button>
     <button data-tab="roms">ROMs</button>
@@ -25,6 +26,7 @@
     <button data-tab="device">Gerät</button>
   </nav>
   <span id="conn" class="muted"></span>
+  <select id="themeSel" title="Design"><option value="glass">Glas</option><option value="doodle">Doodle</option></select>
   <button id="friendsBtn" class="friendsbtn" title="Freunde">👥 Freunde<span id="friendsBadge" hidden></span></button>
 </header>
 

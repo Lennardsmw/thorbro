@@ -273,7 +273,7 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
             val back = hero ?: cover
             if (back != null) Img(back, 1280, Modifier.fillMaxSize().then(if (hero == null) Modifier.blur(40.dp) else Modifier), ContentScale.Crop)
             Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.horizontalGradient(
-                0f to Color(0xF2050608), 0.55f to Color(0xCC050608), 1f to Color(0x66050608))))
+                0f to Bg.copy(alpha = 0.95f), 0.55f to Color(0xCC050608), 1f to Color(0x66050608))))
             Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(0.5f to Color.Transparent, 1f to Color(0xE6050608))))
             val boxW = maxWidth
             val wide = maxWidth / maxHeight > 1.3f   // top screen 16:9; the bottom screen is almost square
@@ -292,7 +292,7 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
                             maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(vertical = 10.dp))
                         Chips()
                         m.optString("desc").takeIf { it.isNotEmpty() }?.let {
-                            Text(it, fontSize = 16.sp, color = Color(0xD9FFFFFF), lineHeight = 22.sp, maxLines = 4, overflow = TextOverflow.Ellipsis,
+                            Text(it, fontSize = 16.sp, color = Ink.copy(alpha = 0.85f), lineHeight = 22.sp, maxLines = 4, overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.padding(top = 16.dp))
                         }
                         Spacer(Modifier.height(28.dp))
@@ -317,7 +317,7 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
                         }
                     }
                     m.optString("desc").takeIf { it.isNotEmpty() }?.let {
-                        Text(it, fontSize = 14.sp, color = Color(0xD9FFFFFF), maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 14.dp))
+                        Text(it, fontSize = 14.sp, color = Ink.copy(alpha = 0.85f), maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 14.dp))
                     }
                     Spacer(Modifier.weight(1f))
                     if (msg.isNotEmpty()) Text(msg, color = if (job != null || upJob != null || uploaded) Muted else Bad, modifier = Modifier.padding(bottom = 10.dp))
@@ -337,8 +337,8 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
 
 @Composable
 private fun Chip(text: String, on: Boolean = false) =
-    Text(text, fontSize = 13.sp, color = if (on) Color.Black else Color.White, maxLines = 1,
-        modifier = Modifier.clip(RoundedCornerShape(50)).background(if (on) Color(0xE6FFFFFF) else Color(0x33FFFFFF)).padding(horizontal = 12.dp, vertical = 5.dp))
+    Text(text, fontSize = 13.sp, color = if (on) OnAccent else Ink, maxLines = 1,
+        modifier = Modifier.clip(RoundedCornerShape(50)).background(if (on) Accent else Soft).padding(horizontal = 12.dp, vertical = 5.dp))
 
 @Composable
 private fun OffloadConfirm(name: String, size: Long, inRomm: Boolean, onYes: () -> Unit, onClose: () -> Unit) =

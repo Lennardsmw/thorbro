@@ -100,7 +100,7 @@ fun SendSheet(sys: String, path: String, title: String, kind: String, onClose: (
     DialogOpen()
     Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         ImmersiveDialog()
-        Column(Modifier.fillMaxSize().background(Color(0xFF07080A)).onPreviewKeyEvent { e ->
+        Column(Modifier.fillMaxSize().background(Bg).onPreviewKeyEvent { e ->
             if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
             when (e.key) {
                 Key.ButtonL1 -> { k = (k + kinds.size - 1) % kinds.size; true }
@@ -115,7 +115,7 @@ fun SendSheet(sys: String, path: String, title: String, kind: String, onClose: (
             // what: L1 / R1
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 kinds.forEachIndexed { i, (_, label) ->
-                    Text(label, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = if (i == k) OnAccent else Color.White,
+                    Text(label, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = if (i == k) OnAccent else Ink,
                         modifier = Modifier.clip(RoundedCornerShape(50)).background(if (i == k) Accent else Color(0x22FFFFFF))
                             .padding(horizontal = 16.dp, vertical = 8.dp))
                 }
@@ -140,7 +140,7 @@ fun SendSheet(sys: String, path: String, title: String, kind: String, onClose: (
                                 Box {
                                     Avatar(f.optString("name"), 40)
                                     if (f.optBoolean("online")) Box(Modifier.align(Alignment.BottomEnd).size(12.dp).clip(CircleShape).background(Color(0xFF3FB950))
-                                        .border(2.dp, Color(0xFF1C1E23), CircleShape))
+                                        .border(2.dp, Card, CircleShape))
                                 }
                                 Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
                                     Text(f.optString("name"), fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -151,12 +151,12 @@ fun SendSheet(sys: String, path: String, title: String, kind: String, onClose: (
                                     }, fontSize = 13.sp, color = Muted)
                                 }
                                 val wayOn = f.optString("way") != "wait"
-                                Text(f.optString("label"), fontSize = 13.sp, color = if (wayOn) Color.White else Muted, maxLines = 1,
-                                    modifier = Modifier.clip(RoundedCornerShape(50)).background(if (wayOn) Color(0x33FFFFFF) else Color(0x14FFFFFF))
+                                Text(f.optString("label"), fontSize = 13.sp, color = if (wayOn) Ink else Muted, maxLines = 1,
+                                    modifier = Modifier.clip(RoundedCornerShape(50)).background(if (wayOn) Soft else Color(0x14FFFFFF))
                                         .padding(horizontal = 12.dp, vertical = 5.dp))
                                 Spacer(Modifier.width(12.dp))
                                 Icon(Icons.Filled.CheckCircle, if (on) "ausgewählt" else null, Modifier.size(26.dp),
-                                    tint = if (on) Ok else Color(0x33FFFFFF))
+                                    tint = if (on) Ok else Soft)
                             }
                         }
                     }

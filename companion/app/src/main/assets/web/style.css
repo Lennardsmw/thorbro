@@ -194,3 +194,71 @@ dialog.friends h4 { margin: 16px 0 6px; color: var(--muted); font-size: 13px; }
 #sendDlg label.person { cursor: pointer; }
 #sendDlg label.person.on { background: rgba(255,255,255,.14); }
 #sendDlg label.person input { width: 18px; height: 18px; }
+
+/* ---------- themes: html[data-theme] = glass (default above) | doodle ---------- */
+.brand { display: inline-flex; align-items: center; gap: 8px; }
+.mascot, .mood { display: none; }
+#themeSel { padding: 4px 8px; }
+
+/* Doodle: warm and flat – forest background, cream 2px outlines, sage for selection/ok,
+   orange only for the one main action, hard offset shadows, serif headings, uneven corners.
+   Look and robot after github.com/catzeyea/ThorBro (MIT, see mascot/LICENSE). */
+html[data-theme="doodle"] {
+  --bg: #1a1e1f; --panel: #252a2a; --panel-2: #2f3535; --text: #EFE7D2; --muted: #B4B6AA; --body: #C4C6BA;
+  --line: rgba(239, 231, 210, 0.78); --faint: rgba(239, 231, 210, 0.16);
+  --accent: #A5B98C; --accent-text: #1a1e1f; --sage: #A5B98C; --sage-shadow: #4a5c38; --sage-soft: rgba(165, 185, 140, 0.16);
+  --orange: #F0A94B; --orange-shadow: #7a4a0f; --ok: #A5B98C; --err: #FF9C84;
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Noto Serif", serif;
+  --r-1: 22px 18px 24px 16px / 18px 24px 16px 22px;
+  --r-2: 18px 24px 16px 22px / 24px 16px 22px 18px;
+  --r-3: 24px 16px 20px 22px / 16px 22px 24px 18px;
+  --r-pill: 20px 24px 18px 26px / 24px 18px 26px 20px;
+  color-scheme: dark;
+}
+html[data-theme="doodle"] body { background: var(--bg); color: var(--body); }
+html[data-theme="doodle"] h1, html[data-theme="doodle"] h2, html[data-theme="doodle"] h3,
+html[data-theme="doodle"] .romhead h2, html[data-theme="doodle"] .dinfo h2 { font-family: var(--serif); color: var(--text); letter-spacing: -0.01em; }
+html[data-theme="doodle"] header { background: var(--bg); border-bottom: 2px dashed var(--faint); padding: 12px 20px; }
+html[data-theme="doodle"] .mascot { display: block; width: 52px; height: 52px; margin: -6px 0 -8px; }
+html[data-theme="doodle"] .logo { font-family: var(--serif); font-size: 30px; font-weight: 700; color: var(--text); letter-spacing: -0.02em; line-height: 1; }
+html[data-theme="doodle"] .mood { display: inline; font-family: var(--serif); color: var(--muted); font-size: 14px; font-style: italic; margin-left: 4px; white-space: nowrap; }
+html[data-theme="doodle"] button, html[data-theme="doodle"] .btn { border: 2px solid var(--line); border-radius: var(--r-pill); background: transparent; color: var(--text); }
+html[data-theme="doodle"] button:hover, html[data-theme="doodle"] .btn:hover { background: rgba(239, 231, 210, 0.08); }
+html[data-theme="doodle"] button.primary { background: var(--orange); border-color: var(--orange); color: #1a1e1f; font-weight: 700; box-shadow: 3px 3px 0 var(--orange-shadow); }
+html[data-theme="doodle"] button.primary:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--orange-shadow); }
+html[data-theme="doodle"] nav button { color: var(--text); border: 2px solid transparent; border-radius: var(--r-pill); padding: 6px 14px; background: none; }
+html[data-theme="doodle"] nav button:hover { background: rgba(239, 231, 210, 0.12); }
+html[data-theme="doodle"] nav button.active { background: var(--orange); color: #1a1e1f; box-shadow: 3px 3px 0 var(--orange-shadow); font-weight: 700; }
+html[data-theme="doodle"] input, html[data-theme="doodle"] select { background: var(--panel-2); border: 2px solid var(--faint); border-radius: 16px 14px 18px 13px / 14px 18px 13px 16px; color: var(--text); }
+html[data-theme="doodle"] input:focus, html[data-theme="doodle"] select:focus { border-color: var(--sage); outline: none; }
+html[data-theme="doodle"] .card, html[data-theme="doodle"] .panel, html[data-theme="doodle"] .app, html[data-theme="doodle"] .romcard,
+html[data-theme="doodle"] .queue li, html[data-theme="doodle"] .syslist, html[data-theme="doodle"] table.files, html[data-theme="doodle"] .act {
+  background: var(--panel); border: 2px solid var(--line); border-radius: var(--r-1); }
+html[data-theme="doodle"] .card:nth-child(3n+2), html[data-theme="doodle"] .romcard:nth-child(3n+2), html[data-theme="doodle"] .app:nth-child(3n+2) { border-radius: var(--r-2); }
+html[data-theme="doodle"] .card:nth-child(3n), html[data-theme="doodle"] .romcard:nth-child(3n), html[data-theme="doodle"] .app:nth-child(3n) { border-radius: var(--r-3); }
+html[data-theme="doodle"] .card h3, html[data-theme="doodle"] .panel h3 { font-family: var(--serif); font-size: 16px; color: var(--text); }
+html[data-theme="doodle"] .romcard:hover, html[data-theme="doodle"] .romcard:focus-within { border-color: var(--sage); box-shadow: 4px 4px 0 var(--sage-shadow); }
+html[data-theme="doodle"] .rmeta, html[data-theme="doodle"] .syslist .n { color: var(--orange); }
+html[data-theme="doodle"] .syslist button, html[data-theme="doodle"] .pickgrid button { border-color: transparent; }
+html[data-theme="doodle"] .syslist button.active { background: var(--sage-soft); color: var(--text); border-color: var(--sage); }
+html[data-theme="doodle"] .drop { background: transparent; border: 2px dashed var(--sage); border-radius: var(--r-3); }
+html[data-theme="doodle"] .drop.over { background: var(--sage-soft); border-color: var(--sage); }
+html[data-theme="doodle"] .bar, html[data-theme="doodle"] .bar > div, html[data-theme="doodle"] .bar i { border-radius: 2px; }
+html[data-theme="doodle"] .bar { background: var(--panel-2); }
+html[data-theme="doodle"] .bar > div, html[data-theme="doodle"] .bar i { background: var(--sage); }
+html[data-theme="doodle"] table.files td { border-bottom: 1px dashed var(--faint); }
+html[data-theme="doodle"] table.files a { color: var(--text); }
+html[data-theme="doodle"] .crumbs a { color: var(--orange); }
+html[data-theme="doodle"] .badge { background: transparent; border: 1.5px solid var(--faint); border-radius: 10px 8px 11px 7px; color: var(--muted); }
+html[data-theme="doodle"] .prof { background: transparent; border: 2px solid var(--faint); }
+html[data-theme="doodle"] .prof.active { border-color: var(--sage); background: var(--sage-soft); }
+html[data-theme="doodle"] dialog#romDetail, html[data-theme="doodle"] dialog.profilepick, html[data-theme="doodle"] dialog.friends {
+  background: var(--panel); border: 2px solid var(--line); border-radius: var(--r-1); color: var(--text); }
+html[data-theme="doodle"] dialog::backdrop { background: rgba(12, 15, 15, 0.72); }
+html[data-theme="doodle"] .person { background: var(--panel-2); border-radius: var(--r-2); }
+html[data-theme="doodle"] pre.code { background: var(--panel-2); border: 2px dashed var(--faint); }
+html[data-theme="doodle"] #toast { background: var(--sage); color: #1a1e1f; border-radius: var(--r-pill); box-shadow: 3px 3px 0 var(--sage-shadow); font-weight: 700; }
+html[data-theme="doodle"] :focus-visible { outline: 3px solid var(--sage); outline-offset: 3px; }
+html[data-theme="doodle"] .fav { color: var(--orange); }
+html[data-theme="doodle"] .friendsbtn { margin-left: auto; }
+@media (max-width: 760px) { html[data-theme="doodle"] .mood { display: none; } }

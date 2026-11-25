@@ -83,6 +83,7 @@ let info = null;
 async function loadDevice() {
   const { body } = await api('/api/info');
   info = body;
+  updMood();
   $('#conn').textContent = `${body.manufacturer} ${body.model} · ${body.ip}:${body.port}`;
   const p = body.permissions;
   const perm = (ok, t) => `<div class="${ok ? 'ok' : 'err'}">${ok ? '✓' : '✗'} ${t}</div>`;
@@ -1508,6 +1509,8 @@ async function pollActivity() {
       ${a.done ? (err ? `<div class="err">${esc(err)}</div>` : '') : `${a.step && a.step !== a.name ? `<div class="muted">${esc(a.step)}</div>` : ''}<div class="bar"><i style="width:${Math.round(a.progress * 100)}%"></i></div><div class="muted">${Math.round(a.progress * 100)} %</div>`}</div>`;
   }).join('');
   const busy = list.some((a) => !a.done);
+  moodState.busy = busy; moodState.err = list.some((a) => a.done && a.error && a.error !== 'null'); moodState.done = !busy && list.length > 0 && !moodState.err;
+  updMood();
   // something finished: refresh what changed
   if (actWasBusy && !busy) { if (romData) loadRoms(true); if (storeData && !$('#store').hidden) loadStore(true); }
   actWasBusy = busy;
@@ -1516,8 +1519,42 @@ async function pollActivity() {
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden && token) pollActivity(); });
 
+// ---------- look (Glas / Doodle): the Thor keeps the setting, the browser remembers it to avoid a flash ----------
+function applyTheme(id) {
+  document.documentElement.dataset.theme = id;
+  store.set('theme', id);
+  $('#themeSel').value = id;
+}
+applyTheme(store.get('theme', 'glass'));
+$('#themeSel').onchange = async (e) => {
+  applyTheme(e.target.value);
+  try { await api('/api/theme?' + q({ id: e.target.value }), { method: 'POST' }); } catch {}
+};
+async function loadTheme() {
+  try { const { body } = await api('/api/theme'); if (body.theme) applyTheme(body.theme); } catch {}
+}
+// the robot next to the wordmark (doodle): busy while something runs, tired on low battery, stuffed when full
+const MOODS = { base: 'Mir geht\'s prima!', busy: 'Bin beschäftigt …', done: 'Erledigt!', ask: 'Da stimmt was nicht.',
+  tired: 'Ich brauche Strom …', stuffed: 'Ich bin ziemlich voll.', wait: 'Ich warte auf den Thor …' };
+const moodState = { busy: false, err: false, done: false };
+function updMood() {
+  let m = 'base';
+  const b = info?.battery, st = info?.storage?.[0];
+  if (!info) m = 'wait';
+  else if (moodState.busy) m = 'busy';
+  else if (moodState.err) m = 'ask';
+  else if (moodState.done) m = 'done';
+  else if (b && b.percent <= 15 && !b.charging) m = 'tired';
+  else if (st && st.total && st.free / st.total < 0.05) m = 'stuffed';
+  const img = $('#mascot');
+  if (!img.src.endsWith('/' + m + '.svg')) img.src = 'mascot/' + m + '.svg';
+  img.alt = img.title = MOODS[m];
+  $('#mood').textContent = MOODS[m];
+}
+
 async function start() {
   if (!token) return showLogin();
+  loadTheme();
   pollActivity();
   try { await loadDevice(); showTab(store.get('tab', 'upload')); if (!romData) loadRoms(false); }
   catch (err) { if (!(err instanceof AuthError)) $('#conn').textContent = 'Thor nicht erreichbar'; }

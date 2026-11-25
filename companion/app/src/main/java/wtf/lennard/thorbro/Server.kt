@@ -1002,6 +1002,19 @@ object Server {
                         .put("to", info.versionName)
                         .put("note", "ThorBro restarts after the update; confirm on the Thor if asked"))
                 }
+                // ---- look (Glas / Doodle): one setting for the Thor app and the web panel ----
+                get("/api/theme") {
+                    if (denied(ctx)) return@get
+                    wtf.lennard.thorbro.ui.Theme.load(ctx)
+                    json(JSONObject().put("theme", wtf.lennard.thorbro.ui.Theme.p.id)
+                        .put("themes", JSONArray(wtf.lennard.thorbro.ui.Theme.all.map { JSONObject().put("id", it.id).put("label", it.label) })))
+                }
+                post("/api/theme") {
+                    if (denied(ctx)) return@post
+                    wtf.lennard.thorbro.ui.Theme.load(ctx)
+                    wtf.lennard.thorbro.ui.Theme.set(ctx, q("id") ?: "glass")
+                    json(JSONObject().put("theme", wtf.lennard.thorbro.ui.Theme.p.id))
+                }
                 // ---- update from the update feed ----
                 get("/api/update") {
                     if (denied(ctx)) return@get

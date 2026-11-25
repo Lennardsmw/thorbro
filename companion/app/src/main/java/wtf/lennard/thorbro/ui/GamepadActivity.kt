@@ -115,7 +115,7 @@ class GamepadActivity : ComponentActivity() {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     names.forEachIndexed { i, n ->
                         Box(Modifier.clip(RoundedCornerShape(10.dp)).background(if (HidGamepad.pressed(i)) Accent else Panel).padding(horizontal = 12.dp, vertical = 8.dp)) {
-                            Text(n, color = if (HidGamepad.pressed(i)) OnAccent else androidx.compose.ui.graphics.Color.White) }
+                            Text(n, color = if (HidGamepad.pressed(i)) OnAccent else Ink) }
                     }
                 }
             }
