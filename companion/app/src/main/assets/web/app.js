@@ -1647,18 +1647,24 @@ async function friendsLoad(path = '/api/friends', method = 'GET') {
 }
 function renderFriends() {
   const f = friends; if (!f) return;
-  const b = $('#friendsBadge'); b.hidden = !f.requests.length; b.textContent = f.requests.length;
+  const n = f.requests.length + (f.invites || []).length; const b = $('#friendsBadge'); b.hidden = !n; b.textContent = n;
   const d = $('#friendsDlg'); if (!d.open) return;
-  const person = (p, sub, btns) => `<div class="person"><div class="avatar">${esc((p.name || '?')[0].toUpperCase())}</div>
+  const person = (p, sub, btns) => `<div class="person"><div class="avatar${p.online ? ' on' : ''}">${esc((p.name || '?')[0].toUpperCase())}</div>
     <div class="grow"><strong>${esc(p.name)}</strong><div class="muted">${esc(sub)}</div></div>${btns}</div>`;
   d.innerHTML = `<div class="me"><div class="avatar big">👤</div><div class="grow"><strong style="font-size:19px">${esc(f.me.name)}</strong>
       <div class="muted">ID ${esc(f.me.id.slice(0, 6))}</div></div><button data-fr="name">Name</button></div>
     <div class="row"><button data-fr="party" class="grow">${f.partyOpen ? 'Party: offen' : 'Party: nur Einladung'}</button></div>
+    ${f.party ? `<h4>${f.party.pending ? 'Party – warte auf den Leiter …' : 'Party (' + f.party.members.length + ')'}</h4>` + f.party.members.map((m) => person({ ...m, online: true },
+      [m.me ? 'du' : '', m.id === f.party.leader ? 'Leiter' : ''].filter(Boolean).join(' · '), '')).join('')
+      + `<div class="row"><button data-fr="leave">${f.party.leaderMe ? 'Party auflösen' : 'Party verlassen'}</button></div>` : ''}
+    ${(f.invites || []).length ? '<h4>Party-Einladungen</h4>' + f.invites.map((i) => person(i, `lädt dich ein (${i.members} drin)`,
+      `<button class="primary" data-fr="pjoin" data-id="${esc(i.id)}" data-party="${esc(i.party)}">Beitreten</button><button data-fr="pdecline" data-id="${esc(i.id)}">✕</button>`)).join('') : ''}
     ${f.requests.length ? '<h4>Anfragen</h4>' + f.requests.map((r) => person(r, 'möchte dein Freund sein',
       `<button class="primary" data-fr="accept" data-id="${esc(r.id)}">Annehmen</button><button data-fr="decline" data-id="${esc(r.id)}">✕</button>`)).join('') : ''}
     <h4>Freunde (${f.friends.length})</h4>
-    ${f.friends.length ? f.friends.map((x) => person(x, [x.app, x.seen ? 'zuletzt ' + ago(x.seen) : ''].filter(Boolean).join(' · '),
-      `<button data-fr="remove" data-id="${esc(x.id)}" data-name="${esc(x.name)}" title="entfernen">✕</button>`)).join('')
+    ${f.friends.length ? f.friends.map((x) => person(x, x.online ? (x.joinable ? 'online · Party offen' : x.inParty ? 'online · in einer Party' : 'online') : [x.app, x.seen ? 'zuletzt ' + ago(x.seen) : ''].filter(Boolean).join(' · '),
+      (x.joinable ? `<button class="primary" data-fr="popen" data-id="${esc(x.id)}">Beitreten</button>` : '')
+      + `<button data-fr="invite" data-id="${esc(x.id)}">Einladen</button><button data-fr="remove" data-id="${esc(x.id)}" data-name="${esc(x.name)}" title="entfernen">✕</button>`)).join('')
       : '<div class="muted">Noch keine. Unten „Freunde hinzufügen“ – per Code oder LocalSend.</div>'}
     ${f.nearby.length ? '<h4>In der Nähe</h4>' + f.nearby.map((n) => person(n, (n.app || 'ThorBro') + ' · gleiches Netz',
       n.asked ? '<span class="muted">angefragt</span>' : `<button data-fr="add" data-id="${esc(n.id)}">Hinzufügen</button>`)).join('') : ''}
@@ -1677,6 +1683,8 @@ $('#friendsDlg').onclick = async (e) => {
   if (a === 'addDlg') return friendAddOpen();
   if (a === 'name') { const n = prompt('Dein Name (so sehen dich deine Freunde):', friends.me.name); if (n && n.trim()) friendsLoad('/api/friends/name?' + q({ name: n.trim() }), 'POST'); return; }
   if (a === 'party') return friendsLoad('/api/friends/party?' + q({ open: friends.partyOpen ? '0' : '1' }), 'POST');
+  const party = { leave: 'leave', invite: 'invite?' + q({ id }), pjoin: 'join?' + q({ leader: id, party: t.dataset.party }), pdecline: 'decline?' + q({ id }), popen: 'open?' + q({ id }) }[a];
+  if (party) return friendsLoad('/api/party/' + party, 'POST');
   if (a === 'remove' && !confirm(`${t.dataset.name} als Freund entfernen?`)) return;
   friendsLoad(`/api/friends/${a}?` + q({ id }), 'POST');
 };

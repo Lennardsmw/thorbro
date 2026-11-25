@@ -178,3 +178,4 @@ dialog.friends h4 { margin: 16px 0 6px; color: var(--muted); font-size: 13px; }
 .person .grow { flex: 1; min-width: 0; }
 .keycode { font-size: 28px; letter-spacing: 6px; margin: 8px 0; }
 #friendAdd { max-height: calc(100vh - 48px); overflow: auto; }
+.avatar.on { box-shadow: 0 0 0 2px #3fb950; }

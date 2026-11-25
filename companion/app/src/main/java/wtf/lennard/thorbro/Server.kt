@@ -645,6 +645,20 @@ object Server {
                     }
                     if (err != null) fail(err, HttpStatusCode.Conflict) else json(Pals.status(ctx))
                 }
+                post("/api/party/{action}") { // invite ?id | join ?leader&party | open ?id | decline ?id | leave
+                    if (denied(ctx)) return@post
+                    val err = withContext(Dispatchers.IO) {
+                        when (call.parameters["action"]) {
+                            "invite" -> Party.invite(ctx, q("id") ?: "")
+                            "join" -> Party.join(ctx, q("leader") ?: "", q("party") ?: "")
+                            "open" -> Party.joinOpen(ctx, q("id") ?: "")
+                            "decline" -> { Party.decline(ctx, q("id") ?: ""); null }
+                            "leave" -> { Party.leave(ctx); null }
+                            else -> "unbekannt"
+                        }
+                    }
+                    if (err != null) fail(err, HttpStatusCode.Conflict) else json(Pals.status(ctx))
+                }
                 get("/api/friends/file") { // the .thorfriend file to download in the web panel
                     if (denied(ctx)) return@get
                     val f = withContext(Dispatchers.IO) { Pals.shareFile(ctx) }

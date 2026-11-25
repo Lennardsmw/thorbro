@@ -48,6 +48,8 @@ object Pals {
     @Volatile var version = 0
         private set
     private fun changed() { version++ }
+    /** something the friends menu shows changed (party, invites) */
+    internal fun bump() = changed()
 
     // ---------- small crypto helpers (plain JVM, the Mac uses the same) ----------
 
@@ -103,7 +105,7 @@ object Pals {
 
     /** party: open (friends may join without invite) or invite only */
     fun partyOpen(ctx: Context) = Prefs.of(ctx).getBoolean("party.open", false)
-    fun setPartyOpen(ctx: Context, on: Boolean) { Prefs.of(ctx).edit().putBoolean("party.open", on).apply(); changed() }
+    fun setPartyOpen(ctx: Context, on: Boolean) { Prefs.of(ctx).edit().putBoolean("party.open", on).apply(); changed(); Party.publish(ctx) }
 
     // ---------- lists (friends, requests) ----------
 
@@ -250,39 +252,134 @@ object Pals {
         Prefs.of(ctx).edit().putString("pals.friends", JSONArray(l).toString()).apply()
     }
 
-    @Volatile private var listening = false
+    // ---------- status (online, party) ----------
 
-    /** always on while ThorBro runs: streams our inbox; after a restart it fetches what came meanwhile (ntfy keeps 12 h) */
+    /**
+     * Every device posts its status to its own status topic — only on changes and every 3 h — and its friends just read
+     * it along (reading costs nothing; ntfy.sh allows 250 posts a day per IP). Encrypted with a key derived from the
+     * card, so only who has the card can read it; signed like messages.
+     */
+    fun statusTopicOf(pubB64: String) = "tbf-s-" + hex(sha("thorbro status v1".toByteArray(), unb64(pubB64)), 12)
+    private fun statusKey(pubB64: String) = hmac(sha(unb64(pubB64)), "thorbro status key v1")
+
+    /** a status counts as "online" this long (heartbeat every 3 h) */
+    const val ONLINE_MS = 3L * 3600_000 + 30 * 60_000
+
+    fun publishStatus(ctx: Context, st: JSONObject): Boolean = runCatching {
+        val m = JSONObject(st.toString()).put("id", myId(ctx)).put("name", myName(ctx)).put("ts", System.currentTimeMillis()).toString()
+        val sig = Signature.getInstance("SHA256withECDSA").run { initSign(keys(ctx).private); update(m.toByteArray()); sign() }
+        val nonce = ByteArray(12).also { rnd.nextBytes(it) }
+        val body = JSONObject().put("m", m).put("s", b64(sig)).toString().toByteArray()
+        post(statusTopicOf(myPub(ctx)), "ts1." + b64(nonce) + "." + b64(gcm(statusKey(myPub(ctx)), true, nonce, body)))
+    }.getOrDefault(false)
+
+    private fun openStatus(friend: JSONObject, wire: String): JSONObject? = runCatching {
+        val p = wire.trim().split('.')
+        if (p.size != 3 || p[0] != "ts1") return null
+        val pubS = friend.getString("pub")
+        val body = JSONObject(String(gcm(statusKey(pubS), false, unb64(p[1]), unb64(p[2]))))
+        val mStr = body.getString("m")
+        val ok = Signature.getInstance("SHA256withECDSA").run { initVerify(pub(pubS)); update(mStr.toByteArray()); verify(unb64(body.getString("s"))) }
+        if (!ok) return null
+        JSONObject(mStr).takeIf { it.optString("id") == friend.optString("id") }
+    }.getOrNull()
+
+    /** last status of every friend (id → status), kept across restarts */
+    private val presence = java.util.concurrent.ConcurrentHashMap<String, JSONObject>()
+    @Volatile private var presenceLoaded = false
+    private fun loadPresence(ctx: Context) {
+        if (presenceLoaded) return
+        presenceLoaded = true
+        runCatching { JSONObject(Prefs.of(ctx).getString("pals.presence", "{}")) }.getOrNull()?.let { o -> o.keys().forEach { k -> presence[k] = o.getJSONObject(k) } }
+    }
+    fun presenceOf(ctx: Context, id: String): JSONObject? { loadPresence(ctx); return presence[id] }
+    fun online(ctx: Context, id: String) = presenceOf(ctx, id)?.let { it.optBoolean("on") && System.currentTimeMillis() - it.optLong("ts") < ONLINE_MS } == true
+
+    /** called when a friend's status arrives (party logic hooks in here) */
+    val onStatus = java.util.concurrent.CopyOnWriteArrayList<(Context, JSONObject, JSONObject) -> Unit>()
+
+    private fun gotStatus(ctx: Context, friend: JSONObject, st: JSONObject) {
+        loadPresence(ctx)
+        val id = friend.optString("id")
+        if ((presence[id]?.optLong("ts") ?: 0) > st.optLong("ts")) return // older than what we have
+        presence[id] = st
+        Prefs.of(ctx).edit().putString("pals.presence", JSONObject(presence as Map<*, *>).toString()).apply()
+        changed()
+        onStatus.forEach { runCatching { it(ctx, friend, st) } }
+    }
+
+    // ---------- listening ----------
+
+    @Volatile private var listening = false
+    @Volatile private var conn: HttpURLConnection? = null
+    @Volatile private var topicsKey = ""
+
+    /** the friend list changed: reconnect with the new set of status topics */
+    private fun resubscribe() { runCatching { conn?.disconnect() } }
+
+    /**
+     * Always on while ThorBro runs: one stream for our inbox and the status topics of all friends. After a restart it
+     * fetches what came meanwhile (ntfy keeps 12 h).
+     */
     @Synchronized
     fun listen(ctx: Context) {
         if (listening) return
         listening = true
         val app = ctx.applicationContext
-        val topic = inboxOf(myPub(app))
+        val inbox = inboxOf(myPub(app))
         thread(name = "pals-inbox", isDaemon = true) {
             while (true) {
                 runCatching {
-                    val since = Prefs.of(app).getString("pals.since", null) ?: "12h"
-                    (URL("$NTFY/$topic/json?since=$since").openConnection() as HttpURLConnection).run {
+                    val fr = friends(app)
+                    val byTopic = fr.associateBy { statusTopicOf(it.optString("pub")) }
+                    val topics = listOf(inbox) + byTopic.keys
+                    topicsKey = topics.joinToString(",")
+                    val since = Prefs.of(app).getLong("pals.sinceT", 0).takeIf { it > 0 }?.let { (it - 2).toString() } ?: "12h"
+                    (URL("$NTFY/${topics.joinToString(",")}/json?since=$since").openConnection() as HttpURLConnection).run {
+                        conn = this
                         connectTimeout = 8000; readTimeout = 90_000 // ntfy sends a keepalive every ~45 s
                         inputStream.bufferedReader().useLines { lines ->
                             for (line in lines) {
                                 val ev = runCatching { JSONObject(line) }.getOrNull() ?: continue
                                 if (ev.optString("event") != "message") continue
-                                unseal(app, ev.optString("message"))?.let { handle(app, it) }
-                                Prefs.of(app).edit().putString("pals.since", ev.optString("id")).apply()
+                                if (!seenNtfy(app, ev.optString("id"))) continue
+                                val topic = ev.optString("topic")
+                                if (topic == inbox) unseal(app, ev.optString("message"))?.let { handle(app, it) }
+                                else byTopic[topic]?.let { f -> openStatus(f, ev.optString("message"))?.let { gotStatus(app, f, it) } }
+                                Prefs.of(app).edit().putLong("pals.sinceT", ev.optLong("time")).apply()
                             }
                         }
                         disconnect()
                     }
                 }
-                Thread.sleep(4000)
+                conn = null
+                Thread.sleep(2000)
+            }
+        }
+        // the friend list decides which status topics we read
+        thread(name = "pals-watch", isDaemon = true) {
+            var last = ""
+            while (true) {
+                Thread.sleep(2000)
+                val k = friends(app).joinToString(",") { it.optString("id") }
+                if (k != last) { if (last.isNotEmpty() || k.isNotEmpty()) resubscribe(); last = k }
             }
         }
         Logs.i("pals", "Postfach offen")
     }
 
-    private fun notify(ctx: Context, title: String, text: String) = runCatching {
+    /** ntfy ids handled lately (the since-time overlaps by 2 s): true = new */
+    private val ntfySeen = LinkedHashSet<String>()
+    @Synchronized
+    private fun seenNtfy(ctx: Context, id: String): Boolean {
+        if (ntfySeen.isEmpty()) Prefs.of(ctx).getString("pals.seenIds", "")!!.split(',').filter { it.isNotEmpty() }.forEach { ntfySeen += it }
+        if (!ntfySeen.add(id)) return false
+        while (ntfySeen.size > 80) ntfySeen.remove(ntfySeen.first())
+        Prefs.of(ctx).edit().putString("pals.seenIds", ntfySeen.joinToString(",")).apply()
+        return true
+    }
+
+    internal fun notify(ctx: Context, title: String, text: String) = runCatching {
         val nm = ctx.getSystemService(android.app.NotificationManager::class.java)
         nm.createNotificationChannel(android.app.NotificationChannel("friends", "Freunde", android.app.NotificationManager.IMPORTANCE_DEFAULT))
         val open = android.app.PendingIntent.getActivity(ctx, 7, Intent(ctx, wtf.lennard.thorbro.ui.ThorActivity::class.java)
@@ -452,7 +549,21 @@ object Pals {
     fun status(ctx: Context): JSONObject {
         val asked = asked(ctx)
         return JSONObject().put("me", card(ctx)).put("partyOpen", partyOpen(ctx))
-            .put("friends", JSONArray(friends(ctx).map { JSONObject(it.toString()).apply { remove("pub") } }))
+            .put("friends", JSONArray(friends(ctx).map { f ->
+                val id = f.optString("id")
+                val st = presenceOf(ctx, id)
+                val p = st?.optJSONObject("party")
+                JSONObject(f.toString()).apply {
+                    remove("pub")
+                    put("online", online(ctx, id))
+                    if (st != null) put("seen", maxOf(f.optLong("seen"), st.optLong("ts")))
+                    // a party the friend leads and that is open (or the friend alone with "Party offen")
+                    put("joinable", online(ctx, id) && ((p != null && p.optString("leader") == id && p.optBoolean("open")) || (p == null && st?.optBoolean("open") == true)))
+                    put("inParty", p != null)
+                    put("partySize", p?.optJSONArray("members")?.length() ?: 0)
+                }
+            }.sortedWith(compareByDescending<JSONObject> { it.optBoolean("online") }.thenByDescending { it.optLong("seen") })))
+            .put("party", Party.json(ctx).opt("party")).put("invites", Party.json(ctx).optJSONArray("invites"))
             .put("requests", JSONArray(requests(ctx).map { JSONObject().put("id", it.optString("id")).put("name", it.optString("name")).put("via", it.optString("via")) }))
             .put("nearby", JSONArray(nearby.filter { !isFriend(ctx, it.optString("id")) }.map {
                 JSONObject().put("id", it.optString("id")).put("name", it.optString("name")).put("app", it.optString("app"))

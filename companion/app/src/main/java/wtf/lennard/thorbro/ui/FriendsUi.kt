@@ -82,7 +82,7 @@ fun Avatar(name: String, size: Int = 40, me: Boolean = false) {
 fun FriendsButton() {
     val ctx = LocalContext.current
     var waiting by remember { mutableStateOf(0) }
-    WhileVisible { while (true) { waiting = withContext(Dispatchers.IO) { Pals.requests(ctx).size }; delay(3000) } }
+    WhileVisible { while (true) { waiting = withContext(Dispatchers.IO) { Pals.requests(ctx).size + wtf.lennard.thorbro.Party.invites(ctx).size }; delay(3000) } }
     val fx = rememberFx()
     Box {
         Box(Modifier.size(38.dp).fx(fx, CircleShape, lift = 1.1f) { FriendsUi.open = true }
@@ -101,12 +101,15 @@ private fun Section(text: String) = Text(text, fontSize = 13.sp, color = Muted, 
 
 /** one person in the menu; the whole row is one focus stop */
 @Composable
-private fun PersonRow(name: String, sub: String, modifier: Modifier = Modifier, trailing: String = "", onClick: () -> Unit) {
+private fun PersonRow(name: String, sub: String, modifier: Modifier = Modifier, trailing: String = "", online: Boolean = false, onClick: () -> Unit) {
     val fx = rememberFx()
     val shape = RoundedCornerShape(14.dp)
     Row(modifier.fillMaxWidth().fx(fx, shape, lift = 1.02f, onClick = onClick).background(if (fx.active) Color(0x33FFFFFF) else Color(0xFF1C1E23))
         .padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
-        Avatar(name, 38)
+        Box {
+            Avatar(name, 38)
+            if (online) Box(Modifier.align(Alignment.BottomEnd).size(12.dp).clip(CircleShape).background(Color(0xFF3FB950)).border(2.dp, Color(0xFF1C1E23), CircleShape))
+        }
         Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
             Text(name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (sub.isNotEmpty()) Text(sub, fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -181,6 +184,23 @@ fun FriendsPanel() {
                     }
                     if (msg.isNotEmpty()) Text(msg, color = Bad, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
 
+                    val party = s?.optJSONObject("party")
+                    if (party != null) {
+                        val mem = party.optJSONArray("members").list()
+                        Section(if (party.optBoolean("pending")) "Party – warte auf den Leiter …" else "Party (${mem.size})")
+                        mem.forEach { m ->
+                            PersonRow(m.optString("name"), listOf(if (m.optBoolean("me")) "du" else "", if (m.optString("id") == party.optString("leader")) "Leiter" else "")
+                                .filter { it.isNotEmpty() }.joinToString(" · "), Modifier.padding(bottom = 6.dp), online = true) {}
+                        }
+                        BigButton(if (party.optBoolean("leaderMe")) "Party auflösen" else "Party verlassen", modifier = Modifier.fillMaxWidth()) {
+                            act { wtf.lennard.thorbro.Party.leave(ctx); null }
+                        }
+                    }
+                    val invs = s?.optJSONArray("invites").list()
+                    if (invs.isNotEmpty()) {
+                        Section("Party-Einladungen")
+                        invs.forEach { i -> PersonRow(i.optString("name"), "lädt dich in die Party ein", Modifier.padding(bottom = 6.dp), "A: ansehen") { pick = i.put("kind", "invite") } }
+                    }
                     val req = s?.optJSONArray("requests").list()
                     if (req.isNotEmpty()) {
                         Section("Anfragen")
@@ -190,8 +210,14 @@ fun FriendsPanel() {
                     Section("Freunde (${friends.size})")
                     if (friends.isEmpty()) Text("Noch keine. Mit Y fügst du Freunde hinzu – per Code oder LocalSend.", fontSize = 14.sp, color = Muted)
                     friends.forEach { f ->
-                        PersonRow(f.optString("name"), listOf(f.optString("app"), "zuletzt ${ago(f.optLong("seen"))}").filter { it.isNotBlank() && it != "zuletzt " }.joinToString(" · "),
-                            Modifier.padding(bottom = 6.dp)) { pick = f.put("kind", "friend") }
+                        val sub = when {
+                            f.optBoolean("online") && f.optBoolean("joinable") -> "online · Party offen"
+                            f.optBoolean("online") && f.optBoolean("inParty") -> "online · in einer Party"
+                            f.optBoolean("online") -> "online"
+                            else -> listOf(f.optString("app"), "zuletzt ${ago(f.optLong("seen"))}").filter { it.isNotBlank() && it != "zuletzt " }.joinToString(" · ")
+                        }
+                        PersonRow(f.optString("name"), sub, Modifier.padding(bottom = 6.dp), if (f.optBoolean("joinable")) "A: beitreten" else "",
+                            online = f.optBoolean("online")) { pick = f.put("kind", "friend") }
                     }
                     val near = s?.optJSONArray("nearby").list()
                     if (near.isNotEmpty()) {
@@ -220,8 +246,13 @@ fun FriendsPanel() {
             "Annehmen" to { act { if (Pals.accept(ctx, p.optString("id"))) null else "Anfrage ist weg" }; pick = null },
             "Ablehnen" to { act { Pals.decline(ctx, p.optString("id")); null }; pick = null },
         )) { pick = null }
-        else ConsoleMenu(name, "Freund seit ${ago(p.optLong("since"))}", options = listOf(
-            "Zur Party einladen" to { msg = "Partys kommen mit dem nächsten Schritt"; pick = null },
+        else if (p.optString("kind") == "invite") ConsoleMenu(name, "lädt dich in die Party ein (${p.optInt("members")} drin)", options = listOf(
+            "Beitreten" to { act { wtf.lennard.thorbro.Party.join(ctx, p.optString("id"), p.optString("party")) }; pick = null },
+            "Ablehnen" to { act { wtf.lennard.thorbro.Party.decline(ctx, p.optString("id")); null }; pick = null },
+        )) { pick = null }
+        else ConsoleMenu(name, if (p.optBoolean("online")) "online" else "Freund seit ${ago(p.optLong("since"))}", options = listOfNotNull(
+            ("Party beitreten" to { act { wtf.lennard.thorbro.Party.joinOpen(ctx, p.optString("id")) }; pick = null }).takeIf { p.optBoolean("joinable") },
+            "Zur Party einladen" to { act { wtf.lennard.thorbro.Party.invite(ctx, p.optString("id"))?.let { it } }; msg = ""; pick = null },
             "Entfernen" to { act { Pals.remove(ctx, p.optString("id")); null }; pick = null },
         )) { pick = null }
     }

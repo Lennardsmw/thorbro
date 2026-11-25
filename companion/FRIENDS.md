@@ -24,3 +24,18 @@ Weitere Typen (Party, Chat) laufen über `Pals.handlers` / `MacFriends.handlers`
   ThorBro und RomBro übernehmen solche Dateien aus `Download/` bzw. `~/Downloads` beim Öffnen des Freunde-Menüs.
 - **In der Nähe**: `GET /api/netplay/lobby` (Port 7330, mDNS `_thorbro._tcp`) liefert `card`; „Hinzufügen“ schickt `req`,
   der andere nimmt an (fragen beide, werden sie sofort Freunde).
+
+## Status (online, Party)
+- Jedes Gerät postet seinen Status nur bei Änderungen und alle 3 h auf sein Status-Topic
+  `tbf-s-` + Hex(SHA-256("thorbro status v1" ‖ pub))[0:12]; Freunde lesen mit (kostet nichts – ntfy.sh erlaubt
+  ohne Konto nur 250 Posts pro Tag und IP, also sparsam senden).
+- Inhalt `ts1.<nonce>.<AES-GCM(HMAC(SHA-256(pub), "thorbro status key v1"), {"m", "s"})>`, `m` = `{"id","name","ts","on","app","party"?,"open"?}`.
+- „online“ = `on` und jünger als 3,5 h. Alle Topics (Postfach + Status aller Freunde) laufen in einem Stream
+  (`/t1,t2,…/json?since=<Zeit>`), neu aufgebaut, wenn sich die Freundesliste ändert.
+
+## Party
+- Der Leiter hält die Party: im Status `party = {id, leader, open, members:[{id,name}]}`; Mitglieder senden `party = {id, leader}`.
+- Nur der Leiter lädt ein: `inv {party, members}` → Freund. Beitreten: `join {party}` → Leiter (eingeladen oder Party offen),
+  Leiter trägt ein und postet seinen Status. `leave {party}` → Leiter. Abgelehnt: `nope {why}`.
+- Ein Mitglied, das im Status des Leiters nicht (mehr) vorkommt (nach 90 s Wartezeit), verlässt die Party von selbst.
+- Ohne Party, aber „Party offen“: Status `open: true` – Freunde sehen das, beitreten geht erst, wenn eine Party besteht.
