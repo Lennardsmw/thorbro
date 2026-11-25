@@ -21,8 +21,11 @@ object Party {
     /** this device's party: {id, leader, members:[{id,name}], invited:[id]} as leader, {id, leader, since} as member */
     fun mine(ctx: Context): JSONObject? = Prefs.of(ctx).getString("party.mine", null)?.let { runCatching { JSONObject(it) }.getOrNull() }
     private fun save(ctx: Context, p: JSONObject?) {
+        val old = mine(ctx)?.optString("net")
+        if (p != null && !old.isNullOrEmpty() && p.optString("net").isEmpty() && p.optString("id") == mine(ctx)?.optString("id")) p.put("net", old)
         Prefs.of(ctx).edit().apply { if (p == null) remove("party.mine") else putString("party.mine", p.toString()) }.apply()
         Pals.bump()
+        thread(name = "partynet-sync", isDaemon = true) { runCatching { PartyNet.sync(ctx.applicationContext) } }
     }
 
     fun isLeader(ctx: Context) = mine(ctx)?.optString("leader") == Pals.myId(ctx)
@@ -35,37 +38,23 @@ object Party {
     /** the lobby opened or closed: as leader, tell the party (one status post) */
     fun lobbyChanged(ctx: Context) { if (leading(ctx)) publish(ctx) }
 
-    /** the open lobby as the party sees it: game, PIN and where to reach us */
+    /** where members' devices may reach this one directly: WLAN, Wi-Fi Direct, NetBird (not mobile data) */
+    private fun addrs(): JSONArray {
+        val a = Room.addresses()
+        return JSONArray((0 until a.length()).map { a.getJSONObject(it) }.filter { it.optString("kind") != "VPN" }.map { it.optString("ip") }.distinct())
+    }
+
+    /** the open lobby as the party sees it: game, PIN, where to reach us, and the 3DS identity (members must differ) */
     private fun gameInfo(): JSONObject? {
         val l = Netplay.lobby ?: return null
-        val addrs = listOfNotNull(Device.ip(), Direct.ownIp().takeIf { Direct.active() }).distinct()
         return JSONObject().put("system", l.system).put("title", l.rom.name.substringBeforeLast('.')).put("mode", l.mode)
-            .put("pin", l.pin).put("addrs", JSONArray(addrs))
+            .put("pin", l.pin).put("addrs", addrs())
+            .apply { l.az?.let { put("azUser", it.optString("user")).put("azConsole", it.optString("console")) } }
     }
 
-    /** the own 3DS room (always on): members point their 127.0.0.1 at it */
-    private fun roomInfo(): JSONObject? {
-        if (!Room.running()) return null
-        val addrs = listOfNotNull(Device.ip(), Direct.ownIp().takeIf { Direct.active() }).distinct()
-        return JSONObject().put("port", Azahar.ROOM_PORT).put("addrs", JSONArray(addrs))
-    }
-
-    @Volatile private var roomKey = ""
-
-    /** as member: 127.0.0.1 leads to the leader's room (null = back to the own room) */
-    private fun followRoom(ctx: Context, leader: JSONObject?, r: JSONObject?) {
-        val addrs = r?.optJSONArray("addrs")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
-        val key = leader?.optString("id").orEmpty() + addrs.joinToString()
-        if (key == roomKey) return
-        roomKey = key
-        if (leader == null || addrs.isEmpty()) { Relay.partyRoom = null; Relay.route(ctx); return }
-        thread(name = "party-room", isDaemon = true) {
-            val reach = addrs.firstOrNull { a -> runCatching { Netplay.peer(a).optBoolean("reachable") }.getOrDefault(false) } ?: addrs.first()
-            Relay.partyRoom = reach to leader.optString("name")
-            Relay.route(ctx)
-            Logs.i("party", "3DS: 127.0.0.1 → Raum von ${leader.optString("name")} ($reach)")
-        }
-    }
+    /** the own rooms (always on) and the party tunnel: members lead their 127.0.0.1 through it ([PartyNet]) */
+    private fun roomInfo(): JSONObject = JSONObject().put("port", Azahar.ROOM_PORT).put("eden", EdenRoom.ROOM_PORT)
+        .put("addrs", addrs()).put("net", PartyNet.host != null)
 
     @Volatile private var lastJoin = ""
 
@@ -80,11 +69,14 @@ object Party {
             // the first address that answers (same WLAN, or the leader's Wi-Fi Direct net)
             val reach = addrs.firstOrNull { a -> runCatching { Netplay.peer(a).optBoolean("reachable") }.getOrDefault(false) }
             if (reach == null) {
-                Pals.notify(ctx, "${leader.optString("name").take(24)} spielt $title", "Nicht im gleichen Netz – übers Internet kommt noch")
+                // not in the same network: the game itself goes through the tunnel (3DS, Switch), the ROM must be here
+                val r = runCatching { Netplay.startForParty(ctx, g, leader.optString("name")) }.getOrElse { JSONObject().put("error", it.message) }
+                if (r.has("error")) Pals.notify(ctx, "${leader.optString("name").take(24)} spielt $title", r.optString("error").take(90))
+                else Pals.notify(ctx, "Party: ${leader.optString("name").take(24)} spielt $title", r.optString("hint").lineSequence().firstOrNull().orEmpty())
                 return@thread
             }
             Pals.notify(ctx, "Party: ${leader.optString("name").take(24)} startet $title", "Du trittst bei …")
-            val job = Jobs.start("Party: $title") { j -> Netplay.join(ctx, reach, g.optString("pin"), j) }
+            val job = Jobs.start("Party: $title") { j -> Netplay.join(ctx, reach, g.optString("pin"), j, party = true) }
             Logs.i("party", "Trete $title bei (${reach})")
             while (!job.done) Thread.sleep(500)
             job.error?.let { Pals.notify(ctx, "Party: $title ging nicht", it.take(80)); Logs.i("party", "Beitritt: $it") }
@@ -97,7 +89,7 @@ object Party {
         val p = mine(ctx)
         if (p != null) st.put("party", if (p.optString("leader") == Pals.myId(ctx))
             JSONObject().put("id", p.optString("id")).put("leader", Pals.myId(ctx)).put("open", Pals.partyOpen(ctx)).put("members", p.optJSONArray("members") ?: JSONArray())
-                .apply { gameInfo()?.let { put("game", it) }; roomInfo()?.let { put("room", it) } }
+                .apply { gameInfo()?.let { put("game", it) }; put("room", roomInfo()) }
             else JSONObject().put("id", p.optString("id")).put("leader", p.optString("leader")))
         else if (Pals.partyOpen(ctx)) st.put("open", true) // alone, but friends may join
         return st
@@ -147,6 +139,7 @@ object Party {
         save(ctx, p)
         Logs.i("party", "${from.optString("name")} ist in der Party")
         Pals.notify(ctx, "${from.optString("name").take(24)} ist in deiner Party", "")
+        PartyNet.sync(ctx) // tunnel up before the status says so
         publish(ctx)
     }
 
@@ -203,7 +196,7 @@ object Party {
     fun leave(ctx: Context) {
         val p = mine(ctx) ?: return
         save(ctx, null)
-        followRoom(ctx, null, null)
+        PartyNet.unfollow(ctx)
         if (p.optString("leader") != Pals.myId(ctx))
             Pals.friends(ctx).firstOrNull { it.optString("id") == p.optString("leader") }?.let { Pals.send(ctx, it.optString("pub"), JSONObject().put("t", "leave").put("party", p.optString("id"))) }
         publish(ctx) // as leader: the members see the party is gone
@@ -217,13 +210,13 @@ object Party {
         val inIt = lp != null && lp.optString("id") == p.optString("id") && lp.optJSONArray("members").objs().any { it.optString("id") == Pals.myId(ctx) }
         if (inIt) {
             if (!p.optBoolean("in")) { p.put("in", true); save(ctx, p) }
-            followRoom(ctx, friend, lp!!.optJSONObject("room"))
+            PartyNet.follow(ctx, friend, lp!!)
             lp.optJSONObject("game")?.let { followGame(ctx, friend, it) }
             return
         }
         // not in it (yet): a join just sent may not be in the leader's status yet
         if (p.optBoolean("in") || System.currentTimeMillis() - p.optLong("since") > 90_000) {
-            save(ctx, null); publish(ctx); followRoom(ctx, null, null)
+            save(ctx, null); publish(ctx); PartyNet.unfollow(ctx)
             Pals.notify(ctx, "Party von ${friend.optString("name").take(24)} ist vorbei", "")
         }
     }
@@ -245,6 +238,7 @@ object Party {
         Pals.handlers["join"] = ::onJoin
         Pals.handlers["leave"] = ::onLeave
         Pals.handlers["nope"] = ::onNope
+        PartyNet.start()
         Pals.onStatus += ::onStatus
         thread(name = "party-heartbeat", isDaemon = true) {
             Thread.sleep(5000)

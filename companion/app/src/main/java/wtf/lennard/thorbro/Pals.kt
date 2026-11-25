@@ -412,12 +412,12 @@ object Pals {
     }
     private fun codeOpen(k: ByteArray, s: String) = runCatching { s.split('.').let { JSONObject(String(gcm(hmac(k, "key"), false, unb64(it[0]), unb64(it[1])))) } }.getOrNull()
 
-    /** the code currently shown (a new one when none runs); digits 0–7 → Online.SYMBOLS */
+    /** the code currently shown (a new one when none runs); digits 0–7 → ButtonCode.SYMBOLS */
     @Synchronized
     fun myCode(ctx: Context, fresh: Boolean = false): JSONObject {
         val app = ctx.applicationContext
         if (fresh || code == null || System.currentTimeMillis() >= codeUntil) {
-            val c = (1..CODE_LEN).map { rnd.nextInt(Online.SYMBOLS.size) }.joinToString("")
+            val c = (1..CODE_LEN).map { rnd.nextInt(ButtonCode.SYMBOLS.size) }.joinToString("")
             code = c; codeUntil = System.currentTimeMillis() + CODE_MINUTES * 60_000
             val k = codeKey(c); val topic = codeTopic(k); val until = codeUntil
             thread(name = "pals-code", isDaemon = true) {
@@ -446,7 +446,7 @@ object Pals {
             }
         }
         val c = code!!
-        return JSONObject().put("code", Online.codeText(c)).put("digits", Online.codeDigits(c))
+        return JSONObject().put("code", ButtonCode.codeText(c)).put("digits", ButtonCode.codeDigits(c))
             .put("minutes", (codeUntil - System.currentTimeMillis()) / 60_000 + 1)
     }
 
@@ -454,7 +454,7 @@ object Pals {
 
     /** the other side's code pressed here → friends with it; returns its name or throws */
     fun redeem(ctx: Context, input: String, job: Jobs.Job? = null): String {
-        val c = Online.normalize(input) ?: throw IllegalArgumentException("Der Code hat $CODE_LEN Tasten")
+        val c = ButtonCode.normalize(input) ?: throw IllegalArgumentException("Der Code hat $CODE_LEN Tasten")
         if (c == code) throw IllegalArgumentException("Das ist dein eigener Code")
         job?.let { it.message = "Suche den Code …"; it.progress = 0.2 }
         val k = codeKey(c); val topic = codeTopic(k)

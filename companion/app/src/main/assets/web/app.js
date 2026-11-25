@@ -1326,209 +1326,29 @@ $('#mlScan').onclick = async () => {
   } catch (err) { $('#mlScanInfo').textContent = 'Fehler: ' + err.message; }
 };
 
-// ---------- netplay (local multiplayer) ----------
+// ---------- multiplayer (the party plays together) ----------
 let np = null;
-const npModes = { retroarch: 'RetroArch', ppsspp: 'PPSSPP', eden: 'Eden', azahar: 'Azahar', share: 'Weitergeben', server: 'Spielserver' };
-const npAddrs = (a) => (a || []).map((x) => `${x.kind}: ${x.ip}`).join(' · ') || 'kein Netz';
+const npModes = { retroarch: 'RetroArch', ppsspp: 'PPSSPP', eden: 'Eden', azahar: 'Azahar', share: 'Weitergeben' };
 async function loadNetplay() {
   try { np = (await api('/api/netplay')).body; } catch (err) { $('#npStatus').textContent = 'Fehler: ' + err.message; return; }
-  const l = np.lobby;
-  const room = np.azahar && np.azahar.server;
+  const p = np.party, n = np.partyNet || {}, l = np.lobby;
+  const others = p ? p.members.filter((m) => !m.me).map((m) => m.name) : [];
+  $('#npStatus').textContent = !p ? 'Keine Party – Freunde einladen, dann spielt ihr zusammen.'
+    : p.leaderMe ? `Du leitest die Party${others.length ? ' mit ' + others.join(', ') : ' (noch allein)'} · ein Spiel, das du startest, startet bei allen`
+    : n.connected ? `In der Party von ${n.leader} · verbunden ✓`
+    : n.following ? `In der Party von ${n.leader} · verbinde …` : 'In einer Party · warte auf den Leiter';
   $('#npClose').hidden = !l;
-  if (l) {
-    const az = l.mode === 'azahar';
-    const members = room && room.members ? room.members : [];
-    const state = { starting: 'startet …',
-      hosting: `<span class="ok">${az ? 'Raum läuft · ' + (members.length ? members.length + ' im Raum' : 'in Azahar beitreten') : 'wartet auf Mitspieler'}</span>`,
-      sharing: '<span class="ok">wird angeboten</span>',
-      error: '<span class="err">3DS-Raum ist aus – beenden und neu starten</span>',
-      manual: '<span class="err">RetroArch hostet nicht von selbst: im RetroArch-Menü Netplay → Host starten</span>' }[l.hostState] || '';
-    $('#npStatus').innerHTML = `${l.mode === 'share' ? 'Du gibst weiter' : 'Du spielst'}: <strong>${esc(l.game)}</strong> (${esc(npModes[l.mode] || l.mode)}) ${state}`;
-    $('#npLobby').innerHTML = `<p style="font-size:2em;letter-spacing:.2em" class="ok">PIN ${esc(l.pin)}</p>
-      <p class="muted">${np.direct ? 'Wi-Fi Direct an – Thors in der Nähe sehen die Einladung.' : 'Wi-Fi Direct aus – der andere Thor braucht dasselbe WLAN (Erweitert → Thors suchen).'}
-      Beigetreten: ${l.guestNames.length ? l.guestNames.map(esc).join(', ') : 'noch keiner'}</p>`
-      + (az ? `<p>Im 3DS-Raum: ${members.length ? members.map(esc).join(', ') : 'niemand'}</p><pre>${esc('In Azahar (dieser Thor): Zurück-Taste → Mehrspieler → Raum beitreten\nIP: 127.0.0.1   Port: ' + l.roomPort + '   Passwort: leer\n\nErreichbar für andere (Port ' + l.roomPort + '): ' + npAddrs(np.addresses))}</pre>` : '');
-  } else {
-    $('#npStatus').textContent = 'Nichts offen.';
-    $('#npLobby').innerHTML = '';
-  }
-  $('#npAddrs').textContent = 'Dieser Thor: ' + npAddrs(np.addresses) + '. Von unterwegs: beide Thors in NetBird, dann hier die NetBird-Adresse des anderen eintippen.';
-  if (np.shizuku !== 'ready') $('#npLobby').innerHTML += '<p class="muted">Tipp: Mit Shizuku übernimmt ThorBro deine RetroArch-Einstellungen 1:1 und kann PPSSPP einstellen.</p>';
-  $('#npSupported').textContent = (np.supported.length
-    ? 'Ein Knopf, keine Spielauswahl: 3DS-Raum, Wi-Fi Direct und Einladungen. Dann ein Spiel aus einem beliebigen Frontend starten. Geht mit: ' + np.supported.map((s) => s.name + (s.shaky ? ' (wackelig)' : '')).join(', ') + '.'
-    : 'Kein passender Emulator installiert (RetroArch, PPSSPP, Azahar oder Eden).') + ' Ein Spiel weitergeben: im Spiele-Tab beim Spiel „Weitergeben“.';
-  renderServer(np.server);
-  renderOnline(np.online);
-  if (np.joined && np.joined.mode === 'azahar' && !l) {
-    const st = np.azahar && np.azahar.room;
-    $('#npLobby').innerHTML += `<p>3DS-Raum bei ${esc(np.joined.host)} (Azahar → 127.0.0.1): ${st === 'connected' ? '<span class="ok">im Raum ✓</span>' : '<span class="err">noch nicht im Raum</span>'} <button data-relay-off>Trennen</button></p><pre>${esc(np.joined.hint || '')}</pre>`;
-  }
-  $('#frList').innerHTML = (np.friends || []).length ? np.friends.map((f) => `<div class="card"><h3>${esc(f.name)}</h3><div class="muted">${esc(f.id)}</div>
-    <p><button data-unfriend="${esc(f.id)}">Entfernen</button></p></div>`).join('') : '<p class="muted">Noch keine – einmal eine Einladung annehmen.</p>';
-  $('#frAuto').checked = !!np.auto;
-  $('#npWlan').checked = !!np.wlanOnly;
-  if ((np.server && np.server.on) || (l && l.mode === 'azahar') || (np.joined && np.joined.mode === 'azahar')) { clearTimeout(loadNetplay.t); loadNetplay.t = setTimeout(() => { if (!$('#netplay').hidden) loadNetplay(); }, 4000); }
+  const room = np.azahar && np.azahar.server;
+  $('#npLobby').innerHTML = l ? `<p><strong>${esc(l.game)}</strong> · ${esc(npModes[l.mode] || l.mode)}${l.mode === 'azahar' && room ? ' · im 3DS-Raum: ' + esc((room.members || []).join(', ') || 'niemand') : ''}</p>` : '';
+  $('#npHow').textContent = (np.services || []).map((x) => `${x.name}\n  ${x.how}`).join('\n\n');
+  clearTimeout(loadNetplay.t); loadNetplay.t = setTimeout(() => { if (!$('#netplay').hidden) loadNetplay(); }, 4000);
 }
-let invites = [];
-$('#invScan').onclick = async () => {
-  $('#invInfo').textContent = 'Suche per Funk (ca. 6 s) …'; $('#invList').innerHTML = '';
-  try {
-    const { body } = await api('/api/netplay/invites');
-    invites = body.invites;
-    $('#invInfo').textContent = !body.permission ? 'Am Thor in ThorBro einmal „Geräte in der Nähe“ erlauben (Multiplayer → Erweitert → Wi-Fi Direct).'
-      : invites.length ? `${invites.length} gefunden` : 'Keiner gefunden. Der andere Thor muss Wi-Fi Direct an haben.';
-    $('#invList').innerHTML = invites.map((i) => `<div class="card"><h3>${esc(i.name)}</h3><div class="muted">${esc(i.game || 'Wi-Fi Direct offen')}${i.mode ? ' · ' + esc(npModes[i.mode] || i.mode) : ''}${i.via ? ' · ' + esc(i.via) : ''}</div>
-      ${i.friend ? '<div class="ok">Freund</div>' : ''}<p><button class="primary" data-inv="${esc(i.device)}">${i.mode === 'server' ? '3DS-Raum nutzen' : !i.lobby ? 'Verbinden' : i.mode === 'share' ? 'Annehmen' : 'Beitreten'}</button></p></div>`).join('');
-  } catch (err) { $('#invInfo').textContent = 'Fehler: ' + err.message; }
-};
-$('#invList').addEventListener('click', async (e) => {
-  const b = e.target.closest('[data-inv]'); if (!b) return;
-  b.disabled = true;
-  try {
-    const { body } = await api('/api/netplay/accept?' + q({ device: b.dataset.inv }), { method: 'POST' });
-    const j = await waitJob(body.id, (j) => ($('#invInfo').textContent = `${j.message || ''} ${Math.round(j.progress * 100)} %`));
-    if (j.error) throw new Error(j.error);
-    $('#invInfo').textContent = j.result.hint || 'Gestartet';
-    loadNetplay();
-  } catch (err) { alert(err.message); $('#invInfo').textContent = ''; }
-  b.disabled = false;
-});
-function serverText(sv) {
-  const lines = [`Name: ${sv.name}`];
-  if (sv.direct) lines.push(`Wi-Fi Direct: ${sv.ssid} (Thors in der Nähe sehen ihn von selbst)`);
-  lines.push('', 'Adressen:', ...(sv.addresses || []).map((x) => `${x.kind}: ${x.ip}`));
-  if ((sv.services || []).length) {
-    lines.push('', 'Läuft hier:');
-    sv.services.forEach((x) => lines.push(`• ${x.name}${x.port ? ' · Port ' + x.port : ''}`, `   ${x.how}`));
-  }
-  const m = (sv.room && sv.room.members) || [];
-  if (m.length) lines.push('', 'Im 3DS-Raum: ' + m.join(', '));
-  lines.push('', 'Spiel aus einem beliebigen Frontend starten – Freunde in der Nähe bekommen die Einladung. Von unterwegs: über NetBird.');
-  return lines.join('\n');
-}
-function renderServer(sv) {
-  if (!sv) return;
-  $('#svToggle').textContent = sv.on ? 'Server stoppen' : 'Spielserver starten';
-  $('#svToggle').classList.toggle('primary', !sv.on);
-  $('#svState').innerHTML = sv.on ? '<span class="ok">läuft</span>' : 'aus';
-  $('#svInfo').hidden = !sv.on;
-  $('#svInfo').textContent = sv.on ? serverText(sv) : '';
-}
-$('#svToggle').onclick = async () => {
-  const on = !(np && np.server && np.server.on);
-  $('#svToggle').disabled = true; $('#svState').textContent = on ? 'startet …' : 'stoppt …';
-  try {
-    const { body } = await api('/api/netplay/server?' + q({ on: on ? '1' : '0' }), { method: 'POST' });
-    if (body.roomError) toast('3DS-Raum: ' + body.roomError);
-  } catch (err) { alert(err.message); }
-  $('#svToggle').disabled = false; loadNetplay(); loadDirect();
-};
-// ---------- online (internet) ----------
-function renderOnline(o) {
-  if (!o) return;
-  $('#onState').innerHTML = o.open ? `<span class="ok">offen</span> · ${o.guests} von außen drin` + (o.public ? '' : ' · <span class="err">keine öffentliche Adresse</span>') : 'zu';
-  $('#onInvite').textContent = o.open ? 'Code zeigen' : 'Online einladen';
-  if (o.open && o.code) {
-    $('#onCode').textContent = o.code;
-    $('#onCodeSub').textContent = `als Zahlen: ${o.digits} · gilt noch ${o.codeMinutes} Min. · Freund: Mehrspieler → „Code eingeben“`;
-  } else if (!o.open) $('#onBox').hidden = true;
-  $('#onKnown').innerHTML = (o.known || []).map((k) => `<button data-known="${esc(k.id)}">Wieder zu ${esc(k.name)}</button><button data-forget="${esc(k.id)}" title="vergessen">✕</button>`).join('');
-}
-async function onlineAction(path) {
-  try { const { body } = await api(path, { method: 'POST' }); if (body.error) alert(body.error); else { renderOnline(body); $('#onBox').hidden = !body.open; } }
-  catch (err) { alert(err.message); }
-  loadNetplay();
-}
-$('#onInvite').onclick = async () => {
-  $('#onInvite').disabled = true; $('#onState').textContent = 'öffnet …';
-  await onlineAction(np && np.online && np.online.open && np.online.code ? '/api/online/new' : '/api/online/host');
-  $('#onInvite').disabled = false;
-};
-$('#onNew').onclick = () => onlineAction('/api/online/new');
-$('#onReset').onclick = () => { if (confirm('Alle, die schon mal drin waren, brauchen dann wieder einen Code. Weiter?')) onlineAction('/api/online/reset'); };
-$('#onClose').onclick = async () => { await api('/api/online/close', { method: 'POST' }); $('#onBox').hidden = true; loadNetplay(); };
-async function onlineJoin(params) {
-  $('#onJoin').disabled = true; $('#onJoinInfo').textContent = 'verbinde …';
-  try {
-    const { body } = await api('/api/online/join?' + q(params), { method: 'POST' });
-    for (;;) {
-      await new Promise((r) => setTimeout(r, 700));
-      const { body: j } = await api('/api/jobs/' + body.id);
-      $('#onJoinInfo').textContent = j.message || 'verbinde …';
-      if (j.done) { $('#onJoinInfo').textContent = j.error ? 'Ging nicht: ' + j.error : (j.result && j.result.hint) || 'Verbunden'; break; }
-    }
-  } catch (err) { $('#onJoinInfo').textContent = err.message; }
-  $('#onJoin').disabled = false; loadNetplay();
-}
-$('#onJoin').onclick = () => { const code = $('#onJoinCode').value.trim(); if (code) onlineJoin({ code }); };
-$('#onKnown').onclick = async (e) => {
-  const k = e.target.dataset.known, f = e.target.dataset.forget;
-  if (k) onlineJoin({ known: k });
-  if (f) { await api('/api/online/forget?' + q({ id: f }), { method: 'POST' }); loadNetplay(); }
-};
-
-$('#npClose').onclick = async () => { await api('/api/netplay/close', { method: 'POST' }); loadNetplay(); loadDirect(); };
-
-function renderPeers(peers) {
-  $('#npPeers').innerHTML = peers.map((p) => {
-    const l = p.lobby;
-    const body = !p.reachable ? '<div class="err">nicht erreichbar</div>'
-      : l && l.open ? `<div><strong>${esc(l.game)}</strong></div><div class="muted">${esc(npModes[l.mode] || l.mode)} · ${fmt(l.size)}</div>
-        <p><button class="primary" data-join="${esc(p.address)}">Beitreten</button></p>`
-      : l && l.room ? `<div class="muted">Spielserver läuft</div><p><button class="primary" data-relay="${esc(p.address)}" data-relay-name="${esc(l.host || p.address)}">3DS-Raum nutzen</button></p>`
-      : '<div class="muted">keine Lobby offen</div>';
-    return `<div class="card"><h3>${esc(l?.host || p.service || p.address)}</h3><div class="muted">${esc(p.address)}</div>${body}</div>`;
-  }).join('');
-}
-$('#npScan').onclick = async () => {
-  $('#npScanInfo').textContent = 'Suche …'; $('#npPeers').innerHTML = '';
-  try {
-    const { peers } = (await api('/api/netplay/peers')).body;
-    $('#npScanInfo').textContent = peers.length ? `${peers.length} gefunden` : 'Keiner gefunden. Selbes WLAN/Hotspot? Sonst IP eintippen.';
-    renderPeers(peers);
-  } catch (err) { $('#npScanInfo').textContent = 'Fehler: ' + err.message; }
-};
-$('#npAddrGo').onclick = async () => {
-  const a = $('#npAddr').value.trim(); if (!a) return;
-  try { renderPeers((await api('/api/netplay/peers?' + q({ address: a }))).body.peers); } catch (err) { alert(err.message); }
-};
-$('#npPeers').addEventListener('click', async (e) => {
-  const r = e.target.closest('[data-relay]');
-  if (r) {
-    try {
-      const { body } = await api('/api/netplay/relay?' + q({ address: r.dataset.relay, name: r.dataset.relayName }), { method: 'POST' });
-      if (body.error) throw new Error(body.error);
-      $('#npScanInfo').textContent = body.hint; loadNetplay();
-    } catch (err) { alert(err.message); }
-    return;
-  }
-  const b = e.target.closest('[data-join]'); if (!b) return;
-  const pin = prompt('PIN vom anderen Thor:'); if (!pin) return;
-  b.disabled = true;
-  try {
-    const { body } = await api('/api/netplay/connect?' + q({ address: b.dataset.join, pin: pin.trim() }), { method: 'POST' });
-    const j = await waitJob(body.id, (j) => ($('#npScanInfo').textContent = `${j.message || ''} ${Math.round(j.progress * 100)} %`));
-    if (j.error) throw new Error(j.error);
-    $('#npScanInfo').textContent = j.result.hint || 'Gestartet';
-    toast('Spiel startet');
-  } catch (err) { alert(err.message); $('#npScanInfo').textContent = ''; }
-  b.disabled = false;
-});
-
-$('#frList').addEventListener('click', async (e) => {
-  const b = e.target.closest('[data-unfriend]'); if (!b) return;
-  await api('/api/netplay/friend/remove?' + q({ id: b.dataset.unfriend }), { method: 'POST' }); loadNetplay();
-});
-$('#npWlan').onchange = async () => { await api('/api/netplay/wlan?' + q({ on: $('#npWlan').checked ? '1' : '0' }), { method: 'POST' }); loadNetplay(); loadDirect(); };
-$('#npLobby').addEventListener('click', async (e) => {
-  if (e.target.dataset.relayOff === undefined) return;
-  await api('/api/netplay/relay', { method: 'POST' }); loadNetplay();
-});
-$('#frAuto').onchange = async () => { await api('/api/netplay/auto?' + q({ on: $('#frAuto').checked ? '1' : '0' }), { method: 'POST' }); loadNetplay(); };
-$('#frPrepare').onclick = async () => {
-  $('#frInfo').textContent = 'Richte ein …';
-  try { const { body } = await api('/api/netplay/prepare', { method: 'POST' }); $('#frInfo').textContent = Object.entries(body).map(([k, v]) => `${npModes[k] || k}: ${v}`).join(' · ') || 'Nichts zu tun'; }
-  catch (err) { $('#frInfo').textContent = 'Fehler: ' + err.message; }
+$('#npFriends').onclick = () => $('#friendsBtn').click();
+$('#npClose').onclick = async () => { await api('/api/netplay/close', { method: 'POST' }); loadNetplay(); };
+$('#npPrepare').onclick = async () => {
+  $('#npInfo').textContent = 'Richte ein …';
+  try { const { body } = await api('/api/netplay/prepare', { method: 'POST' }); $('#npInfo').textContent = Object.entries(body).map(([k, v]) => `${npModes[k] || k}: ${v}`).join(' · ') || 'Nichts zu tun'; }
+  catch (err) { $('#npInfo').textContent = 'Fehler: ' + err.message; }
 };
 
 // ---------- Wi-Fi Direct ----------

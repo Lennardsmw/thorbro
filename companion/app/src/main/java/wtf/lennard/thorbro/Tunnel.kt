@@ -18,11 +18,13 @@ import javax.crypto.spec.SecretKeySpec
 import kotlin.concurrent.thread
 
 /**
- * Online play without a game server: a direct UDP tunnel between two Thors (no VPN app, no relay in between).
+ * Party play over the internet without a game server: a direct UDP tunnel from every party member to the leader
+ * (no VPN app, no relay in between). ThorBro and RomBro use the same file (protocol: companion/FRIENDS.md, "Party-Netz").
  *
- * The host Thor keeps its 3DS room ([Room]) as is; every guest gets a session in the host's tunnel, and the host
- * hands each session to the room from its own local socket — the room sees one steady player per guest, so up to
- * the room's limit (8) can play, online and WLAN players mixed. Guests only talk to the host (star), not to each other.
+ * The leader keeps its rooms (3DS [Room], Switch [EdenRoom]) as they are; every member socket gets a session in the
+ * leader's tunnel and names the room port it wants in its HELLO (only the leader's [Host.ports] are allowed). The
+ * leader hands each session to that room from its own local socket — the room sees one steady player per member, so
+ * up to the room's limit can play, online and WLAN players mixed. Members only talk to the leader (star).
  *
  * Getting through home routers: both sides learn their public address from public STUN servers, swap their
  * candidate addresses (LAN, public, IPv6) through the signalling, then send to each other at the same time
@@ -35,7 +37,9 @@ import kotlin.concurrent.thread
  * Pure JVM on purpose (no Android classes): the same file runs in a test harness on a Mac.
  */
 object Tunnel {
-    const val VERSION: Byte = 1
+    const val VERSION: Byte = 2
+    /** the leader's tunnel port (UDP); the 3DS room has 24873, Azahar's relay 24872 */
+    const val PORT = 24874
     private const val HELLO: Byte = 1    // guest → host: open/keep this session
     private const val WELCOME: Byte = 2  // host → guest: session accepted
     private const val DATA: Byte = 3
@@ -59,7 +63,7 @@ object Tunnel {
     /** one key per direction, so both sides can count from 0 without ever reusing a nonce */
     class Keys(private val secret: ByteArray) {
         private fun derive(label: String) = Mac.getInstance("HmacSHA256").run {
-            init(SecretKeySpec(secret, "HmacSHA256")); doFinal("thorbro tunnel v1 $label".toByteArray())
+            init(SecretKeySpec(secret, "HmacSHA256")); doFinal("thorbro tunnel v2 $label".toByteArray())
         }
         val toHost = SecretKeySpec(derive("guest->host").copyOf(32), "AES")
         val toGuest = SecretKeySpec(derive("host->guest").copyOf(32), "AES")
@@ -206,6 +210,9 @@ object Tunnel {
 
     private fun bind(port: Int) = DatagramSocket(null).apply { reuseAddress = true; bind(InetSocketAddress(port)) }
 
+    /** a member's socket and its addresses (with STUN), before the leader's secret is known: sent along with the knock */
+    fun socket(): Pair<DatagramSocket, List<String>> { val s = bind(0); return s to candidates(s) }
+
     // ---------- host ----------
 
     /**
@@ -213,7 +220,7 @@ object Tunnel {
      * at 127.0.0.1:[roomPort]; answers from the room go back to the guest's current address (it may change, e.g.
      * when a phone hotspot re-maps it — any valid packet moves it).
      */
-    class Host(secret: ByteArray, val roomPort: Int, port: Int = 0, val maxGuests: Int = 7) {
+    class Host(secret: ByteArray, val ports: Set<Int>, port: Int = 0, val maxGuests: Int = 15) {
         private val keys = Keys(secret)
         val sock: DatagramSocket = bind(port)
         private val local: List<String> = Tunnel.candidates(sock, withStun = false)
@@ -229,7 +236,7 @@ object Tunnel {
 
         /** asks STUN again now (the answer arrives in the receive loop within a moment) */
         fun refreshPublic() { stunId = stunAsync(sock) }
-        private class Peer(val session: Long, @Volatile var addr: SocketAddress, val local: DatagramSocket) {
+        private class Peer(val session: Long, @Volatile var addr: SocketAddress, val local: DatagramSocket, val target: Int) {
             val replay = Replay(); @Volatile var tx = 0L; @Volatile var last = System.currentTimeMillis()
         }
         private val peers = ConcurrentHashMap<Long, Peer>()
@@ -254,10 +261,13 @@ object Tunnel {
                     when (m.type) {
                         HELLO -> {
                             val pr = peer ?: run {
+                                // HELLO names the room: 2 bytes port; only the leader's own rooms
+                                val target = if (m.data.size >= 2) ((m.data[0].toInt() and 0xFF) shl 8) or (m.data[1].toInt() and 0xFF) else ports.first()
+                                if (target !in ports) return@run null
                                 if (peers.size >= maxGuests) { send(p.socketAddress, FULL, m.session, 0, ByteArray(0)); return@run null }
-                                Peer(m.session, p.socketAddress, DatagramSocket()).also {
+                                Peer(m.session, p.socketAddress, DatagramSocket(), target).also {
                                     it.replay.fresh(m.counter); peers[m.session] = it; pump(it)
-                                    log("Gast ${m.session.toString(16)} über ${p.socketAddress}")
+                                    log("Gast ${m.session.toString(16)} über ${p.socketAddress} → Port $target")
                                 }
                             } ?: continue
                             pr.addr = p.socketAddress; pr.last = System.currentTimeMillis()
@@ -265,7 +275,7 @@ object Tunnel {
                         }
                         DATA -> peer?.let {
                             it.addr = p.socketAddress; it.last = System.currentTimeMillis()
-                            runCatching { it.local.send(DatagramPacket(m.data, m.data.size, InetSocketAddress(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), roomPort))) }
+                            runCatching { it.local.send(DatagramPacket(m.data, m.data.size, InetSocketAddress(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), it.target))) }
                         }
                         PING -> peer?.let { it.addr = p.socketAddress; it.last = System.currentTimeMillis(); send(it, PING, ByteArray(0)) }
                         BYE -> peer?.let { drop(it, "abgemeldet") }
@@ -333,18 +343,20 @@ object Tunnel {
      * Guest side: tries all host candidates at once and keeps the first that answers. [open] gives one session per
      * local player socket (Azahar's ENet socket), so the host's room sees each as its own member.
      */
-    class Guest(secret: ByteArray, private val hostCandidates: List<String>, port: Int = 0, stun: Boolean = true) {
+    class Guest(val secret: ByteArray, private val hostCandidates: List<String>, port: Int = 0, stun: Boolean = true,
+                socket: DatagramSocket? = null, known: List<String>? = null) {
         private val keys = Keys(secret)
-        val sock: DatagramSocket = bind(port)
+        /** a socket made before the secret was known ([Tunnel.socket]) keeps the address the leader already punched to */
+        val sock: DatagramSocket = socket ?: bind(port)
         /** this guest's own addresses: the host punches towards them */
-        val candidates: List<String> = Tunnel.candidates(sock, withStun = stun)
+        val candidates: List<String> = known ?: Tunnel.candidates(sock, withStun = stun)
         @Volatile var host: SocketAddress? = null
             private set
         @Volatile var lastHeard = 0L
             private set
         @Volatile var full = false
             private set
-        inner class Session(val id: Long, private val back: (ByteArray) -> Unit) {
+        inner class Session(val id: Long, val target: Int, private val back: (ByteArray) -> Unit) {
             internal val replay = Replay()
             @Volatile internal var tx = 0L
             @Volatile var welcomed = false
@@ -394,7 +406,7 @@ object Tunnel {
             thread(name = "tunnel-guest-keep", isDaemon = true) {
                 while (!sock.isClosed) {
                     val waiting = sessions.values.filter { !it.welcomed }
-                    waiting.forEach { s -> (host?.let { listOf(it) } ?: targets).forEach { send(HELLO, s, it) } }
+                    waiting.forEach { s -> (host?.let { listOf(it) } ?: targets).forEach { hello(s, it) } }
                     sessions.values.filter { it.welcomed }.forEach { s -> if (System.currentTimeMillis() - lastHeard > 12_000) host?.let { send(PING, s, it) } }
                     Thread.sleep(if (waiting.isEmpty()) 5_000 else 250)
                     if (host != null && System.currentTimeMillis() - lastHeard > 40_000) { log("Host antwortet nicht mehr, suche neu"); host = null; sessions.values.forEach { it.welcomed = false } }
@@ -402,23 +414,29 @@ object Tunnel {
             }
         }
 
+        private fun hello(s: Session, to: SocketAddress) {
+            val out = seal(keys.toHost, HELLO, s.id, s.tx++, byteArrayOf((s.target shr 8).toByte(), s.target.toByte()))
+            runCatching { sock.send(DatagramPacket(out, out.size, to)) }
+        }
+
         private fun send(type: Byte, s: Session, to: SocketAddress) {
             val out = seal(keys.toHost, type, s.id, s.tx++, ByteArray(0))
             runCatching { sock.send(DatagramPacket(out, out.size, to)) }
         }
 
-        fun open(back: (ByteArray) -> Unit): Session {
-            val s = Session(rnd.nextLong() and Long.MAX_VALUE, back)
+        /** a session to the leader's room at [target] (its port on the leader) */
+        fun open(target: Int, back: (ByteArray) -> Unit): Session {
+            val s = Session(rnd.nextLong() and Long.MAX_VALUE, target, back)
             sessions[s.id] = s
-            (host?.let { listOf(it) } ?: targets).forEach { send(HELLO, s, it) }
+            (host?.let { listOf(it) } ?: targets).forEach { hello(s, it) }
             return s
         }
 
         fun connected() = host != null && System.currentTimeMillis() - lastHeard < 40_000
 
         /** waits up to [ms] for the first answer from the host (opens a probe session for it) */
-        fun await(ms: Long): Boolean {
-            val probe = open { }
+        fun await(ms: Long, target: Int): Boolean {
+            val probe = open(target) { }
             val end = System.currentTimeMillis() + ms
             while (System.currentTimeMillis() < end && !probe.welcomed && !full) Thread.sleep(50)
             probe.close()

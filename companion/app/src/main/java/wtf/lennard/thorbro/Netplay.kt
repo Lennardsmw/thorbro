@@ -36,11 +36,10 @@ import kotlin.concurrent.thread
  *    in RetroArch's menu (Netplay → Connect to host).
  *  - PPSSPP: ad-hoc via the built-in PRO Adhoc server; ThorBro writes [Network] in ppsspp.ini
  *    (host: server on, guest: server = host IP), then the game's own multiplayer menu works.
- *  - Eden: LDN rooms are set up inside Eden; ThorBro starts the game and shows the host IP.
- *  - Azahar (3DS): the room runs on the host Thor itself ([Room], Azahar's room server); both players only "join" in
- *    Azahar (host 127.0.0.1, guest the host's address). ThorBro makes the guest's 3DS name and console ID differ from
- *    the host's (otherwise Azahar refuses the join) and shows who is in the room. No internet needed; from outside the
- *    home the same works through NetBird.
+ *  - Eden (Switch, LDN) and Azahar (3DS): every device runs its own room all the time ([EdenRoom], [Room]); the
+ *    emulator always joins 127.0.0.1 and [Relay] leads that to the own room or, in a party, through the [PartyNet]
+ *    tunnel to the leader's (same WLAN, NetBird or the internet). ThorBro makes the guest's 3DS name and console ID
+ *    differ from the host's (otherwise Azahar refuses the join).
  *  - "share": only hands the game over (no emulator start) — the guest keeps the file.
  *
  * Hosting also opens ThorBro's Wi-Fi Direct net (when allowed): a Thor nearby then gets the invite over the air,
@@ -104,7 +103,7 @@ object Netplay {
         val l = lobby
         return (l?.public() ?: JSONObject().put("open", false))
             .put("host", model()).put("hostId", Me.id(ctx))
-            .put("server", serverOn).put("room", Room.running() && Room.ready).put("card", Pals.card(ctx))
+            .put("server", false).put("room", Room.running() && Room.ready).put("card", Pals.card(ctx))
             .apply { if (l != null && Friends.isFriend(ctx, askerId)) put("pin", l.pin) }
     }
 
@@ -124,7 +123,7 @@ object Netplay {
                 .put("mode", if (l.optBoolean("open")) l.optString("mode") else "server").put("pin", l.optString("pin"))
                 .put("room", l.optBoolean("room"))
         }
-        val direct = if (wlanOnly(ctx) || !Direct.permitted(ctx)) emptyList() else Direct.invites(ctx).objs().map { it.put("via", "Wi-Fi Direct") }
+        val direct = if (!Direct.permitted(ctx)) emptyList() else Direct.invites(ctx).objs().map { it.put("via", "Wi-Fi Direct") }
         val ids = wlan.map { it.optString("id") }.toSet()
         return wlan + direct.filter { it.optString("id") !in ids }
     }
@@ -137,53 +136,18 @@ object Netplay {
     /** Wi-Fi Direct was switched on by hosting (and goes off again with the lobby) */
     @Volatile private var autoDirect = false
 
-    /**
-     * "Spielserver": on until switched off, no game picked. The 3DS room runs, Wi-Fi Direct announces this Thor, and any
-     * game started from any frontend gets its lobby by itself ([AutoPlay]). Lobbies come and go, the server stays.
-     */
-    @Volatile var serverOn = false
-        private set
-
-    /** "Nur WLAN": no Wi-Fi Direct at all; Thors find each other in the same WLAN (mDNS), also via NetBird by address */
-    fun wlanOnly(ctx: Context) = Prefs.of(ctx).getBoolean("netplay.wlanOnly", false)
-
-    fun setWlanOnly(ctx: Context, on: Boolean) {
-        Prefs.of(ctx).edit().putBoolean("netplay.wlanOnly", on).apply()
-        if (on && autoDirect) { autoDirect = false; runCatching { Direct.stop(ctx) } }
-        else if (!on && (serverOn || lobby != null)) ensureDirect(ctx)
-    }
-
-    fun startServer(ctx: Context): JSONObject {
-        appCtx = ctx.applicationContext
-        serverOn = true
-        ensureDirect(ctx)
-        val roomErr = if ("azahar" in Emulators.installed(ctx).map { it.id }) Room.start(ctx, lobby?.public()?.optString("game") ?: "") else null
-        Direct.refreshInvite(ctx)
-        Logs.i("netplay", "Spielserver an" + (roomErr?.let { " (3DS-Raum: $it)" } ?: ""))
-        if (roomErr == null && Room.running()) thread(name = "online-open", isDaemon = true) { runCatching { Online.open(ctx) } } // STUN takes a moment
-        return server(ctx).also { if (roomErr != null) it.put("roomError", roomErr) }
-    }
-
-    fun stopServer(ctx: Context) {
-        serverOn = false
-        close(ctx)
-        Logs.i("netplay", "Spielserver aus")
-    }
-
-    /** what the server offers and how others get in, per emulator */
-    fun server(ctx: Context): JSONObject {
+    /** how each emulator plays together, for the multiplayer page */
+    fun services(ctx: Context): JSONArray {
         val inst = Emulators.installed(ctx).map { it.id }.toSet()
         val services = JSONArray()
-        fun svc(id: String, name: String, port: Int?, how: String) = services.put(JSONObject().put("id", id).put("name", name).put("port", port).put("how", how))
-        if ("azahar" in inst) svc("azahar", "3DS (Azahar)", Azahar.PORT,
-            if (Room.running() && Room.ready) "Raum läuft · auf jedem Thor in Azahar: Mehrspieler → Raum beitreten → 127.0.0.1, ThorBro verbindet"
-            else Room.error ?: "Raum ist aus")
-        if ("ppsspp" in inst) svc("ppsspp", "PSP (PPSSPP)", 27312, "eingebauter Ad-hoc-Server · im Spiel lokalen Mehrspieler wählen")
-        if ("retroarch" in inst) svc("retroarch", "Retro (RetroArch)", RA_NETPLAY_PORT, "hostet, sobald ein Spiel läuft")
-        if ("eden" in inst) svc("eden", "Switch (Eden)", null, "Raum im Eden-Menü öffnen")
-        return JSONObject().put("on", serverOn).put("name", model()).put("direct", Direct.active())
-            .put("ssid", Direct.status(ctx).optString("ssid")).put("addresses", Room.addresses())
-            .put("room", Room.status()).put("services", services)
+        fun svc(id: String, name: String, how: String) = services.put(JSONObject().put("id", id).put("name", name).put("how", how))
+        if ("azahar" in inst) svc("azahar", "3DS (Azahar)",
+            if (Room.running() && Room.ready) "einmal in Azahar: Mehrspieler → Direkt verbinden → 127.0.0.1, Port ${Azahar.PORT}" else Room.error ?: "Raum ist aus")
+        if ("eden" in inst) svc("eden", "Switch (Eden)",
+            if (EdenRoom.running() && EdenRoom.ready) "einmal in Eden: Mehrspieler → Raum beitreten → 127.0.0.1, Port ${EdenRoom.PORT}" else EdenRoom.error ?: "Raum ist aus")
+        if ("ppsspp" in inst) svc("ppsspp", "PSP (PPSSPP)", "Ad-hoc-Server des Leiters · nur im gleichen Netz")
+        if ("retroarch" in inst) svc("retroarch", "Retro (RetroArch)", "Leiter hostet · nur im gleichen Netz")
+        return services
     }
 
     private fun size(f: File) = if (f.isDirectory) f.walkTopDown().filter { it.isFile }.sumOf { it.length() } else f.length()
@@ -217,13 +181,11 @@ object Netplay {
             .put("joined", joinedRoom)
             .put("addresses", Room.addresses())
             .put("me", JSONObject().put("id", Me.id(ctx)).put("name", Me.name(ctx)))
-            .put("friends", JSONArray(Friends.list(ctx)))
-            .put("auto", Friends.auto(ctx))
             .put("direct", Direct.active())
-            .put("server", server(ctx))
+            .put("services", services(ctx))
             .put("relay", Relay.status())
-            .put("online", Online.hostStatus(ctx))
-            .put("wlanOnly", wlanOnly(ctx))
+            .put("partyNet", PartyNet.status())
+            .put("party", Party.json(ctx).opt("party"))
             .put("azahar", if ("azahar" in Emulators.installed(ctx).map { it.id }) JSONObject()
                 .put("identity", Azahar.identity(ctx))
                 .put("room", if (Relay.active()) (if (Relay.connected()) "connected" else "waiting") else Azahar.roomState())
@@ -241,7 +203,7 @@ object Netplay {
         val mode = mode(ctx, system) ?: return JSONObject().put("error", "Für diese Konsole gibt es kein Netplay (oder der Emulator fehlt)")
         if (rom.isDirectory) return JSONObject().put("error", "Ordner-Spiele werden noch nicht unterstützt")
         appCtx = ctx.applicationContext
-        if (mode == "azahar") { Room.start(ctx, rom.name.substringBeforeLast('.'))?.let { return JSONObject().put("error", it) }; Relay.partyRoom = null; joinedRoom = null; Relay.route(ctx) }
+        if (mode == "azahar") { Room.start(ctx, rom.name.substringBeforeLast('.'))?.let { return JSONObject().put("error", it) }; joinedRoom = null; Relay.route(ctx) }
         val l = open(ctx, system, rom, mode)
         val res = start(ctx, l, hostIp = null)
         if (res.has("error")) { close(ctx); return res }
@@ -351,7 +313,7 @@ object Netplay {
 
     /** Wi-Fi Direct on (if allowed and not already in someone's net), so nearby Thors see the invite */
     private fun ensureDirect(ctx: Context) {
-        if (wlanOnly(ctx) || Direct.active() || Direct.inForeignGroup() || !Direct.permitted(ctx)) return
+        if (Direct.active() || Direct.inForeignGroup() || !Direct.permitted(ctx)) return
         val r = runCatching { Direct.start(ctx) }.getOrNull()
         if (r != null && !r.has("error")) autoDirect = true
         else Logs.i("netplay", "Wi-Fi Direct nicht gestartet: ${r?.optString("error")}")
@@ -362,8 +324,6 @@ object Netplay {
         lobby = null
         val c = ctx ?: appCtx
         c?.let { Party.lobbyChanged(it) }
-        if (serverOn) { c?.let { Direct.refreshInvite(it) }; return } // the server keeps Wi-Fi Direct up
-        Online.stopHost() // the online room needs the local room behind it
         if (c != null) {
             if (autoDirect) { autoDirect = false; runCatching { Direct.stop(c) } } else Direct.refreshInvite(c)
         }
@@ -417,7 +377,7 @@ object Netplay {
     // ---------- guest ----------
 
     /** Joins the lobby on [address] with [pin]: fetch ROM if needed, configure, start. Runs as a job. */
-    fun join(ctx: Context, address: String, pin: String, job: Jobs.Job): JSONObject {
+    fun join(ctx: Context, address: String, pin: String, job: Jobs.Job, party: Boolean = false): JSONObject {
         appCtx = ctx.applicationContext
         val base = "http://${hostPart(address)}:${ThorService.PORT}"
         job.message = "Verbinde mit $address"
@@ -456,17 +416,46 @@ object Netplay {
             changed = runCatching { Azahar.makeDistinct(ctx, rom, info.optString("azUser").ifEmpty { null }, info.optString("azConsole").ifEmpty { null }) }
                 .onFailure { Logs.i("azahar", "3DS-Name/ID nicht angepasst: ${it.message}") }.getOrNull()
         }
-        // Azahar joins 127.0.0.1; ThorBro passes it on to the host's room at the address this Thor just reached it at
-        if (mode == "azahar") Relay.start(address, info.optString("host"), info.optInt("roomPort", Azahar.ROOM_PORT))?.let { throw IllegalStateException(it) }
+        // Azahar joins 127.0.0.1; ThorBro passes it on to the host's room: in a party through its tunnel (already
+        // routed), else straight to the address this Thor just reached it at
+        val viaParty = party && PartyNet.guest != null
+        if (mode == "azahar" && !viaParty) Relay.start(address, info.optString("host"), info.optInt("roomPort", Azahar.ROOM_PORT))?.let { throw IllegalStateException(it) }
         val roomIp = address
         val l = Lobby(system, rom, mode, pin, info.optString("host"), roomIp = roomIp)
         val res = start(ctx, l, hostIp = address)
         if (res.has("error")) throw IllegalStateException(res.getString("error"))
         if (changed != null) res.put("hint", res.optString("hint") + "\n\nAngepasst, damit Azahar euch auseinanderhält: $changed")
-        joinedRoom = JSONObject().put("game", info.optString("game")).put("host", info.optString("host")).put("address", address)
+        if (!viaParty) joinedRoom = JSONObject().put("game", info.optString("game")).put("host", info.optString("host")).put("address", address)
             .put("mode", mode).put("roomIp", roomIp).put("hint", res.optString("hint")).put("at", System.currentTimeMillis())
         return res.put("game", info.optString("game")).put("host", address).put("mode", mode)
     }
+
+    /**
+     * Party member, leader not in the same network: the rooms go through the party tunnel (3DS, Switch), so this device
+     * only has to start the same game — it must already be here (game files do not go through the tunnel).
+     */
+    fun startForParty(ctx: Context, g: JSONObject, leaderName: String): JSONObject {
+        appCtx = ctx.applicationContext
+        val mode = g.optString("mode")
+        val title = g.optString("title")
+        if (mode !in setOf("azahar", "eden")) return JSONObject().put("error", "Nicht im gleichen Netz – ${modeName(mode)} geht nur im gleichen WLAN oder über NetBird")
+        if (PartyNet.guest == null) return JSONObject().put("error", "Keine Verbindung zu $leaderName (Party-Tunnel kommt nicht zustande)")
+        if (mode(ctx, g.optString("system")) != mode) return JSONObject().put("error", "${modeName(mode)} fehlt auf diesem Thor")
+        val (system, rom) = findRom(ctx, name = title)?.takeIf { it.first == g.optString("system") }
+            ?: return JSONObject().put("error", "$title fehlt auf diesem Thor – übers Internet kommt das Spiel nicht mit")
+        var changed: String? = null
+        if (mode == "azahar") {
+            forceStop(Azahar.PKG); Thread.sleep(400)
+            changed = runCatching { Azahar.makeDistinct(ctx, rom, g.optString("azUser").ifEmpty { null }, g.optString("azConsole").ifEmpty { null }) }.getOrNull()
+        }
+        Relay.route(ctx)
+        val res = start(ctx, Lobby(system, rom, mode, g.optString("pin"), leaderName, roomIp = "127.0.0.1"), hostIp = "127.0.0.1")
+        if (changed != null) res.put("hint", res.optString("hint") + "\n\nAngepasst, damit Azahar euch auseinanderhält: $changed")
+        Logs.i("netplay", "Party über den Tunnel: $title ($mode)")
+        return res
+    }
+
+    private fun modeName(m: String) = when (m) { "retroarch" -> "RetroArch"; "ppsspp" -> "PPSSPP"; "eden" -> "Eden"; "azahar" -> "Azahar"; else -> m }
 
     /** one button for an invite from [Direct.invites]: join the other Thor's net, then its lobby (PIN came with the invite) */
     fun accept(ctx: Context, invite: JSONObject, job: Jobs.Job): JSONObject {
@@ -574,8 +563,8 @@ object Netplay {
                 }
             }
             else -> Emulators.launch(ctx, l.system, l.rom, "eden").apply {
-                put("hint", if (hostIp == null) "In Eden: Mehrspieler → Raum erstellen. IP für den Gast: ${Device.ip()}"
-                    else "In Eden: Mehrspieler → Direkt verbinden → $hostIp")
+                // the rooms run in ThorBro; Eden always joins 127.0.0.1 (host and guest alike), [Relay] does the rest
+                put("hint", "In Eden: Mehrspieler → Raum beitreten → 127.0.0.1, Port ${EdenRoom.PORT} (Eden merkt es sich), dann im Spiel lokal spielen")
             }
         }
     }

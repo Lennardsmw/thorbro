@@ -41,7 +41,6 @@ import java.io.FileOutputStream
  */
 object Server {
     /** last radio scan for invites (holds the nets' passwords; the panel only gets device addresses) */
-    @Volatile private var lastInvites: org.json.JSONArray? = null
     private const val PART = ".thorbro-part"
     private const val CHUNKS = ".thorbro-part.chunks"
 
@@ -605,16 +604,6 @@ object Server {
                     }
                     json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
                 }
-                post("/api/netplay/server") {
-                    if (denied(ctx)) return@post
-                    val res = withContext(Dispatchers.IO) { if (q("on") == "1") Netplay.startServer(ctx) else { Netplay.stopServer(ctx); Netplay.server(ctx) } }
-                    json(res)
-                }
-                post("/api/netplay/wlan") {
-                    if (denied(ctx)) return@post
-                    Netplay.setWlanOnly(ctx, q("on") == "1")
-                    json(JSONObject().put("wlanOnly", Netplay.wlanOnly(ctx)))
-                }
                 // ---- friends (Pals.kt): card is public, everything else needs the panel login ----
                 get("/api/friends/card") { json(Pals.card(ctx)) }
                 get("/api/friends") {
@@ -684,55 +673,6 @@ object Server {
                     val err = withContext(Dispatchers.IO) { Pals.import(ctx, text) }
                     if (err != null) fail(err, HttpStatusCode.Conflict) else json(Pals.status(ctx))
                 }
-                // online (internet) 3DS room: see Online.kt
-                get("/api/online") {
-                    if (denied(ctx)) return@get
-                    val addrs = runCatching { java.net.NetworkInterface.getNetworkInterfaces().toList().flatMap { n -> n.inetAddresses.toList().map { "${n.name} ${it.hostAddress}" } } }.getOrDefault(emptyList())
-                    json(Online.hostStatus(ctx).put("relay", Relay.status()).put("interfaces", org.json.JSONArray(addrs)))
-                }
-                post("/api/online/host") {
-                    if (denied(ctx)) return@post
-                    val res = withContext(Dispatchers.IO) { Online.startHost(ctx) }
-                    json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
-                }
-                post("/api/online/close") {
-                    if (denied(ctx)) return@post
-                    withContext(Dispatchers.IO) { Online.stopHost() }
-                    json(JSONObject().put("ok", true))
-                }
-                post("/api/online/new") { // a new code
-                    if (denied(ctx)) return@post
-                    json(withContext(Dispatchers.IO) { if (Online.host == null) Online.startHost(ctx) else { Online.newCode(ctx); Online.hostStatus(ctx) } })
-                }
-                post("/api/online/reset") { // new room key: everyone who joined before needs a code again
-                    if (denied(ctx)) return@post
-                    json(withContext(Dispatchers.IO) { Online.resetAccess(ctx) })
-                }
-                post("/api/online/join") { // ?code=… (digits 1-8 or U D L R A B X Y) or ?known=<id>
-                    if (denied(ctx)) return@post
-                    val code = q("code"); val known = q("known")
-                    if (code == null && known == null) return@post fail("code missing")
-                    val job = Jobs.start("Online beitreten") { if (known != null) Online.joinKnown(ctx, known, it) else Online.joinCode(ctx, code!!, it) }
-                    json(job.json())
-                }
-                post("/api/online/forget") {
-                    if (denied(ctx)) return@post
-                    Online.forget(ctx, q("id") ?: return@post fail("id missing"))
-                    json(JSONObject().put("ok", true))
-                }
-                post("/api/netplay/relay") {
-                    if (denied(ctx)) return@post
-                    val addr = q("address")?.takeIf { Regex("^[0-9.]{7,15}$").matches(it) }
-                    val res = withContext(Dispatchers.IO) {
-                        if (addr == null) { Netplay.clearJoined(ctx); JSONObject().put("ok", true) } else Netplay.useRoomOf(ctx, addr, q("name") ?: addr)
-                    }
-                    json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
-                }
-                post("/api/netplay/auto") {
-                    if (denied(ctx)) return@post
-                    Friends.setAuto(ctx, q("on") == "1")
-                    json(JSONObject().put("auto", Friends.auto(ctx)))
-                }
                 post("/api/netplay/friend/remove") {
                     if (denied(ctx)) return@post
                     Friends.remove(ctx, q("id") ?: "")
@@ -746,29 +686,6 @@ object Server {
                     if (denied(ctx)) return@post
                     Netplay.close(ctx)
                     json(JSONObject().put("ok", true))
-                }
-                post("/api/netplay/connect") {
-                    if (denied(ctx)) return@post
-                    val addr = q("address")?.takeIf { Regex("^[0-9.]{7,15}$").matches(it) } ?: return@post fail("address missing")
-                    val pin = q("pin") ?: return@post fail("pin missing")
-                    json(Jobs.start("Netplay beitreten") { Netplay.join(ctx, addr, pin, it) }.json())
-                }
-
-                // Thors nearby that invite over Wi-Fi Direct (radio scan; works without a shared network)
-                get("/api/netplay/invites") {
-                    if (denied(ctx)) return@get
-                    val res = withContext(Dispatchers.IO) { org.json.JSONArray(Netplay.invites(ctx)) }
-                    // the password and PIN stay on this device; the panel answers with the device address
-                    lastInvites = res
-                    val pub = org.json.JSONArray()
-                    for (i in 0 until res.length()) res.getJSONObject(i).let { pub.put(JSONObject(it.toString()).apply { remove("pass"); remove("pin") }.put("lobby", it.optString("pin").isNotEmpty())) }
-                    json(JSONObject().put("invites", pub).put("permission", Direct.permitted(ctx) || Netplay.wlanOnly(ctx)))
-                }
-                post("/api/netplay/accept") {
-                    if (denied(ctx)) return@post
-                    val inv = lastInvites?.let { a -> (0 until a.length()).map { a.getJSONObject(it) }.firstOrNull { it.optString("device") == q("device") } }
-                        ?: return@post fail("Einladung nicht mehr da – nochmal suchen", HttpStatusCode.NotFound)
-                    json(Jobs.start("Einladung annehmen") { Netplay.accept(ctx, inv, it) }.json())
                 }
 
                 get("/api/direct") {

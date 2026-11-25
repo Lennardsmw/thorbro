@@ -49,7 +49,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.delay
 import org.json.JSONObject
-import wtf.lennard.thorbro.Online
+import wtf.lennard.thorbro.ButtonCode
 
 // The Thor's screen is 960 × 540 dp: both dialogs fit in its height without scrolling.
 
@@ -122,7 +122,7 @@ fun CodePad(onClose: () -> Unit, onDone: (String) -> Unit) {
     var code by remember { mutableStateOf("") }
     val box = remember { FocusRequester() }
     LaunchedEffect(Unit) { delay(150); runCatching { box.requestFocus() } }
-    // handed on as digits 1–8 (what Online.normalize reads); the internal 0–7 lost every ↑
+    // handed on as digits 1–8 (what ButtonCode.normalize reads); the internal 0–7 lost every ↑
     fun press(i: Int) { if (code.length < 8) { code += i; if (code.length == 8) onDone(code.map { (it - '0' + 1).toString() }.joinToString("")) } }
     Panel(onClose, Modifier.focusRequester(box).focusable().onPreviewKeyEvent { e ->
         val i = when (e.key) {
@@ -137,10 +137,10 @@ fun CodePad(onClose: () -> Unit, onDone: (String) -> Unit) {
         true
     }) {
         Text("Freundes-Code eingeben", fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 18.dp))
-        CodeRow(List(8) { i -> code.getOrNull(i)?.let { Online.SYMBOLS[it - '0'] } })
+        CodeRow(List(8) { i -> code.getOrNull(i)?.let { ButtonCode.SYMBOLS[it - '0'] } })
         Spacer(Modifier.height(24.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Online.SYMBOLS.forEachIndexed { i, sym -> KeyCap(sym, 52) { press(i) } }
+            ButtonCode.SYMBOLS.forEachIndexed { i, sym -> KeyCap(sym, 52) { press(i) } }
             Spacer(Modifier.width(10.dp))
             BigButton("⌫") { code = code.dropLast(1) }
             BigButton("✕") { onClose() }

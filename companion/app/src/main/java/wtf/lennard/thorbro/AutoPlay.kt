@@ -33,8 +33,6 @@ object AutoPlay {
     @Volatile private var running = false
     @Volatile private var lastGame: String? = null
     @Volatile private var goneTicks = 0
-    private val notified = mutableMapOf<String, Int>() // invite key → notification id
-    private var lastScan = 0L
 
     fun start(ctx: Context) {
         if (running) return
@@ -59,15 +57,16 @@ object AutoPlay {
 
     /** one round; returns how long to wait before the next one */
     private fun tick(ctx: Context): Long {
-        if ((!Friends.any(ctx) && !Netplay.serverOn && !Party.leading(ctx)) || !Power.interactive(ctx)) { hostNotice(ctx); return 15_000L }
-        val top = if (Shell.ready()) topActivity() else null
+        if (!Power.interactive(ctx)) { hostNotice(ctx); return 15_000L }
+        val leading = Party.leading(ctx)
+        val top = if (leading || Netplay.joinedRoom != null || Netplay.lobby != null) (if (Shell.ready()) topActivity() else null) else null
         val emu = top?.let { t -> Emulators.all.firstOrNull { it.pkg == t.first } }
 
-        // ---- host: a game was started somewhere else ----
+        // ---- party leader: a game was started somewhere, the party joins ----
         val lobby = Netplay.lobby
         if (lobby != null && lobby.auto) {
-            if (running(lobby.pkg)) goneTicks = 0 else if (++goneTicks >= 2) { Netplay.close(ctx); lastGame = null }
-        } else if (emu != null && (Friends.auto(ctx) || Netplay.serverOn || Party.leading(ctx)) && lobby == null) {
+            if (running(lobby.pkg) && leading) goneTicks = 0 else if (++goneTicks >= 2) { Netplay.close(ctx); lastGame = null }
+        } else if (emu != null && leading && lobby == null) {
             val game = findGame(ctx, emu, top.second)
             val key = game?.let { "${emu.id}:${it.second.path}" }
             if (game != null && key != lastGame && Netplay.mode(ctx, game.first) == emu.id) {
@@ -87,21 +86,7 @@ object AutoPlay {
             }
         }
         hostNotice(ctx)
-
-        // ---- guest: invites from friends nearby (radio scan, not while playing) ----
-        val now = System.currentTimeMillis()
-        if (Netplay.lobby == null && emu == null && Netplay.joinedRoom == null && !Direct.inForeignGroup() && now - lastScan > 25_000) {
-            lastScan = now
-            val found = Netplay.invites(ctx)
-                .filter { Friends.isFriend(ctx, it.optString("id")) && (it.optString("pin").isNotEmpty() || it.optString("mode") == "server") }
-            val keys = found.map { it.optString("id") + it.optString("pin") }.toSet()
-            val nm = ctx.getSystemService(NotificationManager::class.java)
-            notified.keys.filter { it !in keys }.forEach { k -> notified.remove(k)?.let { nm.cancel(it) } }
-            found.forEach { inv ->
-                val k = inv.optString("id") + inv.optString("pin")
-                if (k !in notified) { notified[k] = 4200 + (notified.size % 50); inviteNotice(ctx, inv, notified[k]!!) }
-            }
-        }
+        if (!leading) return 15_000L
         return 6_000L
     }
 
@@ -183,7 +168,7 @@ object AutoPlay {
     private fun hostNotice(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         val l = Netplay.lobby
-        if ((l == null || !l.auto) && !Netplay.serverOn) { nm.cancel(ID_HOST); return }
+        if (l == null || !l.auto) { nm.cancel(ID_HOST); return }
         val close = PendingIntent.getBroadcast(ctx, ID_HOST, Intent(ctx, CloseReceiver::class.java).setAction(ACTION_CLOSE),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val who = l?.guests?.toList()?.joinToString(", ").orEmpty()
