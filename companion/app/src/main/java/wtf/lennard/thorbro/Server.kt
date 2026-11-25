@@ -29,6 +29,7 @@ import io.ktor.server.routing.routing
 import io.ktor.utils.io.jvm.javaio.toInputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -114,7 +115,20 @@ object Server {
                 get("/api/roms") {
                     if (denied(ctx)) return@get
                     val res = withContext(Dispatchers.IO) { Roms.scan(ctx, q("refresh") == "1") }
-                    json(res)
+                    json(JSONObject(res.toString()).put("romRoot", Library.romsRoot(ctx).path))
+                }
+
+                get("/api/roms/root") {
+                    if (denied(ctx)) return@get
+                    val ch = withContext(Dispatchers.IO) { Library.romsRootChoices(ctx) }
+                    json(JSONObject().put("root", Library.romsRoot(ctx).path)
+                        .put("choices", JSONArray(ch.map { (l, f) -> JSONObject().put("label", l).put("path", f.path) })))
+                }
+
+                post("/api/roms/root") {
+                    if (denied(ctx)) return@post
+                    val err = withContext(Dispatchers.IO) { Library.setRomsRoot(ctx, q("path") ?: "") }
+                    if (err != null) fail(err) else json(JSONObject().put("root", Library.romsRoot(ctx).path))
                 }
 
                 get("/api/roms/meta") {
@@ -374,8 +388,7 @@ object Server {
                     if (denied(ctx)) return@post
                     val id = q("id")?.toIntOrNull() ?: return@post fail("id missing")
                     val root = q("root")?.let { Storage.resolve(it) }
-                        ?: Roms.scan(ctx, false).optJSONArray("romRoots")?.let { a -> (0 until a.length()).map { File(a.getString(it)) }.lastOrNull() }
-                        ?: File(Storage.primary, "ROMs")
+                        ?: Library.romsRoot(ctx)
                     val j = Jobs.start("RomM-Download") { job -> Romm.download(ctx, id, root, job) }
                     json(j.json())
                 }

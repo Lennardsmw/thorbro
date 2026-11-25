@@ -526,7 +526,7 @@ object Netplay {
             if (s.getString("id") == system && s.getJSONArray("roms").length() > 0)
                 return File(s.getJSONArray("roms").getJSONObject(0).getString("path")).parentFile!!
         }
-        val root = scan.optJSONArray("romRoots")?.optString(0)?.takeIf { it.isNotEmpty() }?.let(::File) ?: File(Storage.primary, "ROMs")
+        val root = Library.romsRoot(ctx)
         return File(root, system)
     }
 

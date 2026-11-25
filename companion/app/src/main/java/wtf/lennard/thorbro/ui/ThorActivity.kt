@@ -65,6 +65,8 @@ import org.json.JSONObject
 import wtf.lennard.thorbro.AppActivity
 import wtf.lennard.thorbro.Device
 import wtf.lennard.thorbro.MainActivity
+import androidx.compose.material.icons.filled.Folder
+import wtf.lennard.thorbro.Library
 import wtf.lennard.thorbro.Prefs
 import wtf.lennard.thorbro.Romm
 import wtf.lennard.thorbro.RommSync
@@ -210,6 +212,9 @@ private fun SettingsScreen() {
     var autostart by remember { mutableStateOf(Prefs.autostart(ctx)) }
     var updMsg by remember { mutableStateOf("") }
     var menu by remember { mutableStateOf(false) }
+    var romMenu by remember { mutableStateOf(false) }
+    var romRoot by remember { mutableStateOf("") }
+    LaunchedEffect(tick / 10) { romRoot = withContext(Dispatchers.IO) { Library.romsRoot(ctx).path } }
     fun open(action: String) = ctx.startActivity(Intent(action, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     val (lan, mesh) = remember(tick) { ipv4() }
     val version = remember { Updater.current(ctx) }
@@ -234,6 +239,8 @@ private fun SettingsScreen() {
             wtf.lennard.thorbro.Apps.restart(ctx, wtf.lennard.thorbro.Apps.COCOON) } }
         item { ConsoleTile("Neuer Code", "alte Kopplungen ungültig", androidx.compose.material.icons.Icons.Filled.Key) { Prefs.newToken(ctx); tick++ } }
         item { ConsoleTile("Web-Oberfläche", "alles auf dem Thor", androidx.compose.material.icons.Icons.Filled.Web) { ctx.startActivity(Intent(ctx, AppActivity::class.java)) } }
+        header("Speicher", "wohin Downloads und empfangene Spiele kommen")
+        item { ConsoleTile("ROM-Ordner", romRoot, androidx.compose.material.icons.Icons.Filled.Folder) { romMenu = true } }
         header("Weitergeben", "ThorBro an einen anderen Thor schicken – auch ohne gemeinsames WLAN")
         directTiles(ctx, direct, scope, share = true)
 
@@ -252,5 +259,20 @@ private fun SettingsScreen() {
     if (menu) ConsoleMenu("Im Browser öffnen",
         listOfNotNull(lan?.let { "http://$it:${ThorService.PORT}" }, mesh?.let { "http://$it:${ThorService.PORT}  (NetBird)" }).joinToString("\n") + "\nCode: ${Prefs.token(ctx)}",
         mono = true, options = emptyList()) { menu = false }
+    if (romMenu) {
+        val choices = remember { mutableStateOf<List<Pair<String, java.io.File>>>(emptyList()) }
+        LaunchedEffect(Unit) { choices.value = withContext(Dispatchers.IO) { Library.romsRootChoices(ctx) } }
+        ConsoleMenu("ROM-Ordner", "Jetzt: $romRoot\nNeue Downloads und empfangene Spiele landen dort (je Konsole ein Unterordner). Spiele in anderen Ordnern bleiben, wo sie sind.",
+            options = choices.value.map { (label, f) ->
+                (if (f.path == romRoot) "✓ " else "") + "$label · ${f.path}" to {
+                    scope.launch {
+                        val err = withContext(Dispatchers.IO) { Library.setRomsRoot(ctx, f.path) }
+                        romRoot = withContext(Dispatchers.IO) { Library.romsRoot(ctx).path }
+                        if (err != null) android.widget.Toast.makeText(ctx, err, android.widget.Toast.LENGTH_LONG).show()
+                    }
+                    romMenu = false
+                }
+            }) { romMenu = false }
+    }
     DirectDialog(direct)
 }

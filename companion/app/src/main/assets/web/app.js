@@ -260,8 +260,14 @@ const isArchiveName = (n) => ['zip', '7z'].includes(ext(n));
 const KEEP_ZIPPED = new Set(['nes', 'snes', 'gb', 'gbc', 'gba', 'megadrive', 'mastersystem', 'gamegear', 'pcengine', 'atari2600', 'lynx', 'ngp', 'wonderswan', 'arcade', 'n64']);
 const APK_DIR = '/storage/emulated/0/Download/ThorBro';
 
-$('#romRoot').value = store.get('romRoot', '') || '/storage/emulated/0/ROMs';
-$('#romRoot').onchange = () => store.set('romRoot', $('#romRoot').value.replace(/\/+$/, ''));
+// the Thor's ROM folder (Settings → ROM-Ordner); changing it here changes it on the Thor
+$('#romRoot').value = '/storage/emulated/0/ROMs';
+$('#romRoot').onchange = async () => {
+  const path = $('#romRoot').value.replace(/\/+$/, '');
+  try { const r = await api('/api/roms/root?path=' + encodeURIComponent(path), { method: 'POST' }); $('#romRoot').value = r.body.root || path; }
+  catch (err) { alert('ROM-Ordner: ' + err.message); }
+  renderQueue();
+};
 
 const queue = [];
 let running = false;
@@ -549,11 +555,8 @@ async function loadRoms(refresh) {
   try { romData = (await api('/api/roms' + (refresh ? '?refresh=1' : ''))).body; }
   catch (err) { $('#romStats').textContent = 'Fehler: ' + err.message; return; }
   if (refresh) Object.keys(metaCache).forEach((k) => delete metaCache[k]);
-  // Upload target: use the ROMs folder the scan found, unless the user picked one.
-  if (!store.get('romRoot', '') && romData.romRoots.length) {
-    $('#romRoot').value = romData.romRoots[romData.romRoots.length - 1];
-    renderQueue();
-  }
+  // Upload target: the Thor's ROM folder (Settings)
+  if (romData.romRoot && document.activeElement !== $('#romRoot')) { $('#romRoot').value = romData.romRoot; renderQueue(); }
   if (!romData.systems.some((s) => s.id === romSys)) romSys = romData.systems[0]?.id || '';
   renderRoms();
 }

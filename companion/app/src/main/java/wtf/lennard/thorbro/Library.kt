@@ -169,10 +169,32 @@ object Library {
         return f
     }
 
-    /** where a downloaded game goes: the ROMs folder the scan found (SD preferred), else internal ROMs */
+    /** where downloaded/received games go: the folder picked in Settings, else the ROMs folder the scan found (SD preferred), else internal ROMs */
     fun romsRoot(ctx: Context): File =
-        Roms.scan(ctx, false).optJSONArray("romRoots")?.let { a -> (0 until a.length()).map { File(a.getString(it)) }.lastOrNull() }
+        Prefs.of(ctx).getString("roms.root", null)?.let(::File)?.takeIf { it.isDirectory }
+            ?: Roms.scan(ctx, false).optJSONArray("romRoots")?.let { a -> (0 until a.length()).map { File(a.getString(it)) }.lastOrNull() }
             ?: File(Storage.primary, "ROMs")
+
+    /** the ROM folders to pick from: per storage volume the one the scan found, else <volume>/ROMs (created when picked) */
+    fun romsRootChoices(ctx: Context): List<Pair<String, File>> {
+        val found = Roms.scan(ctx, false).optJSONArray("romRoots")?.let { a -> (0 until a.length()).map { File(a.getString(it)) } }.orEmpty()
+        val vols = Storage.volumes(ctx)
+        val out = (0 until vols.length()).map { i ->
+            val v = vols.getJSONObject(i); val dir = File(v.getString("path"))
+            v.optString("label", dir.name) to (found.firstOrNull { it.path.startsWith(dir.path + "/") } ?: File(dir, "ROMs"))
+        }
+        val cur = romsRoot(ctx)
+        return if (out.any { it.second.path == cur.path }) out else out + ("Eigener Ordner" to cur)
+    }
+
+    /** Settings: new ROM folder for downloads and received games; null = ok */
+    fun setRomsRoot(ctx: Context, path: String): String? {
+        val f = Storage.resolve(path) ?: return "Ungültiger Pfad"
+        if (!f.isDirectory && !f.mkdirs()) return "Ordner lässt sich nicht anlegen"
+        Prefs.of(ctx).edit().putString("roms.root", f.path).apply()
+        Roms.invalidate()
+        return null
+    }
 
     /** running store downloads by RomM id, so every screen shows the same progress */
     val downloads = java.util.concurrent.ConcurrentHashMap<Int, Jobs.Job>()
