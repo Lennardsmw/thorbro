@@ -532,7 +532,7 @@ const volLabel = (p) => {
   return v ? v.label : '';
 };
 const authQ = () => 'token=' + encodeURIComponent(token);
-const iconUrl = (id) => `/api/consoles/${encodeURIComponent(id)}/icon?${authQ()}`;
+const iconUrl = (id) => `/api/consoles/${encodeURIComponent(id)}/icon?v=bro1&${authQ()}`; // v: bust the 30-day cache when the icon set changes
 const coverUrl = (sys, name) => `/api/roms/cover?${q({ system: sys, name })}&${authQ()}`;
 const mediaUrl = (sys, path, kind) => `/api/roms/media?${q({ system: sys, path, kind })}&${authQ()}`;
 // Cocoon's box art first, libretro cover second
