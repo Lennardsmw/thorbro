@@ -44,6 +44,7 @@ class ThorService : Service() {
             AutoPlay.start(applicationContext)
             Pals.listen(applicationContext) // friend network inbox (requests, party, later chat)
             Party.start(applicationContext) // own status every 3 h and on changes
+            thread(name = "room-ensure", isDaemon = true) { runCatching { Room.ensure(applicationContext) } } // 3DS room always on, 127.0.0.1 → it
             Online.listen(applicationContext) // friends with the link can knock any time, game server on or off
             running = true
         }

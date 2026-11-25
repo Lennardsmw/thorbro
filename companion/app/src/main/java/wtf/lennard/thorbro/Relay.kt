@@ -37,8 +37,8 @@ object Relay {
 
     /** forwards 127.0.0.1:[port] to [host]; null when it runs, else the reason */
     @Synchronized
-    fun start(host: String, name: String = host, port: Int = Azahar.PORT): String? {
-        val to = runCatching { InetSocketAddress(InetAddress.getByName(host), port) }.getOrElse { return "Adresse $host geht nicht" }
+    fun start(host: String, name: String = host, roomPort: Int = Azahar.ROOM_PORT, port: Int = Azahar.PORT): String? {
+        val to = runCatching { InetSocketAddress(InetAddress.getByName(host), roomPort) }.getOrElse { return "Adresse $host geht nicht" }
         if (active() && target == to && tunnel == null) return null
         return listen(name, port, to, null) { azahar, s ->
             val u = DatagramSocket()
@@ -79,7 +79,6 @@ object Relay {
 
     private fun listen(name: String, port: Int, to: InetSocketAddress?, t: Tunnel.Guest?, newUp: (SocketAddress, DatagramSocket) -> Up): String? {
         stop()
-        Room.stop() // the own room holds the port on every interface
         val s = runCatching {
             DatagramSocket(null).apply { reuseAddress = true; bind(InetSocketAddress(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), port)) }
         }.getOrElse { t?.close(); return "Port $port belegt (Raum im Azahar-Menü erstellt?)" }
@@ -114,6 +113,16 @@ object Relay {
         ups.values.forEach { it.close() }; ups.clear()
         tunnel?.close(); tunnel = null
         Logs.i("relay", "3DS-Weiterleitung aus")
+    }
+
+    /** what 127.0.0.1 should lead to when nothing else is asked for: the party leader's room, else the own room */
+    @Volatile var partyRoom: Pair<String, String>? = null
+
+    /** points 127.0.0.1 at the party leader's room or the own room (a joined lobby or online room sets it itself) */
+    fun route(ctx: android.content.Context) {
+        if (tunnel != null || Netplay.joinedRoom != null) return
+        val (addr, name) = partyRoom ?: ("127.0.0.1" to "eigener Raum")
+        start(addr, name)?.let { Logs.i("relay", "3DS-Weiterleitung: $it") }
     }
 
     fun status(): JSONObject = JSONObject().put("active", active()).put("connected", connected())

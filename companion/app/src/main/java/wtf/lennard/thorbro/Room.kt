@@ -38,19 +38,18 @@ object Room {
     fun start(ctx: Context, gameName: String): String? {
         if (running() && ready) { game = gameName; return null }
         stop()
-        Relay.stop() // this Thor hosts now: 127.0.0.1 is its own room again
         val bin = binary(ctx)
         if (!bin.canExecute()) return "Raumserver fehlt in dieser ThorBro-Version"
         error = null; ready = false; members = emptyList(); game = gameName
         val p = runCatching {
-            ProcessBuilder(bin.path, "${Azahar.PORT}", "Thor", "8").redirectErrorStream(true).start()
+            ProcessBuilder(bin.path, "${Azahar.ROOM_PORT}", "Thor", "8").redirectErrorStream(true).start()
         }.getOrElse { return "Raumserver startet nicht: ${it.message}" }
         proc = p
         thread(name = "azahar-room", isDaemon = true) {
             runCatching {
                 p.inputStream.bufferedReader().forEachLine { line ->
                     when {
-                        line.startsWith("ready") -> { ready = true; Logs.i("room", "3DS-Raum läuft (Port ${Azahar.PORT})") }
+                        line.startsWith("ready") -> { ready = true; Logs.i("room", "3DS-Raum läuft (Port ${Azahar.ROOM_PORT})") }
                         line.startsWith("members ") -> {
                             members = line.removePrefix("members ").substringAfter(' ', "").split(',').map { it.trim() }.filter { it.isNotEmpty() }
                             Logs.i("room", "Im Raum: ${members.joinToString().ifEmpty { "niemand" }}")
@@ -70,7 +69,7 @@ object Room {
                 proc = null
                 val now = System.currentTimeMillis()
                 restarts.removeAll { now - it > 120_000 }
-                if (Netplay.serverOn && !Relay.active() && restarts.size < 5) {
+                if (wanted && restarts.size < 5) {
                     restarts += now
                     Thread.sleep(1000)
                     start(ctx.applicationContext, game)?.let { Logs.i("room", "Neustart ging nicht: $it") } ?: Logs.i("room", "3DS-Raum neu gestartet")
@@ -80,14 +79,26 @@ object Room {
         // wait for "ready" (or the port being taken, e.g. by a room made in Azahar's own menu)
         repeat(30) {
             if (ready) return null
-            if (!p.isAlive) return error ?: "Raumserver beendet (Port ${Azahar.PORT} belegt?)"
+            if (!p.isAlive) return error ?: "Raumserver beendet (Port ${Azahar.ROOM_PORT} belegt?)"
             Thread.sleep(100)
         }
         return if (ready) null else "Raumserver antwortet nicht"
     }
 
+    /** the room runs all the time (ThorService on): friends can always join, Azahar always has a room behind 127.0.0.1 */
+    @Volatile private var wanted = false
+
+    /** keeps the own room and the relay up (called when ThorBro starts and when Azahar shows up) */
+    fun ensure(ctx: Context) {
+        if (!available(ctx) || "azahar" !in Emulators.installed(ctx).map { it.id }) return
+        wanted = true
+        if (!(running() && ready)) start(ctx.applicationContext, game)?.let { Logs.i("room", "3DS-Raum: $it") }
+        if (!Relay.active()) Relay.route(ctx)
+    }
+
     @Synchronized
     fun stop() {
+        wanted = false
         val p = proc ?: return
         proc = null
         ready = false; members = emptyList()
@@ -120,7 +131,7 @@ object Room {
 
     fun status(): JSONObject = JSONObject()
         .put("running", running() && ready)
-        .put("port", Azahar.PORT)
+        .put("port", Azahar.ROOM_PORT)
         .put("game", game)
         .put("members", JSONArray(members))
         .put("error", error)

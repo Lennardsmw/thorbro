@@ -162,7 +162,7 @@ object Online {
         if (!Room.running()) Room.start(ctx, "")?.let { return JSONObject().put("error", it) }
         host?.let { return hostStatus(ctx) }
         val s = roomSecret(ctx)
-        val h = runCatching { Tunnel.Host(s, Azahar.PORT, TUNNEL_PORT) }.getOrElse { runCatching { Tunnel.Host(s, Azahar.PORT) }.getOrNull() }
+        val h = runCatching { Tunnel.Host(s, Azahar.ROOM_PORT, TUNNEL_PORT) }.getOrElse { runCatching { Tunnel.Host(s, Azahar.ROOM_PORT) }.getOrNull() }
             ?: return JSONObject().put("error", "Kein UDP-Port frei")
         host = h; secret = s
         Logs.i("online", "Online-Raum offen, erreichbar über ${h.candidates.size} Adressen" +

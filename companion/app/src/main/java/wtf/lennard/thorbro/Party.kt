@@ -43,6 +43,30 @@ object Party {
             .put("pin", l.pin).put("addrs", JSONArray(addrs))
     }
 
+    /** the own 3DS room (always on): members point their 127.0.0.1 at it */
+    private fun roomInfo(): JSONObject? {
+        if (!Room.running()) return null
+        val addrs = listOfNotNull(Device.ip(), Direct.ownIp().takeIf { Direct.active() }).distinct()
+        return JSONObject().put("port", Azahar.ROOM_PORT).put("addrs", JSONArray(addrs))
+    }
+
+    @Volatile private var roomKey = ""
+
+    /** as member: 127.0.0.1 leads to the leader's room (null = back to the own room) */
+    private fun followRoom(ctx: Context, leader: JSONObject?, r: JSONObject?) {
+        val addrs = r?.optJSONArray("addrs")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
+        val key = leader?.optString("id").orEmpty() + addrs.joinToString()
+        if (key == roomKey) return
+        roomKey = key
+        if (leader == null || addrs.isEmpty()) { Relay.partyRoom = null; Relay.route(ctx); return }
+        thread(name = "party-room", isDaemon = true) {
+            val reach = addrs.firstOrNull { a -> runCatching { Netplay.peer(a).optBoolean("reachable") }.getOrDefault(false) } ?: addrs.first()
+            Relay.partyRoom = reach to leader.optString("name")
+            Relay.route(ctx)
+            Logs.i("party", "3DS: 127.0.0.1 → Raum von ${leader.optString("name")} ($reach)")
+        }
+    }
+
     @Volatile private var lastJoin = ""
 
     /** the leader started a game: join it (ROM from the leader if missing, emulator as guest) */
@@ -73,7 +97,7 @@ object Party {
         val p = mine(ctx)
         if (p != null) st.put("party", if (p.optString("leader") == Pals.myId(ctx))
             JSONObject().put("id", p.optString("id")).put("leader", Pals.myId(ctx)).put("open", Pals.partyOpen(ctx)).put("members", p.optJSONArray("members") ?: JSONArray())
-                .apply { gameInfo()?.let { put("game", it) } }
+                .apply { gameInfo()?.let { put("game", it) }; roomInfo()?.let { put("room", it) } }
             else JSONObject().put("id", p.optString("id")).put("leader", p.optString("leader")))
         else if (Pals.partyOpen(ctx)) st.put("open", true) // alone, but friends may join
         return st
@@ -179,6 +203,7 @@ object Party {
     fun leave(ctx: Context) {
         val p = mine(ctx) ?: return
         save(ctx, null)
+        followRoom(ctx, null, null)
         if (p.optString("leader") != Pals.myId(ctx))
             Pals.friends(ctx).firstOrNull { it.optString("id") == p.optString("leader") }?.let { Pals.send(ctx, it.optString("pub"), JSONObject().put("t", "leave").put("party", p.optString("id"))) }
         publish(ctx) // as leader: the members see the party is gone
@@ -192,12 +217,13 @@ object Party {
         val inIt = lp != null && lp.optString("id") == p.optString("id") && lp.optJSONArray("members").objs().any { it.optString("id") == Pals.myId(ctx) }
         if (inIt) {
             if (!p.optBoolean("in")) { p.put("in", true); save(ctx, p) }
-            lp!!.optJSONObject("game")?.let { followGame(ctx, friend, it) }
+            followRoom(ctx, friend, lp!!.optJSONObject("room"))
+            lp.optJSONObject("game")?.let { followGame(ctx, friend, it) }
             return
         }
         // not in it (yet): a join just sent may not be in the leader's status yet
         if (p.optBoolean("in") || System.currentTimeMillis() - p.optLong("since") > 90_000) {
-            save(ctx, null); publish(ctx)
+            save(ctx, null); publish(ctx); followRoom(ctx, null, null)
             Pals.notify(ctx, "Party von ${friend.optString("name").take(24)} ist vorbei", "")
         }
     }

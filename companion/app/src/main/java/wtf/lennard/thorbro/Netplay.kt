@@ -76,7 +76,7 @@ object Netplay {
             .put("game", if (rom.isDirectory) rom.name else rom.name.substringBeforeLast('.'))
             .put("file", rom.name).put("size", size(rom)).put("mode", mode).put("dir", rom.isDirectory)
             .put("guests", guests.size).put("since", startedAt).put("hostId", appCtx?.let { Me.id(it) })
-            .put("roomIp", roomIp).put("roomPort", Azahar.PORT)
+            .put("roomIp", roomIp).put("roomPort", Azahar.ROOM_PORT)
             .put("azUser", az?.optString("user")).put("azConsole", az?.optString("console"))
     }
 
@@ -86,11 +86,7 @@ object Netplay {
     /** guest session over: 127.0.0.1 points at this Thor again (own room if the server runs) */
     fun clearJoined(ctx: Context? = null) {
         joinedRoom = null
-        if (Relay.active()) {
-            Relay.stop()
-            val c = ctx ?: appCtx
-            if (serverOn && c != null && "azahar" in Emulators.installed(c).map { it.id }) Room.start(c, "")
-        }
+        (ctx ?: appCtx)?.let { Relay.route(it) } // back to the party's or the own room
     }
 
     /** use the 3DS room of the Thor at [address] (its server or lobby): Azahar keeps joining 127.0.0.1 */
@@ -245,8 +241,7 @@ object Netplay {
         val mode = mode(ctx, system) ?: return JSONObject().put("error", "Für diese Konsole gibt es kein Netplay (oder der Emulator fehlt)")
         if (rom.isDirectory) return JSONObject().put("error", "Ordner-Spiele werden noch nicht unterstützt")
         appCtx = ctx.applicationContext
-        if (mode == "azahar") Room.start(ctx, rom.name.substringBeforeLast('.'))?.let { return JSONObject().put("error", it) }
-        else if (!serverOn) Room.stop()
+        if (mode == "azahar") { Room.start(ctx, rom.name.substringBeforeLast('.'))?.let { return JSONObject().put("error", it) }; Relay.partyRoom = null; joinedRoom = null; Relay.route(ctx) }
         val l = open(ctx, system, rom, mode)
         val res = start(ctx, l, hostIp = null)
         if (res.has("error")) { close(ctx); return res }
@@ -338,7 +333,6 @@ object Netplay {
     fun share(ctx: Context, system: String, rom: File): JSONObject {
         if (!rom.isFile) return JSONObject().put("error", "Nur einzelne Spieldateien lassen sich weitergeben")
         appCtx = ctx.applicationContext
-        if (!serverOn) Room.stop()
         val l = open(ctx, system, rom, "share")
         l.hostState = "sharing"
         return JSONObject().put("pin", l.pin).put("ip", l.roomIp).put("mode", "share").put("direct", Direct.active())
@@ -368,8 +362,7 @@ object Netplay {
         lobby = null
         val c = ctx ?: appCtx
         c?.let { Party.lobbyChanged(it) }
-        if (serverOn) { c?.let { Direct.refreshInvite(it) }; return } // the server keeps room and Wi-Fi Direct up
-        Room.stop()
+        if (serverOn) { c?.let { Direct.refreshInvite(it) }; return } // the server keeps Wi-Fi Direct up
         Online.stopHost() // the online room needs the local room behind it
         if (c != null) {
             if (autoDirect) { autoDirect = false; runCatching { Direct.stop(c) } } else Direct.refreshInvite(c)
@@ -464,7 +457,7 @@ object Netplay {
                 .onFailure { Logs.i("azahar", "3DS-Name/ID nicht angepasst: ${it.message}") }.getOrNull()
         }
         // Azahar joins 127.0.0.1; ThorBro passes it on to the host's room at the address this Thor just reached it at
-        if (mode == "azahar") Relay.start(address, info.optString("host"))?.let { throw IllegalStateException(it) }
+        if (mode == "azahar") Relay.start(address, info.optString("host"), info.optInt("roomPort", Azahar.ROOM_PORT))?.let { throw IllegalStateException(it) }
         val roomIp = address
         val l = Lobby(system, rom, mode, pin, info.optString("host"), roomIp = roomIp)
         val res = start(ctx, l, hostIp = address)
