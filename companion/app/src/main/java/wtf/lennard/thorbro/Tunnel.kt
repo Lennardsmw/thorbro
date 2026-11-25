@@ -333,7 +333,7 @@ object Tunnel {
         }
 
         fun close() {
-            peers.values.toList().forEach { send(it, BYE, ByteArray(0)); drop(it, "Raum zu") }
+            ArrayList(peers.values).forEach { send(it, BYE, ByteArray(0)); drop(it, "Raum zu") }
             sock.close()
         }
     }
@@ -445,6 +445,6 @@ object Tunnel {
             return host != null
         }
 
-        fun close() { sessions.values.toList().forEach { it.close() }; sock.close() }
+        fun close() { ArrayList(sessions.values).forEach { it.close() }; sock.close() }
     }
 }
