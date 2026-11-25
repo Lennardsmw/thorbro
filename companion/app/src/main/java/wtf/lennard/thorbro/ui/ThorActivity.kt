@@ -1,6 +1,11 @@
 package wtf.lennard.thorbro.ui
 
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.SignalCellularAlt
+import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.PowerSettingsNew
@@ -205,6 +210,7 @@ private fun SettingsScreen() {
     var autostart by remember { mutableStateOf(Prefs.autostart(ctx)) }
     var updMsg by remember { mutableStateOf("") }
     var menu by remember { mutableStateOf(false) }
+    var dataTick by remember { mutableIntStateOf(0) }
     fun open(action: String) = ctx.startActivity(Intent(action, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     val (lan, mesh) = remember(tick) { ipv4() }
     val version = remember { Updater.current(ctx) }
@@ -229,6 +235,25 @@ private fun SettingsScreen() {
             wtf.lennard.thorbro.Apps.restart(ctx, wtf.lennard.thorbro.Apps.COCOON) } }
         item { ConsoleTile("Neuer Code", "alte Kopplungen ungültig", androidx.compose.material.icons.Icons.Filled.Key) { Prefs.newToken(ctx); tick++ } }
         item { ConsoleTile("Web-Oberfläche", "alles auf dem Thor", androidx.compose.material.icons.Icons.Filled.Web) { ctx.startActivity(Intent(ctx, AppActivity::class.java)) } }
+        header("Daten sparen", "wann ThorBro Spielstände von allein mit RomM abgleicht")
+        val mode = dataTick.let { wtf.lennard.thorbro.DataSaver.mode(ctx) }
+        wtf.lennard.thorbro.DataSaver.Mode.entries.forEach { m ->
+            item {
+                ConsoleTile(m.label, if (m == mode) "an · ${m.sub}" else m.sub, when (m) {
+                    wtf.lennard.thorbro.DataSaver.Mode.ALL -> androidx.compose.material.icons.Icons.Filled.SignalCellularAlt
+                    wtf.lennard.thorbro.DataSaver.Mode.MOBILE -> androidx.compose.material.icons.Icons.Filled.Wifi
+                    wtf.lennard.thorbro.DataSaver.Mode.LOCAL -> androidx.compose.material.icons.Icons.Filled.CloudOff
+                    wtf.lennard.thorbro.DataSaver.Mode.MANUAL -> androidx.compose.material.icons.Icons.Filled.TouchApp
+                }, accent = m == mode) { wtf.lennard.thorbro.DataSaver.setMode(ctx, m); dataTick++ }
+            }
+        }
+        item {
+            val keep = remember(dataTick) { wtf.lennard.thorbro.DataSaver.keep(ctx) }
+            ConsoleTile("$keep Backups", "pro Spiel behalten", androidx.compose.material.icons.Icons.Filled.History) {
+                val c = wtf.lennard.thorbro.DataSaver.KEEP_CHOICES
+                wtf.lennard.thorbro.DataSaver.setKeep(ctx, c[(c.indexOf(keep) + 1) % c.size]); dataTick++
+            }
+        }
         header("Weitergeben", "ThorBro an einen anderen Thor schicken – auch ohne gemeinsames WLAN")
         directTiles(ctx, direct, scope, share = true)
 

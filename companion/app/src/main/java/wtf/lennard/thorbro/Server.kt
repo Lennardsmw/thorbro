@@ -240,6 +240,46 @@ object Server {
                     val res = withContext(Dispatchers.IO) { SharedSaves.install(ctx, q("system") ?: "", rom.path, ids, q("profile") ?: Profiles.MAIN) }
                     json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
                 }
+                // ---- one game's save: Thor vs. RomM, backups ----
+                get("/api/saves/state") {
+                    if (denied(ctx)) return@get
+                    val rom = (Storage.resolve(q("path")) ?: Ports.resolve(ctx, q("path"))) ?: return@get fail("path not allowed")
+                    json(withContext(Dispatchers.IO) { GameSave.state(ctx, q("system") ?: "", rom.path) })
+                }
+                post("/api/saves/cloud") {
+                    if (denied(ctx)) return@post
+                    val rom = (Storage.resolve(q("path")) ?: Ports.resolve(ctx, q("path"))) ?: return@post fail("path not allowed")
+                    val res = withContext(Dispatchers.IO) {
+                        when (q("do")) {
+                            "pull" -> GameSave.pullCloud(ctx, q("system") ?: "", rom.path)
+                            "push" -> GameSave.pushCloud(ctx, rom.path)
+                            else -> JSONObject().put("error", "do=pull|push")
+                        }
+                    }
+                    json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
+                }
+                post("/api/saves/game/backup") {
+                    if (denied(ctx)) return@post
+                    val rom = (Storage.resolve(q("path")) ?: Ports.resolve(ctx, q("path"))) ?: return@post fail("path not allowed")
+                    val res = withContext(Dispatchers.IO) { GameSave.backupNow(ctx, rom.path) }
+                    json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
+                }
+                post("/api/saves/game/restore") {
+                    if (denied(ctx)) return@post
+                    val rom = (Storage.resolve(q("path")) ?: Ports.resolve(ctx, q("path"))) ?: return@post fail("path not allowed")
+                    val res = withContext(Dispatchers.IO) { GameSave.restore(ctx, rom.path, q("backup") ?: "") }
+                    json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
+                }
+                get("/api/datasaver") {
+                    if (denied(ctx)) return@get
+                    json(DataSaver.json(ctx))
+                }
+                post("/api/datasaver") {
+                    if (denied(ctx)) return@post
+                    q("mode")?.let { id -> DataSaver.Mode.entries.firstOrNull { it.id == id }?.let { DataSaver.setMode(ctx, it) } }
+                    q("keep")?.toIntOrNull()?.let { DataSaver.setKeep(ctx, it) }
+                    json(DataSaver.json(ctx))
+                }
                 post("/api/saves/share") {
                     if (denied(ctx)) return@post
                     val ids = (q("save") ?: "").split(',').mapNotNull { it.trim().toIntOrNull() }

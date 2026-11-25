@@ -716,24 +716,50 @@ let romSavesFor = null;
 /** where a save was uploaded from ("vom Mac …", "von diesem Thor") */
 const devTag = (s, d) => (s.device ? ` · <span class="muted">${s.device === d.thisDevice ? 'von diesem Gerät' : 'von ' + esc(s.device)}</span>` : '');
 const when = (t) => (t ? new Date(t).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) : '');
+const CMP = {
+  same: ['Thor und RomM gleich', '#7fe0a8'], 'cloud-newer': ['RomM ist neuer', '#ffd27a'], 'device-newer': ['Thor ist neuer', '#9cc4ff'],
+  'device-only': ['nur auf dem Thor', '#a7adb8'], 'cloud-only': ['nur in RomM', '#ffd27a'],
+};
+/** Thor vs. RomM, buttons, per-game backups */
+function gameSaveHtml(g) {
+  const cmp = CMP[g.compare];
+  const cloudOk = g.rommAllowed && g.connected && g.inRomm;
+  const card = (label, s, empty, hi) => `<div class="card${hi ? ' hi' : ''}"><div class="lbl">${label}</div>${s
+    ? `<div class="t">${when(s.time)}</div><div class="muted">${fmt(s.size)}${s.device ? ' · von ' + esc(s.device) : ''} · ${esc(s.name)}</div>`
+    : `<div class="muted">${empty}</div>`}</div>`;
+  const cloudEmpty = !g.rommAllowed ? '„Nur lokal“ ist an (Spielstände → Daten sparen)' : !g.connected ? 'RomM nicht verbunden'
+    : g.cloudError ? 'RomM antwortet nicht: ' + esc(g.cloudError) : g.inRomm === false ? 'Das Spiel ist nicht in RomM' : 'Noch kein Spielstand in RomM';
+  const pullFirst = g.compare === 'cloud-newer' || g.compare === 'cloud-only';
+  const pull = `<button data-gs="pull" ${g.cloud ? '' : 'disabled'} class="${pullFirst ? 'primary' : ''}">☁↓ Cloud-Stand aufs Thor holen</button>`;
+  const push = `<button data-gs="push" ${g.device ? '' : 'disabled'} class="${!pullFirst && g.compare !== 'same' ? 'primary' : ''}">☁↑ Thor-Stand hochladen</button>`;
+  const b = g.backups || [];
+  return `<h3>Spielstände${g.multiProfile ? ` <span class="muted">· Profil ${esc(g.profile)}</span>` : ''}${cmp ? `<span class="cmpchip" style="color:${cmp[1]}">${cmp[0]}</span>` : ''}</h3>
+    <div class="gsave">${card('Auf dem Thor', g.device, 'Noch kein Spielstand auf dem Thor', g.compare === 'device-newer' || g.compare === 'device-only')}
+      ${card('Neuester in RomM', g.cloud, cloudEmpty, pullFirst)}</div>
+    ${cloudOk ? `<div class="row">${pullFirst ? pull + push : push + pull}</div>` : ''}
+    <details class="snaps"><summary>Backups · ${b.length ? `${b.length} ältere Stände · ${fmt(b.reduce((a, x) => a + x.size, 0))}` : 'noch keins – entsteht beim nächsten Speichern'}</summary>
+      <table class="savetable">${b.map((x) => `<tr><td>${when(x.time)}<div class="muted">${esc(x.reasonLabel)}${g.multiProfile && x.profile ? ' · ' + esc(x.profile) : ''} · ${fmt(x.size)}</div></td>
+        <td><button data-gs-restore="${esc(x.path)}" data-gs-time="${esc(when(x.time))}">Zurückholen</button></td></tr>`).join('')}</table>
+      <div class="row"><button data-gs="backup">Jetzt sichern</button></div></details>`;
+}
 async function loadRomSaves(path, sys) {
   romSavesFor = { path, sys };
   const box = $('#romSaves');
   if (!box) return;
-  let d;
-  try { d = (await api('/api/saves/game?' + q({ path, system: sys }))).body; } catch (err) { box.innerHTML = `<h3>Spielstände</h3><div class="sub">${esc(err.message)}</div>`; return; }
+  let d, g;
+  try {
+    [d, g] = await Promise.all([api('/api/saves/game?' + q({ path, system: sys })).then((r) => r.body), api('/api/saves/state?' + q({ path, system: sys })).then((r) => r.body)]);
+  } catch (err) { box.innerHTML = `<h3>Spielstände</h3><div class="sub">${esc(err.message)}</div>`; return; }
   if (romSavesFor?.path !== path || !$('#romSaves')) return;
   const profiles = d.profiles || [];
   const opts = profiles.map((p) => `<option value="${esc(p.id)}"${p.active ? ' selected' : ''}>${esc(p.name)}</option>`).join('');
   const installBtn = (id) => d.supported
     ? `<select data-sv-for="${id}">${opts}</select> <button data-sv-install="${id}">Installieren</button>` : '';
-  box.innerHTML = `<h3>Spielstände</h3>
-    ${d.supported ? `<div class="sub">Aktiv ist der Spielstand von <b>${esc(profiles.find((p) => p.active)?.name || '–')}</b>. Wechseln tauscht die Dateien, der alte Stand wird vorher gesichert.</div>
+  box.innerHTML = gameSaveHtml(g) + `
+    ${d.supported && profiles.length > 1 ? `<h4 style="margin:12px 0 4px">Profile</h4><div class="sub">Aktiv ist der Spielstand von <b>${esc(profiles.find((p) => p.active)?.name || '–')}</b>. Wechseln tauscht die Dateien, der alte Stand wird vorher gesichert.</div>
       <div class="proflist">${profiles.map((p) => `<button class="prof${p.active ? ' active' : ''}" data-sv-activate="${esc(p.id)}" ${p.active ? 'disabled' : ''}>${profDot(p)}${esc(p.name)}${p.hasSave ? ' 💾' : ''}</button>`).join('')}</div>`
-      : '<div class="sub">Switch-Spielstände liegen in Eden, das eigene Profile hat. Hier nur ansehen und teilen.</div>'}
-    ${!d.connected ? '<div class="sub">RomM nicht verbunden – geteilte Spielstände gibt es nur mit RomM.</div>'
-      : d.inRomm === false ? '<div class="sub">Das Spiel ist nicht in RomM, darum gibt es keine Spielstände dort.</div>'
-      : d.error ? `<div class="sub">${esc(d.error)}</div>` : `
+      : ''}
+    ${!d.connected || d.inRomm === false || d.error || !g.rommAllowed ? '' : `
     <h4 style="margin:12px 0 4px">Deine Spielstände in RomM</h4>
     ${d.own.length ? `<table class="savetable">${d.own.map((s) => `<tr><td>${esc(s.profile)}${devTag(s, d)}<div class="muted">${when(s.updated)} · ${fmt(s.size)}</div></td>
       <td><button data-sv-share="${s.id}" data-sv-on="${s.public ? 0 : 1}">${s.public ? '🌐 Geteilt – zurücknehmen' : 'Teilen'}</button> ${installBtn(s.id)}</td></tr>`).join('')}</table>`
@@ -744,10 +770,25 @@ async function loadRomSaves(path, sys) {
       : '<div class="sub">Niemand hat für dieses Spiel einen Spielstand geteilt. In RomM beim Spielstand „öffentlich“ setzen, dann taucht er hier auf.</div>'}`}`;
 }
 $('#romDetail').addEventListener('click', async (e) => {
-  const t = e.target.closest('[data-sv-activate],[data-sv-share],[data-sv-install]');
+  const t = e.target.closest('[data-sv-activate],[data-sv-share],[data-sv-install],[data-gs],[data-gs-restore]');
   if (!t || !romSavesFor) return;
   const { path, sys } = romSavesFor;
   try {
+    if (t.dataset.gs) {
+      if (t.dataset.gs === 'pull' && !confirm('Cloud-Stand holen?\nEr ersetzt den Spielstand auf dem Thor. Der jetzige wird vorher als Backup gesichert.')) return;
+      t.disabled = true; t.textContent = t.dataset.gs === 'backup' ? 'Sichert …' : 'Läuft …';
+      const ep = t.dataset.gs === 'backup' ? '/api/saves/game/backup?' + q({ path }) : '/api/saves/cloud?' + q({ path, system: sys, do: t.dataset.gs });
+      const { body } = await api(ep, { method: 'POST' });
+      if (body.error) { alert(body.error); return loadRomSaves(path, sys); }
+      toast(body.done || 'Fertig');
+    }
+    if (t.dataset.gsRestore) {
+      if (!confirm(`Backup vom ${t.dataset.gsTime} zurückholen?\nDer jetzige Spielstand wird vorher gesichert.`)) return;
+      t.disabled = true;
+      const { body } = await api('/api/saves/game/restore?' + q({ path, backup: t.dataset.gsRestore }), { method: 'POST' });
+      if (body.error) { alert(body.error); return loadRomSaves(path, sys); }
+      toast(body.done || 'Zurückgeholt');
+    }
     if (t.dataset.svActivate) {
       const { body } = await api('/api/saves/profile?' + q({ path, system: sys, id: t.dataset.svActivate }), { method: 'POST' });
       if (body.error) return alert(body.error);
@@ -1118,6 +1159,7 @@ $('#profileList').onclick = async (e) => {
 async function loadSaves() {
   loadHistory();
   loadProfiles().catch(() => {});
+  loadDataSaver().catch(() => {});
   $('#savesInfo').textContent = 'Lade …';
   const { body } = await api('/api/saves');
   $('#savesAuto').checked = body.auto;
@@ -1635,3 +1677,12 @@ start();
 document.addEventListener('keydown', (e) => {
   if ((e.key === 'Enter' || e.key === ' ') && e.target.classList?.contains('romcard')) { e.preventDefault(); e.target.click(); }
 });
+
+// ---------- Daten sparen ----------
+async function loadDataSaver(set) {
+  const { body } = await api('/api/datasaver' + (set ? '?' + q(set) : ''), set ? { method: 'POST' } : {});
+  $('#dataModes').innerHTML = body.modes.map((m) => `<button class="prof${m.id === body.mode ? ' active' : ''}" data-dmode="${m.id}" title="${esc(m.sub)}">${esc(m.label)}<div class="muted" style="font-size:12px">${esc(m.sub)}</div></button>`).join('');
+  $('#dataKeep').innerHTML = body.keepChoices.map((n) => `<option value="${n}"${n === body.keep ? ' selected' : ''}>${n}</option>`).join('');
+}
+$('#dataModes').addEventListener('click', (e) => { const b = e.target.closest('[data-dmode]'); if (b) loadDataSaver({ mode: b.dataset.dmode }); });
+$('#dataKeep').onchange = (e) => loadDataSaver({ keep: e.target.value });
