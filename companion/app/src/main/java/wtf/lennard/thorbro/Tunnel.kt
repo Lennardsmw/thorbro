@@ -208,7 +208,8 @@ object Tunnel {
         InetSocketAddress(InetAddress.getByName(host), c.substringAfterLast(':').toInt())
     }.getOrNull()
 
-    private fun bind(port: Int) = DatagramSocket(null).apply { reuseAddress = true; bind(InetSocketAddress(port)) }
+    // no SO_REUSEADDR: a second tunnel on the same port would silently share it (and miss packets) instead of failing
+    private fun bind(port: Int) = DatagramSocket(null).apply { reuseAddress = false; bind(InetSocketAddress(port)) }
 
     /** a member's socket and its addresses (with STUN), before the leader's secret is known: sent along with the knock */
     fun socket(): Pair<DatagramSocket, List<String>> { val s = bind(0); return s to candidates(s) }
