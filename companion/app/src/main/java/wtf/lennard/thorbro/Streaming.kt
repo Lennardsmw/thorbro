@@ -115,11 +115,21 @@ object Streaming {
         val port = prop("service.adb.tls.port")?.toIntOrNull()?.takeIf { it > 0 }
         val ip = wtf.lennard.thorbro.ui.ipv4().first
         val out = JSONObject().put("shell", Shell.state()).put("wifi", wifi).put("ip", ip).put("port", port)
+            .put("usb", usbAdb(ctx)).put("usbCommand", "scrcpy -d")
         if (wifi && port != null && ip != null) {
             out.put("address", "$ip:$port")
             out.put("command", "scrcpy --tcpip=$ip:$port")
         }
         return out
+    }
+
+    /**
+     * a computer is on the cable with USB debugging (sticky USB_STATE broadcast). Rule for every
+     * Thor ↔ Mac path: a cable beats the air – RomBro uses USB then and falls back to Wi-Fi when it goes.
+     */
+    fun usbAdb(ctx: Context): Boolean {
+        val i = ctx.registerReceiver(null, android.content.IntentFilter("android.hardware.usb.action.USB_STATE")) ?: return false
+        return i.getBooleanExtra("connected", false) && i.getBooleanExtra("adb", false)
     }
 
     /** switches wireless debugging on (via Shizuku); the port appears a moment later */

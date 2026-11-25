@@ -105,6 +105,7 @@ fun StreamScreen() {
             val c = sc
             ConsoleTile("scrcpy am Mac", when {
                 c == null -> "…"
+                c.optBoolean("usb") -> "USB-Kabel"
                 c.has("address") -> c.optString("address")
                 c.optBoolean("wifi") -> "Port in Kabellosem Debugging"
                 else -> "WLAN-Debugging aus"
@@ -125,7 +126,8 @@ fun StreamScreen() {
             val wifi = c?.optBoolean("wifi") == true
             val cmd = c?.optString("command")?.takeIf { it.isNotEmpty() } ?: "scrcpy --tcpip=$ip:<Port>"
             ConsoleMenu("Thor am Mac (scrcpy)",
-                "Mac: brew install scrcpy\nEinmal koppeln: adb pair $ip:<Kopplungsport> <Code>\nDann: $cmd",
+                if (c?.optBoolean("usb") == true) "USB-Kabel steckt – geht ohne WLAN:\nscrcpy -d\n(RomBro nimmt USB von selbst; Kabel ab → weiter über WLAN)"
+                else "Mac: brew install scrcpy\nEinmal koppeln: adb pair $ip:<Kopplungsport> <Code>\nDann: $cmd\nMit USB-Kabel: scrcpy -d (RomBro wechselt von selbst)",
                 mono = true,
                 options = buildList {
                     if (!wifi) add("WLAN-Debugging einschalten" to {

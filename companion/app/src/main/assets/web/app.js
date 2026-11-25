@@ -1348,7 +1348,10 @@ async function loadScrcpy() {
   const ip = s.ip || '<Thor-IP>';
   const pair = `<p>Einmal koppeln: am Thor „Koppeln am Thor öffnen“ → <em>Gerät über einen Kopplungscode koppeln</em>, dann auf dem Mac:</p>
     <pre class="code">adb pair ${esc(ip)}:&lt;Kopplungsport&gt; &lt;Code&gt;</pre>`;
-  if (!s.wifi) {
+  if (s.usb) {
+    $('#scStatus').innerHTML = '<span class="ok">USB-Kabel steckt – läuft über USB</span>';
+    $('#scHow').innerHTML = `<p>Kabel schlägt WLAN: RomBro nimmt USB von selbst und wechselt beim Abziehen auf WLAN. Von Hand auf dem Mac:</p><pre class="code">scrcpy -d</pre>`;
+  } else if (!s.wifi) {
     $('#scStatus').textContent = s.shell === 'ready' ? 'Kabelloses Debugging ist aus.' : 'Kabelloses Debugging ist aus. Ohne Shizuku in den Entwickleroptionen einschalten.';
     $('#scHow').innerHTML = pair;
   } else if (!s.command) {
