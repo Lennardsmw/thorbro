@@ -104,15 +104,21 @@ object PartyNet {
         knock(app, leader)
     }
 
-    /** sends our addresses to the leader (at most every 20 s, [MAX_KNOCKS] per party) */
+    /**
+     * Sends our addresses to the leader: at most every 20 s, after [MAX_KNOCKS] failed ones only every 5 min (ntfy.sh
+     * allows 250 posts a day). Each knock uses a fresh socket with fresh addresses — after a network change (WLAN →
+     * hotspot) the old ones lead nowhere; the leader's answer then moves the tunnel onto it ([onNet]).
+     */
     @Synchronized
     private fun knock(ctx: Context, leader: JSONObject) {
         val now = System.currentTimeMillis()
-        if (now - lastKnock < 20_000 || knocks >= MAX_KNOCKS) return
+        if (now - lastKnock < (if (knocks >= MAX_KNOCKS) 5 * 60_000 else 20_000)) return
         lastKnock = now; knocks++
         val party = following
         thread(name = "partynet-knock", isDaemon = true) {
-            val cands = guest?.candidates ?: (pending ?: Tunnel.socket().also { pending = it }).second
+            val fresh = Tunnel.socket()
+            synchronized(this) { pending?.first?.close(); pending = fresh }
+            val cands = fresh.second
             Logs.i("partynet", "Klopfe bei ${leader.optString("name").take(24)} an (${cands.size} Adressen)")
             Pals.send(ctx, leader.optString("pub"), JSONObject().put("t", "knock").put("party", party).put("c", JSONArray(cands)))
         }
@@ -129,9 +135,11 @@ object PartyNet {
         lastNet = System.currentTimeMillis()
         synchronized(this) {
             val g = guest
-            if (g != null && g.secret.contentEquals(s)) { g.addTargets(cands); return }
+            val fresh = pending
+            // still connected on the old socket: keep it, just learn the leader's addresses
+            if (g != null && g.secret.contentEquals(s) && (g.connected() || fresh == null)) { g.addTargets(cands); return }
             g?.close()
-            val (sock, mine) = pending ?: Tunnel.socket()
+            val (sock, mine) = fresh ?: Tunnel.socket()
             pending = null
             guest = Tunnel.Guest(s, cands, socket = sock, known = mine)
         }
@@ -147,7 +155,7 @@ object PartyNet {
         var down = 0L
         while (guest === g) {
             Thread.sleep(5000)
-            if (g.connected()) { down = 0; continue }
+            if (g.connected()) { down = 0; knocks = 0; continue }
             if (down == 0L) down = System.currentTimeMillis()
             if (System.currentTimeMillis() - down > 25_000) { down = System.currentTimeMillis(); knock(ctx, leader) }
         }
