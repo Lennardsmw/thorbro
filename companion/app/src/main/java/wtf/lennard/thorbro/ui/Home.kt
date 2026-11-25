@@ -155,6 +155,8 @@ fun StatusBar(title: String) {
         Spacer(Modifier.width(12.dp))
         Icon(Icons.Filled.BatteryFull, null, Modifier.size(20.dp))
         Text(" $battery %", fontSize = 15.sp)
+        Spacer(Modifier.width(18.dp))
+        FriendsButton()
     }
 }
 

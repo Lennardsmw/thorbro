@@ -9,14 +9,14 @@ import java.net.NetworkInterface
 import kotlin.concurrent.thread
 
 /**
- * The 3DS multiplayer room runs on the Thor itself: Azahar's room server (companion/room, built by
- * scripts/build-room.sh, shipped as lib/arm64/libazaharroom.so). No internet and no server elsewhere needed:
- * both Thors join this room in Azahar (the host at 127.0.0.1, the guest at this Thor's address).
+ * A multiplayer room runs on the Thor itself, all the time: Azahar's room server for 3DS ([Room], companion/room,
+ * scripts/build-room.sh → libazaharroom.so) and Eden's for Switch/LDN ([EdenRoom], companion/room/eden,
+ * scripts/build-eden-room.sh → libedenroom.so). No server elsewhere needed: the emulators always join 127.0.0.1 and
+ * [Relay] leads that to the own room or, in a party, through the [Tunnel] to the leader's.
  *
- * It listens on every network the Thor is in, so the same room works in the home WLAN, in a hotspot,
- * in ThorBro's Wi-Fi Direct net and — when the Thor is in NetBird — for a friend in NetBird from anywhere.
+ * It listens on every network the Thor is in, so party members reach it over WLAN, Wi-Fi Direct, NetBird or the tunnel.
  */
-object Room {
+open class RoomServer(private val lib: String, val port: Int, private val what: String, private val emu: String) {
     @Volatile private var proc: Process? = null
     @Volatile var ready = false
         private set
@@ -27,9 +27,10 @@ object Room {
     @Volatile private var game: String = ""
     private val restarts = java.util.concurrent.CopyOnWriteArrayList<Long>()
 
-    fun binary(ctx: Context) = File(ctx.applicationInfo.nativeLibraryDir, "libazaharroom.so")
+    fun binary(ctx: Context) = File(ctx.applicationInfo.nativeLibraryDir, lib)
 
-    fun available(ctx: Context) = binary(ctx).canExecute()
+    /** the room server is in this build and the emulator is installed */
+    fun available(ctx: Context) = binary(ctx).canExecute() && emu in Emulators.installed(ctx).map { it.id }
 
     fun running() = proc?.isAlive == true
 
@@ -38,19 +39,18 @@ object Room {
     fun start(ctx: Context, gameName: String): String? {
         if (running() && ready) { game = gameName; return null }
         stop()
-        Relay.stop() // this Thor hosts now: 127.0.0.1 is its own room again
         val bin = binary(ctx)
         if (!bin.canExecute()) return "Raumserver fehlt in dieser ThorBro-Version"
         error = null; ready = false; members = emptyList(); game = gameName
         val p = runCatching {
-            ProcessBuilder(bin.path, "${Azahar.PORT}", "Thor", "8").redirectErrorStream(true).start()
+            ProcessBuilder(bin.path, "$port", "Thor", "8").redirectErrorStream(true).start()
         }.getOrElse { return "Raumserver startet nicht: ${it.message}" }
         proc = p
-        thread(name = "azahar-room", isDaemon = true) {
+        thread(name = "room-$emu", isDaemon = true) {
             runCatching {
                 p.inputStream.bufferedReader().forEachLine { line ->
                     when {
-                        line.startsWith("ready") -> { ready = true; Logs.i("room", "3DS-Raum läuft (Port ${Azahar.PORT})") }
+                        line.startsWith("ready") -> { ready = true; Logs.i("room", "$what-Raum läuft (Port $port)") }
                         line.startsWith("members ") -> {
                             members = line.removePrefix("members ").substringAfter(' ', "").split(',').map { it.trim() }.filter { it.isNotEmpty() }
                             Logs.i("room", "Im Raum: ${members.joinToString().ifEmpty { "niemand" }}")
@@ -66,34 +66,46 @@ object Room {
                 ready = false; members = emptyList()
                 // 137 = killed by Android, 139 = crashed
                 error = "Raumserver beendet (Code $code)"
-                Logs.i("room", "3DS-Raum unerwartet beendet (Code $code)")
+                Logs.i("room", "$what-Raum unerwartet beendet (Code $code)")
                 proc = null
                 val now = System.currentTimeMillis()
                 restarts.removeAll { now - it > 120_000 }
-                if (Netplay.serverOn && !Relay.active() && restarts.size < 5) {
+                if (wanted && restarts.size < 5) {
                     restarts += now
                     Thread.sleep(1000)
-                    start(ctx.applicationContext, game)?.let { Logs.i("room", "Neustart ging nicht: $it") } ?: Logs.i("room", "3DS-Raum neu gestartet")
+                    start(ctx.applicationContext, game)?.let { Logs.i("room", "Neustart ging nicht: $it") } ?: Logs.i("room", "$what-Raum neu gestartet")
                 }
             }
         }
         // wait for "ready" (or the port being taken, e.g. by a room made in Azahar's own menu)
         repeat(30) {
             if (ready) return null
-            if (!p.isAlive) return error ?: "Raumserver beendet (Port ${Azahar.PORT} belegt?)"
+            if (!p.isAlive) return error ?: "Raumserver beendet (Port $port belegt?)"
             Thread.sleep(100)
         }
         return if (ready) null else "Raumserver antwortet nicht"
     }
 
+    /** the room runs all the time (ThorService on): friends can always join, Azahar always has a room behind 127.0.0.1 */
+    @Volatile private var wanted = false
+
+    /** keeps the own room and the relay up (called when ThorBro starts and when Azahar shows up) */
+    fun ensure(ctx: Context) {
+        if (!available(ctx)) return
+        wanted = true
+        if (!(running() && ready)) start(ctx.applicationContext, game)?.let { Logs.i("room", "$what-Raum: $it") }
+        Relay.route(ctx)
+    }
+
     @Synchronized
     fun stop() {
+        wanted = false
         val p = proc ?: return
         proc = null
         ready = false; members = emptyList()
         runCatching { p.outputStream.close() } // the room ends when its stdin closes
         if (runCatching { p.waitFor(1500, java.util.concurrent.TimeUnit.MILLISECONDS) }.getOrDefault(false).not()) p.destroy()
-        Logs.i("room", "3DS-Raum geschlossen")
+        Logs.i("room", "$what-Raum geschlossen")
     }
 
     /** every address another device can use to reach the room, labeled by the network it belongs to */
@@ -120,9 +132,18 @@ object Room {
 
     fun status(): JSONObject = JSONObject()
         .put("running", running() && ready)
-        .put("port", Azahar.PORT)
+        .put("port", port)
         .put("game", game)
         .put("members", JSONArray(members))
         .put("error", error)
         .put("addresses", addresses())
+}
+
+/** 3DS (Azahar): emulator joins 127.0.0.1:24872 ([Azahar.PORT]), room on 24873 */
+object Room : RoomServer("libazaharroom.so", Azahar.ROOM_PORT, "3DS", "azahar")
+
+/** Switch (Eden, LDN): Eden joins 127.0.0.1:[PORT] (Mehrspieler → Direkt verbinden, typed once), room on [ROOM_PORT] */
+object EdenRoom : RoomServer("libedenroom.so", 24876, "Switch", "eden") {
+    const val PORT = 24875
+    const val ROOM_PORT = 24876
 }

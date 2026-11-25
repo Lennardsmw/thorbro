@@ -58,7 +58,7 @@ object SaveWatcher {
                 // fetch saves made on other devices (e.g. the Mac): when the Thor wakes up, else every 15 minutes
                 val now0 = System.currentTimeMillis()
                 val due = (woke && now0 - lastPull > 2 * 60_000) || now0 - lastPull > PULL_MS
-                if (on && !low && due && RommSync.auto(ctx) && onWifi(ctx) && Romm.status(ctx).optBoolean("connected")) {
+                if (on && !low && due && DataSaver.autoSync(ctx) && DataSaver.netOk(ctx) && Romm.status(ctx).optBoolean("connected")) {
                     lastPull = now0
                     val r = runCatching { RommSync.pullSaves(ctx) }.getOrNull()
                     if (r != null && r.optInt("downloaded") > 0) {
@@ -77,9 +77,10 @@ object SaveWatcher {
                 if (!pending) continue
                 pending = false
                 runCatching { Saves.backup(ctx, null) }
+                runCatching { GameSave.backupChanged(ctx) }
                 val res = JSONObject().put("at", System.currentTimeMillis())
-                if (RommSync.auto(ctx) && Romm.status(ctx).optBoolean("connected")) {
-                    if (onWifi(ctx)) {
+                if (DataSaver.autoSync(ctx) && Romm.status(ctx).optBoolean("connected")) {
+                    if (DataSaver.netOk(ctx)) {
                         runCatching { RommSync.pullSaves(ctx) }
                         lastPull = System.currentTimeMillis()
                         val r = runCatching { RommSync.syncSaves(ctx, null) }.getOrElse { JSONObject().put("error", it.message) }
@@ -88,7 +89,7 @@ object SaveWatcher {
                         pending = true // try again when Wi-Fi is back
                         res.put("state", "Spielstand geändert, warte auf WLAN")
                     }
-                } else res.put("state", "lokal gesichert (RomM-Sync aus)")
+                } else res.put("state", "lokal gesichert (" + (if (DataSaver.rommAllowed(ctx)) "Auto-Sync aus" else "Nur lokal") + ")")
                 last = res
             }
         }

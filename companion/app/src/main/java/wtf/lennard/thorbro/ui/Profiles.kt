@@ -23,7 +23,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.PublicOff
 import androidx.compose.material3.Icon
@@ -54,6 +60,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import wtf.lennard.thorbro.DataSaver
+import wtf.lennard.thorbro.GameSave
 import wtf.lennard.thorbro.Profiles
 import wtf.lennard.thorbro.SharedSaves
 import java.io.File
@@ -135,6 +143,12 @@ fun GameSaves(sys: String, path: String, title: String, onClose: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var installing by remember { mutableStateOf<JSONObject?>(null) }
     var ownMenu by remember { mutableStateOf<JSONObject?>(null) }
+    var g by remember { mutableStateOf<JSONObject?>(null) }
+    var backupsOpen by remember { mutableStateOf(false) }
+    var restorePick by remember { mutableStateOf<JSONObject?>(null) }
+    var askPull by remember { mutableStateOf(false) }
+    var sendOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(tick) { g = withContext(Dispatchers.IO) { runCatching { GameSave.state(ctx, sys, path) }.getOrElse { JSONObject().put("error", it.message) } } }
     LaunchedEffect(tick) { data = withContext(Dispatchers.IO) { runCatching { SharedSaves.forGame(ctx, sys, path) }.getOrElse { JSONObject().put("error", it.message) } } }
     val first = remember { FocusRequester() }
     LaunchedEffect(data != null) { kotlinx.coroutines.delay(200); runCatching { first.requestFocus() } }
@@ -154,18 +168,79 @@ fun GameSaves(sys: String, path: String, title: String, onClose: () -> Unit) {
     Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         ImmersiveDialog()
         Column(Modifier.fillMaxSize().background(Color(0xFF07080A)).padding(horizontal = 40.dp, vertical = 28.dp)) {
-            Text("Spielstände", fontSize = 15.sp, color = Muted)
-            Text(title, fontSize = 28.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Spielstände" + (g?.takeIf { it.optBoolean("multiProfile") }?.let { " · Profil ${it.optString("profile")}" } ?: ""), fontSize = 15.sp, color = Muted)
+                    Text(title, fontSize = 28.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                g?.let { CompareChip(it) }
+            }
             if (msg.isNotEmpty()) Text(msg, color = if (busy) Muted else Ok, modifier = Modifier.padding(top = 6.dp))
             Spacer(Modifier.height(14.dp))
             LazyColumn(Modifier.weight(1f), contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp, horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (d == null) item { Text("Lade …", color = Muted) }
-                if (d != null && supported) {
-                    item { Text("Wer spielt mit welchem Stand", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+                val gs = g
+                if (gs == null) item { Text("Lade …", color = Muted) }
+                if (gs != null) {
+                    val cmp = gs.optString("compare")
+                    val cloudOk = gs.optBoolean("rommAllowed") && gs.optBoolean("connected") && gs.optBoolean("inRomm")
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                            StateCard(Modifier.weight(1f).firstFocus(first, true), "Auf dem Thor", gs.optJSONObject("device"),
+                                "Noch kein Spielstand auf dem Thor", highlight = cmp == "device-newer" || cmp == "device-only") {
+                                if (cloudOk && gs.has("device")) act("Lädt hoch …") { GameSave.pushCloud(ctx, path) }
+                            }
+                            StateCard(Modifier.weight(1f), "Neuester in RomM", gs.optJSONObject("cloud"), when {
+                                !gs.optBoolean("rommAllowed") -> "„Nur lokal“ ist an (Einstellungen → Daten sparen)"
+                                !gs.optBoolean("connected") -> "RomM nicht verbunden"
+                                gs.has("cloudError") -> "RomM antwortet nicht: ${gs.optString("cloudError")}"
+                                !gs.optBoolean("inRomm") -> "Das Spiel ist nicht in RomM"
+                                else -> "Noch kein Spielstand in RomM"
+                            }, highlight = cmp == "cloud-newer" || cmp == "cloud-only") { if (gs.has("cloud")) askPull = true }
+                        }
+                    }
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            if (cloudOk) {
+                                val pullFirst = cmp == "cloud-newer" || cmp == "cloud-only"
+                                val pull: @Composable () -> Unit = { BigButton("Cloud-Stand aufs Thor holen", Icons.Filled.CloudDownload, primary = pullFirst, enabled = gs.has("cloud")) { askPull = true } }
+                                val push: @Composable () -> Unit = { BigButton("Thor-Stand hochladen", Icons.Filled.CloudUpload, primary = !pullFirst && cmp != "same", enabled = gs.has("device")) {
+                                    act("Lädt hoch …") { GameSave.pushCloud(ctx, path) } } }
+                                if (pullFirst) { pull(); push() } else { push(); pull() }
+                            }
+                            BigButton("An Freund schicken …", Icons.Filled.Send, enabled = gs.has("device")) { sendOpen = true }
+                        }
+                    }
+                    val backups = gs.optJSONArray("backups").objs()
+                    item {
+                        FocusCard(Modifier.fillMaxWidth(), onClick = { backupsOpen = !backupsOpen }) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.History, null, Modifier.size(26.dp)); Spacer(Modifier.width(14.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text("Backups", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                                    Text(if (backups.isEmpty()) "noch keins – entsteht beim nächsten Speichern" else "${backups.size} ältere Stände · ${fmtBytes(backups.sumOf { it.optLong("size") })}",
+                                        fontSize = 13.sp, color = Muted)
+                                }
+                                Text(if (backupsOpen) "Zuklappen" else "Öffnen", fontSize = 14.sp, color = Accent)
+                            }
+                        }
+                    }
+                    if (backupsOpen) {
+                        backups.forEach { b ->
+                            item {
+                                SaveRow(Icons.Filled.Restore, stamp(b.optLong("time")),
+                                    b.optString("reasonLabel") + (if (!b.isNull("profile") && gs.optBoolean("multiProfile")) " · ${b.optString("profile")}" else "") + " · ${fmtBytes(b.optLong("size"))}",
+                                    "Zurückholen") { restorePick = b }
+                            }
+                        }
+                        item { SaveRow(Icons.Filled.Save, "Jetzt sichern", "den Stand auf dem Thor als Backup ablegen", "Sichern") { act("Sichere …") { GameSave.backupNow(ctx, path) } } }
+                    }
+                }
+                if (d != null && supported && profiles.size > 1) {
+                    item { Text("Wer spielt mit welchem Stand", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp)) }
                     item {
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             profiles.forEachIndexed { i, p ->
-                                FocusCard(Modifier.width(170.dp).firstFocus(first, i == 0), onClick = {
+                                FocusCard(Modifier.width(170.dp), onClick = {
                                     if (!p.optBoolean("active")) act("Tausche Spielstand …") {
                                         Profiles.activate(ctx, path, p.getString("id")).also { if (!it.has("error")) it.put("done", "Spielstand von ${it.optString("profile")} ist aktiv") }
                                     }
@@ -183,12 +258,9 @@ fun GameSaves(sys: String, path: String, title: String, onClose: () -> Unit) {
                         }
                     }
                 }
-                if (d != null && !supported) item { Text("Switch-Spielstände liegen in Eden, das eigene Profile hat.", color = Muted) }
                 when {
                     d == null -> {}
-                    !d.optBoolean("connected") -> item { Text("RomM nicht verbunden – geteilte Spielstände gibt es nur mit RomM.", color = Muted) }
-                    d.has("error") -> item { Text(d.optString("error"), color = Bad) }
-                    !d.optBoolean("inRomm") -> item { Text("Das Spiel ist nicht in RomM.", color = Muted) }
+                    !d.optBoolean("connected") || d.has("error") || !d.optBoolean("inRomm") || !DataSaver.rommAllowed(ctx) -> {}
                     else -> {
                         val own = d.optJSONArray("own").objs()
                         val shared = d.optJSONArray("shared").objs()
@@ -217,6 +289,17 @@ fun GameSaves(sys: String, path: String, title: String, onClose: () -> Unit) {
             ButtonHints("A" to "Auswählen", "B" to "Zurück")
         }
     }
+    if (sendOpen) SendSheet(sys, path, title, "save") { sendOpen = false; tick++ }
+    if (askPull) g?.optJSONObject("cloud")?.let { c ->
+        ConsoleMenu("Cloud-Stand holen?", "Stand vom ${stamp(c.optLong("time"))}" + (if (!c.isNull("device")) " (${c.optString("device")})" else "") +
+            " ersetzt den auf dem Thor. Der jetzige wird vorher als Backup gesichert.",
+            options = listOf("Holen" to { askPull = false; act("Holt aus RomM …") { GameSave.pullCloud(ctx, sys, path) } })) { askPull = false }
+    }
+    restorePick?.let { b ->
+        ConsoleMenu("Backup zurückholen?", "Stand vom ${stamp(b.optLong("time"))} ersetzt den auf dem Thor. Der jetzige wird vorher gesichert" +
+            (if (g?.optBoolean("rommAllowed") == true && g?.optBoolean("connected") == true) " und kommt danach als neuester Stand nach RomM." else "."),
+            options = listOf("Zurückholen" to { restorePick = null; act("Holt Backup zurück …") { GameSave.restore(ctx, path, b.optString("path")) } })) { restorePick = null }
+    }
     ownMenu?.let { s ->
         val pub = s.optBoolean("public")
         ConsoleMenu(s.optString("profile"), "${day(s.optString("updated"))} · ${fmtBytes(s.optLong("size"))}", options = buildList {
@@ -241,6 +324,48 @@ fun GameSaves(sys: String, path: String, title: String, onClose: () -> Unit) {
             }) { installing = null }
     }
 }
+
+private fun stamp(t: Long): String {
+    if (t <= 0) return "–"
+    val m = (System.currentTimeMillis() - t) / 60_000
+    val clock = java.text.SimpleDateFormat("HH:mm", java.util.Locale.GERMANY).format(java.util.Date(t))
+    val today = java.time.LocalDate.now(); val day = java.time.Instant.ofEpochMilli(t).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+    return when {
+        m < 1 -> "gerade eben"; m < 60 -> "vor $m min"
+        day == today -> "heute, $clock"; day == today.minusDays(1) -> "gestern, $clock"
+        else -> java.text.SimpleDateFormat("d. MMM, HH:mm", java.util.Locale.GERMANY).format(java.util.Date(t))
+    }
+}
+
+/** "gleich" / "Cloud ist neuer" / … next to the title */
+@Composable
+private fun CompareChip(g: JSONObject) {
+    val (text, color) = when (g.optString("compare")) {
+        "same" -> "Thor und RomM gleich" to Ok
+        "cloud-newer" -> "RomM ist neuer" to Color(0xFFFFD27A)
+        "device-newer" -> "Thor ist neuer" to Color(0xFF9CC4FF)
+        "device-only" -> (if (g.optBoolean("rommAllowed")) "nur auf dem Thor" else "nur lokal") to Muted
+        "cloud-only" -> "nur in RomM" to Color(0xFFFFD27A)
+        else -> return
+    }
+    Box(Modifier.clip(RoundedCornerShape(50)).border(1.dp, color.copy(alpha = 0.5f), RoundedCornerShape(50)).padding(horizontal = 14.dp, vertical = 6.dp)) {
+        Text(text, color = color, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/** one side of the comparison: when, how big, where from */
+@Composable
+private fun StateCard(modifier: Modifier, label: String, s: JSONObject?, empty: String, highlight: Boolean, onClick: () -> Unit) =
+    FocusCard(modifier.border(if (highlight) 1.dp else 0.dp, if (highlight) Color(0x80FFFFFF) else Color.Transparent, RoundedCornerShape(20.dp)), onClick = onClick) {
+        Text(label.uppercase(), fontSize = 12.sp, color = Muted, letterSpacing = 1.sp)
+        Spacer(Modifier.height(6.dp))
+        if (s == null) Text(empty, fontSize = 15.sp, color = Muted, maxLines = 2)
+        else {
+            Text(stamp(s.optLong("time")), fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Text(fmtBytes(s.optLong("size")) + (if (!s.isNull("device") && s.optString("device").isNotEmpty()) " · von ${s.optString("device")}" else "") +
+                " · " + s.optString("name"), fontSize = 13.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
 
 /** " · von MacBook-Pro" / " · von diesem Gerät"; empty for older uploads without a device */
 private fun devLabel(s: JSONObject, d: JSONObject): String {
