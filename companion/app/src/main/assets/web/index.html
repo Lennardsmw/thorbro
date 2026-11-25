@@ -150,6 +150,12 @@
       <div class="sub">Zeigt den Thor-Bildschirm hier im Browser, ohne Installation. Auf dem Thor einmal „Jetzt starten“ bestätigen.</div>
       <div class="row"><button id="mlScreen" class="primary">Bildschirm übertragen</button></div>
     </div>
+    <div class="panel">
+      <h3>Thor am Mac mit scrcpy</h3>
+      <div class="sub">Flüssiger als im Browser, mit Ton und Maus/Tastatur. Läuft über Kabelloses Debugging. Auf dem Mac einmal <code>brew install scrcpy</code>.</div>
+      <div class="row"><span id="scStatus" class="muted grow">Lade …</span><button id="scWifi" class="primary" hidden>WLAN-Debugging einschalten</button><button id="scPair">Koppeln am Thor öffnen</button><button id="scReload">Neu laden</button></div>
+      <div id="scHow"></div>
+    </div>
   </section>
 
   <section id="netplay" class="tab" hidden>

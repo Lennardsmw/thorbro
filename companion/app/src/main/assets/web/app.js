@@ -1296,7 +1296,35 @@ async function loadStream() {
     btn.hidden = true;
   }
   $('#mlLaunch').hidden = !s.installed;
+  loadScrcpy();
 }
+async function loadScrcpy() {
+  let s;
+  try { s = (await api('/api/stream/scrcpy')).body; } catch (err) { $('#scStatus').textContent = 'Fehler: ' + err.message; return; }
+  $('#scWifi').hidden = s.wifi;
+  const ip = s.ip || '<Thor-IP>';
+  const pair = `<p>Einmal koppeln: am Thor „Koppeln am Thor öffnen“ → <em>Gerät über einen Kopplungscode koppeln</em>, dann auf dem Mac:</p>
+    <pre class="code">adb pair ${esc(ip)}:&lt;Kopplungsport&gt; &lt;Code&gt;</pre>`;
+  if (!s.wifi) {
+    $('#scStatus').textContent = s.shell === 'ready' ? 'Kabelloses Debugging ist aus.' : 'Kabelloses Debugging ist aus. Ohne Shizuku in den Entwickleroptionen einschalten.';
+    $('#scHow').innerHTML = pair;
+  } else if (!s.command) {
+    $('#scStatus').textContent = 'Kabelloses Debugging ist an, Port nicht lesbar (Shizuku starten) – steht am Thor unter Kabelloses Debugging.';
+    $('#scHow').innerHTML = pair + `<p>Dann auf dem Mac:</p><pre class="code">scrcpy --tcpip=${esc(ip)}:&lt;Port&gt;</pre>`;
+  } else {
+    $('#scStatus').innerHTML = `<span class="ok">Bereit auf ${esc(s.address)}</span>`;
+    $('#scHow').innerHTML = pair + `<p>Dann auf dem Mac (der Port ändert sich, wenn Debugging neu startet):</p><pre class="code">${esc(s.command)}</pre>`;
+  }
+}
+$('#scWifi').onclick = async () => {
+  $('#scWifi').disabled = true;
+  try { await api('/api/stream/scrcpy/wifi', { method: 'POST' }); toast('Kabelloses Debugging an'); } catch (err) { alert(err.message); }
+  $('#scWifi').disabled = false; loadScrcpy();
+};
+$('#scPair').onclick = async () => {
+  try { await api('/api/stream/scrcpy/pair', { method: 'POST' }); toast('Am Thor: Gerät über einen Kopplungscode koppeln'); } catch (err) { alert(err.message); }
+};
+$('#scReload').onclick = () => loadScrcpy();
 $('#mlInstall').onclick = async () => {
   const btn = $('#mlInstall'); btn.disabled = true;
   try {

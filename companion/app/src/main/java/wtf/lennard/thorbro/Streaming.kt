@@ -105,6 +105,44 @@ object Streaming {
         })
     }
 
+    // ---- scrcpy: Thor screen on the Mac, through wireless debugging ----
+    // adbd is never restarted (no `adb tcpip`): Shizuku runs on the same adbd and would die with it.
+    // The Mac pairs once (adb pair, code from the Thor's pairing dialog), then connects to the TLS port.
+
+    /** wireless debugging state and the command for the Mac */
+    fun scrcpy(ctx: Context): JSONObject {
+        val wifi = runCatching { android.provider.Settings.Global.getInt(ctx.contentResolver, "adb_wifi_enabled") == 1 }.getOrDefault(false)
+        val port = prop("service.adb.tls.port")?.toIntOrNull()?.takeIf { it > 0 }
+        val ip = wtf.lennard.thorbro.ui.ipv4().first
+        val out = JSONObject().put("shell", Shell.state()).put("wifi", wifi).put("ip", ip).put("port", port)
+        if (wifi && port != null && ip != null) {
+            out.put("address", "$ip:$port")
+            out.put("command", "scrcpy --tcpip=$ip:$port")
+        }
+        return out
+    }
+
+    /** switches wireless debugging on (via Shizuku); the port appears a moment later */
+    fun scrcpyWifi(ctx: Context): JSONObject {
+        if (!Shell.run("settings", "put", "global", "adb_wifi_enabled", "1"))
+            throw IllegalStateException("Shizuku nicht bereit – Kabelloses Debugging in den Entwickleroptionen einschalten")
+        repeat(20) { if (prop("service.adb.tls.port")?.toIntOrNull()?.let { it > 0 } == true) return scrcpy(ctx); Thread.sleep(250) }
+        return scrcpy(ctx)
+    }
+
+    /** opens the developer options at "Wireless debugging", where "Pair device with pairing code" lives */
+    fun scrcpyPairing(ctx: Context) {
+        ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+            .putExtra(":settings:fragment_args_key", "toggle_adb_wireless")
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    /** a system property: through Shizuku if it runs, else plain getprop (may be hidden by SELinux) */
+    private fun prop(name: String): String? =
+        (Shell.out("getprop", name) ?: runCatching {
+            Runtime.getRuntime().exec(arrayOf("getprop", name)).inputStream.bufferedReader().use { it.readText() }
+        }.getOrNull())?.trim()?.takeIf { it.isNotEmpty() }
+
     private fun open(url: String) = (URL(url).openConnection() as HttpURLConnection).apply {
         connectTimeout = 10_000; readTimeout = 60_000; instanceFollowRedirects = true
         setRequestProperty("User-Agent", "ThorBro")

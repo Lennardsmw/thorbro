@@ -556,6 +556,21 @@ object Server {
                     if (denied(ctx)) return@get
                     json(JSONObject().put("hosts", withContext(Dispatchers.IO) { Streaming.hosts(ctx) }))
                 }
+                // scrcpy (Thor screen on the Mac over wireless debugging)
+                get("/api/stream/scrcpy") {
+                    if (denied(ctx)) return@get
+                    json(withContext(Dispatchers.IO) { Streaming.scrcpy(ctx) })
+                }
+                post("/api/stream/scrcpy/wifi") {
+                    if (denied(ctx)) return@post
+                    try { json(withContext(Dispatchers.IO) { Streaming.scrcpyWifi(ctx) }) }
+                    catch (e: Exception) { fail(e.message ?: "Fehler", HttpStatusCode.Conflict) }
+                }
+                post("/api/stream/scrcpy/pair") {
+                    if (denied(ctx)) return@post
+                    Streaming.scrcpyPairing(ctx)
+                    json(JSONObject().put("ok", true))
+                }
 
                 // ---- netplay (local multiplayer between two ThorBro devices) ----
                 // public for the other Thor: only the open lobby; data needs the lobby PIN
