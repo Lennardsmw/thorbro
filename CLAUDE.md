@@ -4,10 +4,12 @@ Mehrere Chats/Sessions arbeiten parallel an verschiedenen Features. Damit sich n
 Code, Versionen oder den Thor kaputtmacht, gelten diese Regeln für **jeden** Chat:
 
 1. **Nie im Haupt-Checkout arbeiten.** `~/dev/thorbro` bleibt immer auf `main` und sauber.
-   Jedes Feature bekommt einen eigenen Worktree:
+   Jedes Feature bekommt einen eigenen Worktree, Zweig und PR auf GitHub (Ablauf: `~/dev/tools/README.md`):
    ```sh
-   scripts/feature.sh <name>        # -> ~/dev/thorbro-<name>, Zweig feature/<name>, von main
+   scripts/feature.sh <name> [feature|fix|chore]   # -> ~/dev/wt/thorbro/<name>, Zweig feature/<name> von origin/main, gepusht
+   wt ls thorbro                                   # Überblick: alle Worktrees, offene Änderungen, PRs
    ```
+   Zwischendurch committen und `wt pr` (pusht, legt den PR an) – so liegt nichts nur lokal.
    Fremde Worktrees (`git worktree list`) nicht anfassen, nicht darin committen, keine Zweige löschen.
 
 2. **Versionsnummer nie von Hand ändern.** `versionName`/`versionCode` in `build.gradle.kts` werden
@@ -19,9 +21,9 @@ Code, Versionen oder den Thor kaputtmacht, gelten diese Regeln für **jeden** Ch
    übergehen, ohne dass der User es sagt. Welcher Build drauf ist: ThorBro → Einstellungen (Titel)
    oder `GET /api/update` → `current`.
 
-4. **Fertig → `scripts/land.sh`** im Feature-Worktree (alles committet): rebased auf `main`, baut,
-   spult `main` vor. Bei Konflikten: lösen, `git rebase --continue`, `land.sh` nochmal.
-   `scripts/land.sh --remove` entfernt danach Worktree und Zweig.
+4. **Fertig → `scripts/land.sh`** im Feature-Worktree (alles committet): rebased auf `origin/main`, baut
+   (`scripts/check.sh`), merged den PR auf GitHub (rebase), spult den lokalen `main` vor und entfernt Worktree
+   und Zweig (`--keep` behält sie). Bei Konflikten: lösen, `git rebase --continue`, `land.sh` nochmal.
 
 5. **Release** (nur nach Absprache mit dem User): auf `main` `scripts/release.sh <neue Version>`.
 
