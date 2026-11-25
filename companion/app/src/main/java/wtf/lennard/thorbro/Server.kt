@@ -627,6 +627,11 @@ object Server {
                     Streaming.scrcpyPairing(ctx)
                     json(JSONObject().put("ok", true))
                 }
+                // Wi-Fi without power saving while a Mac mirrors; RomBro repeats "on" every 30 s, "off" when it stops
+                post("/api/stream/lowlatency") {
+                    if (denied(ctx)) return@post
+                    json(JSONObject().put("held", Streaming.lowLatency(ctx, q("on") != "0")))
+                }
 
                 // ---- netplay (local multiplayer between two ThorBro devices) ----
                 // public for the other Thor: only the open lobby; data needs the lobby PIN

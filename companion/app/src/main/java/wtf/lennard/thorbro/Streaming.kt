@@ -137,6 +137,41 @@ object Streaming {
             .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
+    // Wi-Fi power saving makes the stream come in bursts (ping 7–160 ms): hold HIGH_PERF (works with the
+    // game in front) plus LOW_LATENCY while someone mirrors. Released when the keep-alive stops for 90 s.
+    private val locks = mutableListOf<android.net.wifi.WifiManager.WifiLock>()
+    @Volatile private var lastPing = 0L
+
+    @Synchronized fun lowLatency(ctx: Context, on: Boolean): Boolean {
+        if (!on) { releaseLocks(); return false }
+        lastPing = System.currentTimeMillis()
+        if (locks.isEmpty()) {
+            val wm = ctx.applicationContext.getSystemService(android.net.wifi.WifiManager::class.java)
+            @Suppress("DEPRECATION")
+            listOf(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, android.net.wifi.WifiManager.WIFI_MODE_FULL_LOW_LATENCY).forEach { mode ->
+                runCatching { wm.createWifiLock(mode, "thorbro:mirror").apply { setReferenceCounted(false); acquire() } }.getOrNull()?.let { locks += it }
+            }
+            Logs.i("stream", "WLAN ohne Stromsparen (Spiegeln)")
+            Thread {
+                while (true) {
+                    Thread.sleep(15_000)
+                    synchronized(this) {
+                        if (locks.isEmpty()) return@Thread
+                        if (System.currentTimeMillis() - lastPing > 90_000) { releaseLocks(); return@Thread }
+                    }
+                }
+            }.apply { isDaemon = true }.start()
+        }
+        return locks.isNotEmpty()
+    }
+
+    @Synchronized private fun releaseLocks() {
+        if (locks.isEmpty()) return
+        locks.forEach { runCatching { if (it.isHeld) it.release() } }
+        locks.clear()
+        Logs.i("stream", "WLAN-Stromsparen wieder an")
+    }
+
     /** a system property: through Shizuku if it runs, else plain getprop (may be hidden by SELinux) */
     private fun prop(name: String): String? =
         (Shell.out("getprop", name) ?: runCatching {
