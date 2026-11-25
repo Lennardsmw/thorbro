@@ -67,11 +67,11 @@ table.files a.dir { font-weight: 600; }
 .syslist .warn { color: var(--err); }
 .romhead { display: flex; align-items: baseline; gap: 10px; margin: 2px 0 8px; }
 .romhead h2 { margin: 0; font-size: 20px; }
-.sysicon { width: 22px; height: 22px; object-fit: contain; flex: none; }
+.sysicon { width: 28px; height: 28px; object-fit: contain; flex: none; }
 .noicon { display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; background: var(--bg);
           border: 1px solid var(--line); font-size: 10px; font-weight: 700; color: var(--muted); }
-.headicon { width: 30px; height: 30px; object-fit: contain; }
-.bigicon { width: 56px; height: 56px; object-fit: contain; opacity: .8; }
+.headicon { width: 40px; height: 40px; object-fit: contain; }
+.bigicon { width: 72px; height: 72px; object-fit: contain; }
 .syslist button { align-items: center; }
 .covergrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
 .romcard { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px; cursor: pointer; min-width: 0; }
