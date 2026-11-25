@@ -393,8 +393,9 @@ object Tunnel {
                     lastHeard = System.currentTimeMillis()
                     when (m.type) {
                         WELCOME -> {
-                            if (host != p.socketAddress) log("Host erreicht über ${p.socketAddress}")
-                            host = p.socketAddress; s.welcomed = true
+                            // several leader addresses may answer the same hello burst: keep the first (fastest)
+                            if (host == null) { host = p.socketAddress; log("Host erreicht über ${p.socketAddress}") }
+                            s.welcomed = true
                         }
                         DATA -> { host = p.socketAddress; s.deliver(m.data) }
                         FULL -> { full = true; log("Raum ist voll") }

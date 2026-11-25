@@ -39,3 +39,50 @@ Weitere Typen (Party, Chat) laufen über `Pals.handlers` / `MacFriends.handlers`
   Leiter trägt ein und postet seinen Status. `leave {party}` → Leiter. Abgelehnt: `nope {why}`.
 - Ein Mitglied, das im Status des Leiters nicht (mehr) vorkommt (nach 90 s Wartezeit), verlässt die Party von selbst.
 - Ohne Party, aber „Party offen“: Status `open: true` – Freunde sehen das, beitreten geht erst, wenn eine Party besteht.
+
+## Party-Netz (zusammen spielen, auch übers Internet)
+Mehrspieler läuft nur noch über die Party. Kein Spielserver-Schalter, kein Online-Code, keine Lobby-/PIN-Suche.
+
+**Räume, immer an** (jedes Gerät, ThorBro und RomBro):
+
+| Emulator | Emulator verbindet sich mit | Weiterleitung (Relay) | eigener Raum |
+|---|---|---|---|
+| Azahar (3DS) | 127.0.0.1:24872 | UDP 127.0.0.1:24872 | UDP 24873 (`libazaharroom.so` / `azahar --room`) |
+| Eden (Switch, LDN) | 127.0.0.1:24875 | UDP 127.0.0.1:24875 | UDP 24876 (`libedenroom.so` / `eden-room`, aus Eden v0.2.1 gebaut: `scripts/build-eden-room.sh`) |
+
+Der Emulator tritt einmal 127.0.0.1 bei (Azahar/Eden merken sich das; RomBro trägt es in die qt-config ein und
+klickt „Direkt verbinden“ über die Bedienungshilfen). Das Relay führt dorthin, wo gespielt wird:
+- keine Party oder selbst Leiter → eigener Raum,
+- Mitglied → durch den Party-Tunnel in den Raum des Leiters,
+- (alt, nur noch intern) beigetretene Lobby → direkt an deren Adresse.
+Jeder Emulator-Socket bekommt einen eigenen Weg, der Raum sieht also einen festen Mitspieler pro Gerät.
+
+**Status des Leiters** (`party` im Status, siehe oben) enthält zusätzlich
+`room = {port: 24873, eden: 24876, addrs: [WLAN, Wi-Fi Direct, NetBird 100.116.x …], net: true}` (`net` = Tunnel offen) und
+beim laufenden Spiel `game = {system, title, mode, pin, addrs, azUser?, azConsole?}`.
+
+**Tunnel** (`Tunnel.kt`, identisch in ThorBro und RomBro `netplay/Tunnel.kt`), Version 2:
+- Der Leiter hält, solange er eine Party mit Mitgliedern leitet, einen `Tunnel.Host` auf UDP **24874** (belegt → beliebiger Port)
+  mit einem Geheimnis pro Party (16 Byte, in `party.mine.net`). Erlaubte Ziele: nur die eigenen Raum-Ports 24873 und 24876.
+- Pakete: `"TB" ver(2) type session(8) counter(8) nonce(12) | AES-256-GCM | tag(16)`, Header als AAD.
+  Schlüssel je Richtung = HMAC-SHA256(Geheimnis, "thorbro tunnel v2 guest->host" bzw. "… host->guest"). Wiederholte Zähler
+  (64er-Fenster) werden verworfen; alles andere, was den Port erreicht, wird ohne Antwort weggeworfen.
+- Typen: 1 HELLO (Mitglied → Leiter, Nutzlast 2 Byte = Raum-Port), 2 WELCOME, 3 DATA, 4 PING (alle ~12 s ohne Verkehr),
+  5 PUNCH (Leiter → Mitglied, öffnet den eigenen Router), 6 BYE, 7 FULL (mehr als 15 Mitglieds-Sockets).
+- Eine Sitzung pro Emulator-Socket; der Leiter reicht sie von einem eigenen lokalen Socket an 127.0.0.1:<Raum-Port> weiter.
+
+**Signalisierung** über Pals-Nachrichten (verschlüsselt, signiert, nur zwischen Freunden, wie oben):
+- `knock {party, c: [Adressen]}` Mitglied → Leiter, sobald es laut Status in der Party ist und `room.net` gesetzt ist.
+  `c` = eigene Adressen des Tunnel-Sockets: STUN (öffentlich IPv4:Port), alle IPv4 der Schnittstellen (WLAN, NetBird, …),
+  globale IPv6. Höchstens alle 20 s, höchstens 8 pro Party; erneut, wenn der Tunnel 25 s nicht antwortet.
+- Leiter prüft: Absender ist Mitglied, Party-id stimmt, Nachricht < 5 min alt (ntfy liefert nach Neustart alte nach).
+  Dann Hole-Punching zu allen `c` (bei öffentlichem IPv4 auch Ports +-8 … +400 für Mobilfunk-NAT), STUN neu, Antwort
+  `net {party, s: Geheimnis (base64url), c: [Adressen des Leiters]}`.
+- Mitglied öffnet `Tunnel.Guest` auf demselben Socket (die Adressen aus dem knock bleiben gültig), sendet HELLO an alle
+  Adressen gleichzeitig und behält die erste, die antwortet: gleiches WLAN, NetBird oder Internet. Danach führen
+  127.0.0.1:24872 und 127.0.0.1:24875 durch den Tunnel.
+
+**Spielstart**: Der Leiter startet ein Spiel (irgendein Frontend) → Lobby → `game` im Status. Ein Mitglied, das eine Adresse
+aus `game.addrs` per HTTP (7330) erreicht, tritt wie bisher bei (ROM vom Leiter, Emulator als Gast). Sonst, bei 3DS/Switch:
+das Spiel wird mit dem eigenen ROM gleichen Namens gestartet (Spieldateien gehen nicht durch den Tunnel), der Raum läuft
+über den Tunnel. RetroArch und PPSSPP gehen nur im gleichen Netz (WLAN, Wi-Fi Direct, NetBird).
