@@ -174,6 +174,8 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
     val canPlay = remember(sys) { Emulators.forSystem(ctx, sys) }
     var confirm by remember { mutableStateOf(false) }
     var savesOpen by remember { mutableStateOf(false) }
+    var sendOpen by remember { mutableStateOf(false) }
+    val giftFrom = remember(r) { wtf.lennard.thorbro.Gifts.newFrom(ctx, r.getString("path")) }
     var job by remember { mutableStateOf<Jobs.Job?>(null) }
     val start = rememberPlay(onError = { msg = it }, onStarted = onClose)
     val size = group.sumOf { it.optLong("size") }
@@ -217,6 +219,7 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
     @Composable
     fun Chips() = Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Chip(fmtBytes(size))
+        giftFrom?.let { Chip("neu · von $it", true) }
         if (lib != null) Chip(if (lib.optBoolean("inRomm")) "☁ in RomM" else "☁ nicht in RomM", lib.optBoolean("inRomm"))
         when (lib?.optString("save")) {
             "synced" -> Chip("💾 Spielstand in RomM", true); "pending" -> Chip("💾 Spielstand geändert"); "local" -> Chip("💾 nur auf dem Thor")
@@ -229,19 +232,8 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
         val list = buildList<Triple<String, androidx.compose.ui.graphics.vector.ImageVector, () -> Unit>> {
             play?.let { add(Triple("Spielen", Icons.Filled.PlayArrow, it)) }
             if (sys != "ports" || lib != null) add(Triple("Spielstände", Icons.Filled.Save, { savesOpen = true }))
-            if (sys != "ports" && !r.optBoolean("dir")) add(Triple("Weitergeben", Icons.Filled.SportsEsports, {
-                // hand this game to a Thor nearby: it gets an invite (Wi-Fi Direct) and keeps the file
-                scope.launch {
-                    val res = withContext(Dispatchers.IO) {
-                        runCatching { wtf.lennard.thorbro.Netplay.share(ctx, sys, File(r.getString("path"))) }.getOrElse { JSONObject().put("error", it.message) }
-                    }
-                    msg = when {
-                        res.has("error") -> res.optString("error")
-                        res.optBoolean("direct") -> "Wird angeboten – der Thor in der Nähe bekommt eine Einladung. Beenden unter Multiplayer."
-                        else -> "Wird angeboten · PIN ${res.optString("pin")} – Wi-Fi Direct ist aus, der andere Thor braucht dasselbe WLAN."
-                    }
-                }
-            }))
+            // to friends (anywhere) or, inside the menu, to a Thor nearby without friendship
+            if (sys != "ports") add(Triple("Weitergeben", Icons.Filled.SportsEsports, { sendOpen = true }))
             add(Triple(if (fav) "Favorit ✓" else "Favorit", if (fav) Icons.Filled.Star else Icons.Filled.StarBorder, { Favorites.toggle(ctx, r.getString("path")) }))
             val queued = Background.isQueued(r.getString("path"))
             if (sys != "ports" && lib != null && !queued) add(Triple(if (lib.optBoolean("inRomm")) "Auslagern" else "Hochladen + auslagern", Icons.Filled.CloudUpload, { confirm = true }))
@@ -335,6 +327,7 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
         }
     }
     if (savesOpen) GameSaves(sys, r.getString("path"), title(r, m)) { savesOpen = false }
+    if (sendOpen) SendSheet(sys, r.getString("path"), title(r, m), "game") { sendOpen = false }
     if (confirm) OffloadConfirm(title(r, m), size, lib?.optBoolean("inRomm") == true, onYes = {
         confirm = false
         Background.offload(ctx, group.map { it.getString("path") }, title(r, m), size)

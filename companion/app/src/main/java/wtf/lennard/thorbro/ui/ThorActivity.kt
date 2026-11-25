@@ -1,5 +1,6 @@
 package wtf.lennard.thorbro.ui
 
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.SignalCellularAlt
 import androidx.compose.material.icons.filled.Wifi
@@ -245,7 +246,7 @@ private fun SettingsScreen() {
             wtf.lennard.thorbro.Apps.restart(ctx, wtf.lennard.thorbro.Apps.COCOON) } }
         item { ConsoleTile("Neuer Code", "alte Kopplungen ungültig", androidx.compose.material.icons.Icons.Filled.Key) { Prefs.newToken(ctx); tick++ } }
         item { ConsoleTile("Web-Oberfläche", "alles auf dem Thor", androidx.compose.material.icons.Icons.Filled.Web) { ctx.startActivity(Intent(ctx, AppActivity::class.java)) } }
-        header("Daten sparen", "wann ThorBro Spielstände von allein mit RomM abgleicht")
+        header("Daten sparen", "wann ThorBro Spielstände und Spiele übers Netz bewegt (RomM, Freunde)")
         val mode = dataTick.let { wtf.lennard.thorbro.DataSaver.mode(ctx) }
         wtf.lennard.thorbro.DataSaver.Mode.entries.forEach { m ->
             item {
@@ -262,6 +263,21 @@ private fun SettingsScreen() {
             ConsoleTile("$keep Backups", "pro Spiel behalten", androidx.compose.material.icons.Icons.Filled.History) {
                 val c = wtf.lennard.thorbro.DataSaver.KEEP_CHOICES
                 wtf.lennard.thorbro.DataSaver.setKeep(ctx, c[(c.indexOf(keep) + 1) % c.size]); dataTick++
+            }
+        }
+        item {
+            val auto = remember(dataTick) { wtf.lennard.thorbro.DataSaver.giftAuto(ctx) }
+            ConsoleTile(if (auto) "Spielstände von Freunden: automatisch" else "Spielstände von Freunden: fragen",
+                if (auto) "als Backup ablegen, der eigene Stand bleibt aktiv" else "erst annehmen", androidx.compose.material.icons.Icons.Filled.Group, accent = auto) {
+                wtf.lennard.thorbro.DataSaver.setGiftAuto(ctx, !auto); dataTick++
+            }
+        }
+        item {
+            val mb = remember(dataTick) { (wtf.lennard.thorbro.DataSaver.giftMaxMobile(ctx) shr 20).toInt() }
+            ConsoleTile("Mobil bis ${if (mb >= 1000) "${mb / 1000} GB" else "$mb MB"}", "größere Spiele von Freunden warten aufs WLAN",
+                androidx.compose.material.icons.Icons.Filled.SignalCellularAlt) {
+                val c = wtf.lennard.thorbro.DataSaver.GIFT_MB_CHOICES
+                wtf.lennard.thorbro.DataSaver.setGiftMaxMobile(ctx, c[(c.indexOf(mb) + 1) % c.size]); dataTick++
             }
         }
         header("Speicher", "wohin Downloads und empfangene Spiele kommen")

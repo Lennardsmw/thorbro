@@ -212,6 +212,17 @@ object Romm {
             .put("name", r.optString("name").ifEmpty { name })
     }
 
+    /** a game's RomM record (name on disk, size, single/multi file) */
+    fun romInfo(ctx: Context, romId: Int): JSONObject = JSONObject(request(ctx, "GET", "/api/roms/$romId/simple"))
+
+    /** a game's file from byte [from] (to [to], inclusive), for gifts that load over RomM */
+    fun content(ctx: Context, romId: Int, fsName: String, from: Long, to: Long?): HttpURLConnection {
+        val path = "/api/roms/$romId/content/" + URLEncoder.encode(fsName, "UTF-8").replace("+", "%20")
+        val c = open(ctx, "GET", path, headers = if (from > 0 || to != null) mapOf("Range" to "bytes=$from-${to ?: ""}") else emptyMap())
+        if (c.responseCode !in listOf(200, 206)) error("RomM antwortet mit HTTP ${c.responseCode}")
+        return c
+    }
+
     // ---------- raw API for syncing ----------
 
     fun rawPlatforms(ctx: Context): List<JSONObject> = JSONArray(request(ctx, "GET", "/api/platforms")).let { a -> (0 until a.length()).map { a.getJSONObject(it) } }

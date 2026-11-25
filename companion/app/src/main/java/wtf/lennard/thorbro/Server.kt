@@ -291,6 +291,10 @@ object Server {
                     if (denied(ctx)) return@post
                     q("mode")?.let { id -> DataSaver.Mode.entries.firstOrNull { it.id == id }?.let { DataSaver.setMode(ctx, it) } }
                     q("keep")?.toIntOrNull()?.let { DataSaver.setKeep(ctx, it) }
+                    q("giftAuto")?.let { DataSaver.setGiftAuto(ctx, it == "1") }
+                    q("giftMaxMobileMb")?.toIntOrNull()?.let { DataSaver.setGiftMaxMobile(ctx, it) }
+                    q("giftAuto")?.let { DataSaver.setGiftAuto(ctx, it == "1") }
+                    q("giftMaxMobileMb")?.toIntOrNull()?.let { DataSaver.setGiftMaxMobile(ctx, it) }
                     json(DataSaver.json(ctx))
                 }
                 post("/api/saves/share") {
@@ -712,6 +716,64 @@ object Server {
                     val text = call.receiveText()
                     val err = withContext(Dispatchers.IO) { Pals.import(ctx, text) }
                     if (err != null) fail(err, HttpStatusCode.Conflict) else json(Pals.status(ctx))
+                }
+                // ---- gifts (Gifts.kt) ----
+                // a friend's Thor loads a gift's file: no pairing code, the gift's own token (sent encrypted to the friend)
+                get("/api/gift/{gid}/{part}") {
+                    val f = withContext(Dispatchers.IO) { Gifts.file(ctx, call.parameters["gid"] ?: "", call.parameters["part"] ?: "", q("k")) }
+                        ?: return@get fail("not found", HttpStatusCode.NotFound)
+                    val len = f.length()
+                    val range = call.request.headers[HttpHeaders.Range]?.let { Regex("^bytes=(\\d+)-(\\d*)$").find(it.trim()) }
+                    val from = range?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+                    val to = range?.groupValues?.get(2)?.toLongOrNull()?.coerceAtMost(len - 1) ?: (len - 1)
+                    if (range != null && from > to) return@get fail("range", HttpStatusCode.RequestedRangeNotSatisfiable)
+                    call.response.header(HttpHeaders.AcceptRanges, "bytes")
+                    if (range != null) call.response.header(HttpHeaders.ContentRange, "bytes $from-$to/$len")
+                    Transfers.begin(ctx)
+                    try {
+                        call.respondBytesWriter(ContentType.Application.OctetStream, if (range != null) HttpStatusCode.PartialContent else HttpStatusCode.OK, to - from + 1) {
+                            java.io.RandomAccessFile(f, "r").use { raf ->
+                                raf.seek(from)
+                                var left = to - from + 1
+                                val buf = ByteArray(1 shl 18)
+                                while (left > 0) {
+                                    val n = withContext(Dispatchers.IO) { raf.read(buf, 0, minOf(buf.size.toLong(), left).toInt()) }
+                                    if (n < 0) break
+                                    writeFully(buf, 0, n); left -= n
+                                }
+                            }
+                        }
+                    } finally { Transfers.end() }
+                }
+                get("/api/gifts") {
+                    if (denied(ctx)) return@get
+                    json(withContext(Dispatchers.IO) { Gifts.status(ctx) })
+                }
+                get("/api/gifts/routes") { // ?system&path&kind → per friend the likely way
+                    if (denied(ctx)) return@get
+                    val rom = q("path")?.let { Storage.resolve(it) ?: Ports.resolve(ctx, it) }
+                    json(withContext(Dispatchers.IO) { Gifts.routes(ctx, q("system") ?: "", rom, q("kind") ?: "game") })
+                }
+                post("/api/gifts/send") { // ?system&path&kind=save|game|both&to=id,id
+                    if (denied(ctx)) return@post
+                    val rom = (Storage.resolve(q("path")) ?: Ports.resolve(ctx, q("path"))) ?: return@post fail("path not allowed")
+                    val to = (q("to") ?: "").split(',').filter { it.isNotBlank() }
+                    val kind = q("kind") ?: "game"; val system = q("system") ?: ""
+                    json(Jobs.start("Verschicken: ${rom.nameWithoutExtension}") { j ->
+                        Gifts.send(ctx, to, kind, system, rom, j).also { if (it.has("error")) error(it.getString("error")) }
+                    }.json())
+                }
+                post("/api/gifts/{action}") { // accept ?gid&how=take|backup|load | decline ?gid | ask ?gid | sendwanted ?gid&id
+                    if (denied(ctx)) return@post
+                    val gid = q("gid") ?: return@post fail("gid missing")
+                    val id = q("id") ?: ""
+                    when (call.parameters["action"]) {
+                        "accept" -> json(Gifts.accept(ctx, gid, q("how") ?: "load").json())
+                        "decline" -> { withContext(Dispatchers.IO) { Gifts.decline(ctx, gid) }; json(Gifts.status(ctx)) }
+                        "ask" -> withContext(Dispatchers.IO) { Gifts.askGame(ctx, gid) }?.let { fail(it, HttpStatusCode.Conflict) } ?: json(Gifts.status(ctx))
+                        "sendwanted" -> json(Jobs.start("Spiel nachschicken") { j -> Gifts.sendWanted(ctx, gid, id, j).also { if (it.has("error")) error(it.getString("error")) } }.json())
+                        else -> fail("unbekannt")
+                    }
                 }
                 post("/api/netplay/friend/remove") {
                     if (denied(ctx)) return@post

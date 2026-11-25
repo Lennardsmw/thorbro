@@ -25,6 +25,7 @@ object GameSave {
         MANUAL("manuell", "von Hand gesichert"),
         PROFILE("vor-profil", "vor dem Profilwechsel gesichert"),
         INSTALL("vor-installation", "vor dem Installieren gesichert"),
+        GIFT("geschenk", "Geschenk"),
     }
 
     /** a save bigger than this is not packed per game (the location-wide snapshots still cover it) */
@@ -58,7 +59,17 @@ object GameSave {
         val zip = File(d, "${stamp.format(Date())}-${reason.id}~$owner.zip")
         Profiles.pack(ctx, zip, romPath, items)
         last.writeText(fp)
-        zips(romPath).drop(DataSaver.keep(ctx)).forEach { it.delete() }
+        zips(romPath).drop(DataSaver.keep(ctx)).forEach { it.delete(); File(it.path + ".from").delete() }
+        return zip
+    }
+
+    /** a save a friend sent (already pointing at this Thor's paths) → kept as a backup "Geschenk von …" */
+    fun addGift(ctx: Context, romPath: String, mapped: File, fromName: String): File {
+        val d = dir(romPath).apply { mkdirs() }
+        val zip = File(d, "${stamp.format(Date())}-${Reason.GIFT.id}~${Profiles.owner(ctx, romPath)}.zip")
+        mapped.copyTo(zip, overwrite = true)
+        File(zip.path + ".from").writeText(fromName.take(24))
+        zips(romPath).drop(DataSaver.keep(ctx)).forEach { it.delete(); File(it.path + ".from").delete() }
         return zip
     }
 
@@ -75,9 +86,11 @@ object GameSave {
         val parts = z.name.removeSuffix(".zip")
         val reasonId = parts.drop(16).substringBefore('~')
         val profile = parts.substringAfter('~', Profiles.MAIN)
+        val from = File(z.path + ".from").takeIf { it.isFile }?.readText()?.trim()
         JSONObject().put("path", z.path).put("name", z.name).put("size", z.length())
             .put("time", runCatching { stamp.parse(parts.take(15))!!.time }.getOrDefault(z.lastModified()))
-            .put("reason", reasonId).put("reasonLabel", Reason.entries.firstOrNull { it.id == reasonId }?.label ?: "gesichert")
+            .put("reason", reasonId).put("from", from ?: JSONObject.NULL)
+            .put("reasonLabel", if (from != null) "Geschenk von $from" else Reason.entries.firstOrNull { it.id == reasonId }?.label ?: "gesichert")
             .put("profile", Profiles.get(ctx, profile)?.name ?: JSONObject.NULL)
     })
 

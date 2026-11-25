@@ -58,6 +58,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import wtf.lennard.thorbro.Jobs
 import wtf.lennard.thorbro.Pals
 
 /** the friends menu: button top right on every page, or L2 */
@@ -82,7 +83,7 @@ fun Avatar(name: String, size: Int = 40, me: Boolean = false) {
 fun FriendsButton() {
     val ctx = LocalContext.current
     var waiting by remember { mutableStateOf(0) }
-    WhileVisible { while (true) { waiting = withContext(Dispatchers.IO) { Pals.requests(ctx).size + wtf.lennard.thorbro.Party.invites(ctx).size }; delay(3000) } }
+    WhileVisible { while (true) { waiting = withContext(Dispatchers.IO) { Pals.requests(ctx).size + wtf.lennard.thorbro.Party.invites(ctx).size + wtf.lennard.thorbro.Gifts.waiting(ctx) }; delay(3000) } }
     val fx = rememberFx()
     Box {
         Box(Modifier.size(38.dp).fx(fx, CircleShape, lift = 1.1f) { FriendsUi.open = true }
@@ -131,13 +132,18 @@ fun FriendsPanel() {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var st by remember { mutableStateOf<JSONObject?>(null) }
+    var gifts by remember { mutableStateOf<JSONObject?>(null) }
+    var gift by remember { mutableStateOf<JSONObject?>(null) }
     var add by remember { mutableStateOf(false) }
     var rename by remember { mutableStateOf(false) }
     var pick by remember { mutableStateOf<JSONObject?>(null) }
     var msg by remember { mutableStateOf("") }
     val first = remember { FocusRequester() }
     fun close() { FriendsUi.open = false }
-    fun refresh() = scope.launch { st = withContext(Dispatchers.IO) { Pals.status(ctx) } }
+    fun refresh() = scope.launch {
+        st = withContext(Dispatchers.IO) { Pals.status(ctx) }
+        gifts = withContext(Dispatchers.IO) { runCatching { wtf.lennard.thorbro.Gifts.status(ctx) }.getOrNull() }
+    }
     fun act(work: () -> String?) = scope.launch {
         val err = withContext(Dispatchers.IO) { runCatching { work() }.getOrElse { it.message } }
         msg = err ?: ""; refresh()
@@ -148,13 +154,20 @@ fun FriendsPanel() {
     }
     // nearby: same WLAN / hotspot, looked for again every 15 s while the menu is open
     LaunchedEffect(Unit) { while (true) { withContext(Dispatchers.IO) { runCatching { Pals.scanNearby(ctx) } }; refresh(); delay(15_000) } }
-    LaunchedEffect(Unit) { var v = Pals.version; while (true) { delay(1000); if (Pals.version != v) { v = Pals.version; refresh() } } }
+    LaunchedEffect(Unit) {
+        var v = Pals.version
+        while (true) {
+            delay(1000)
+            val loading = gifts?.optJSONArray("incoming").list().any { it.optString("state") == "loading" }
+            if (Pals.version != v || loading) { v = Pals.version; refresh() }
+        }
+    }
 
     DialogOpen()
     Dialog(::close, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         ImmersiveDialog()
         Box(Modifier.fillMaxSize().onPreviewKeyEvent { e ->
-            if (e.type != KeyEventType.KeyDown || add || rename || pick != null) return@onPreviewKeyEvent false
+            if (e.type != KeyEventType.KeyDown || add || rename || pick != null || gift != null) return@onPreviewKeyEvent false
             when (e.key) {
                 Key.ButtonY -> { add = true; true }
                 Key.ButtonL2 -> { close(); true }
@@ -183,6 +196,19 @@ fun FriendsPanel() {
                         BigButton("Name") { rename = true }
                     }
                     if (msg.isNotEmpty()) Text(msg, color = Bad, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+
+                    // gifts: games and saves from friends, and friends who want a game to a save we sent
+                    val inc = gifts?.optJSONArray("incoming").list().filter { it.optString("state") != "done" || System.currentTimeMillis() - it.optLong("at") < 86_400_000 }
+                    val wants = gifts?.optJSONArray("outgoing").list().flatMap { o -> o.optJSONArray("to").list().filter { it.optBoolean("want") }.map { o to it } }
+                    if (inc.isNotEmpty() || wants.isNotEmpty()) {
+                        Section("Für dich")
+                        inc.forEach { g -> GiftRow(g, Modifier.padding(bottom = 6.dp)) { gift = g } }
+                        wants.forEach { (o, t) ->
+                            PersonRow(t.optString("name"), "möchte auch das Spiel: ${o.optString("title")}", Modifier.padding(bottom = 6.dp), "A: schicken") {
+                                act { Jobs.start("Spiel nachschicken") { j -> wtf.lennard.thorbro.Gifts.sendWanted(ctx, o.optString("gid"), t.optString("id"), j) }; null }
+                            }
+                        }
+                    }
 
                     val party = s?.optJSONObject("party")
                     if (party != null) {
@@ -239,6 +265,7 @@ fun FriendsPanel() {
         }
     }
     if (add) AddFriendPopup(onClose = { add = false; refresh() })
+    gift?.let { g -> GiftMenu(g, onAct = { work -> act(work) }) { gift = null; refresh() } }
     if (rename) NameDialog(st?.optJSONObject("me")?.optString("name") ?: "", onClose = { rename = false }) { n -> act { Pals.setName(ctx, n); null }; rename = false }
     pick?.let { p ->
         val name = p.optString("name")
@@ -345,4 +372,98 @@ private fun NameDialog(current: String, onClose: () -> Unit, onSave: (String) ->
             }
         }
     }
+}
+
+private fun giftWhat(kind: String) = when (kind) { "save" -> "einen Spielstand"; "both" -> "ein Spiel mit Spielstand"; else -> "ein Spiel" }
+private val wayLabel = mapOf("lan" to "lokal", "romm" to "RomM", "tunnel" to "Tunnel")
+
+/** one gift under "Für dich": who, what, and where it stands (with a bar while it loads) */
+@Composable
+private fun GiftRow(g: JSONObject, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val fx = rememberFx()
+    val shape = RoundedCornerShape(14.dp)
+    val from = g.optJSONObject("from")?.optString("name") ?: "Freund"
+    val state = g.optString("state")
+    val live = g.optJSONObject("live")
+    Column(modifier.fillMaxWidth().fx(fx, shape, lift = 1.02f, onClick = onClick).background(if (fx.active) Color(0x33FFFFFF) else Color(0xFF1C1E23))
+        .padding(horizontal = 12.dp, vertical = 9.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Avatar(from, 38)
+            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text(when (state) {
+                    "loading" -> "Lädt: ${g.optString("title")}"
+                    "done" -> "${g.optString("title")} ist da"
+                    else -> "$from schickt dir ${giftWhat(g.optString("kind"))}"
+                }, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val size = g.optLong("size").takeIf { it > 0 } ?: g.optJSONObject("save")?.optLong("size") ?: 0L
+                Text(when (state) {
+                    "loading" -> "von $from" + (live?.optString("way")?.let { wayLabel[it] }?.let { " · $it" } ?: "") +
+                        (live?.takeIf { it.optLong("total") > 0 }?.let { " · ${fmtBytes(it.optLong("done"))} von ${fmtBytes(it.optLong("total"))}" } ?: "")
+                    "failed", "wifi" -> g.optString("error")
+                    "expired" -> "abgelaufen"
+                    "done" -> "von $from · " + (g.optJSONObject("result")?.optString("save")?.takeIf { it.isNotEmpty() }?.let { "Spielstand $it" } ?: "fertig")
+                    else -> listOf(g.optString("title"), if (size > 0) fmtBytes(size) else "", if (g.optString("kind") == "both") "mit Spielstand" else "",
+                        if (g.optBoolean("missing")) "Spiel fehlt" else "").filter { it.isNotEmpty() }.joinToString(" · ")
+                }, fontSize = 12.sp, color = if (state == "failed") Bad else Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            Text(when (state) { "new" -> "neu"; "loading" -> live?.let { l -> if (l.optLong("total") > 0) "${l.optLong("done") * 100 / l.optLong("total")} %" else "…" } ?: "…"
+                "failed", "wifi" -> "A: nochmal"; else -> "" }, fontSize = 13.sp, color = if (state == "new") Ok else if (fx.active) Color.White else Muted)
+        }
+        if (state == "loading" && live != null && live.optLong("total") > 0) {
+            val p = live.optLong("done").toFloat() / live.optLong("total")
+            Box(Modifier.padding(top = 8.dp).fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color(0x22FFFFFF))) {
+                Box(Modifier.fillMaxWidth(p.coerceIn(0f, 1f)).height(4.dp).background(Color.White))
+            }
+        }
+    }
+}
+
+/** what to do with a gift: load (game), take over or keep as backup (save), decline */
+@Composable
+private fun GiftMenu(g: JSONObject, onAct: (() -> String?) -> Unit, onClose: () -> Unit) {
+    val ctx = LocalContext.current
+    val gid = g.optString("gid")
+    val from = g.optJSONObject("from")?.optString("name") ?: "Freund"
+    val kind = g.optString("kind")
+    val state = g.optString("state")
+    val ways = g.optJSONObject("ways") ?: JSONObject()
+    val probe = g.optJSONObject("probe")
+    fun way(id: String, allowed: Boolean) = "${wayLabel[id]} " + when {
+        !allowed -> "–"
+        probe?.has(id) == true -> "${probe.optString(id)} MB/s"
+        else -> "✓"
+    }
+    val mode = wtf.lennard.thorbro.DataSaver.mode(ctx)
+    val local = mode == wtf.lennard.thorbro.DataSaver.Mode.LOCAL
+    val text = buildString {
+        append(g.optString("title"))
+        val size = g.optLong("size")
+        if (size > 0) append(" · ${fmtBytes(size)}")
+        g.optJSONObject("save")?.let { s -> append(if (kind == "save") " · ${fmtBytes(s.optLong("size"))}" else " · mit Spielstand") }
+        if (kind != "save") append("\nWege: " + listOf(way("lan", ways.optBoolean("lan")), way("romm", ways.optBoolean("romm") && !local),
+            way("tunnel", ways.optBoolean("tunnel") && !local)).joinToString(" · ") + (if (local) " (Nur lokal ist an)" else "") +
+            "\nThorBro testet beim Annehmen alle Wege kurz und nimmt den schnellsten.")
+        else append("\nÜbernehmen sichert deinen jetzigen Stand vorher als Backup.")
+        if (g.optBoolean("missing")) append("\nDas Spiel fehlt auf diesem Thor.")
+        if (state == "failed" || state == "wifi") append("\n" + g.optString("error"))
+    }
+    val start: (String) -> Unit = { how -> onAct { wtf.lennard.thorbro.Gifts.accept(ctx, gid, how); null }; onClose() }
+    val options = buildList<Pair<String, () -> Unit>> {
+        when {
+            state == "loading" -> {}
+            state == "done" || state == "expired" -> {}
+            kind == "save" && g.optBoolean("missing") && !g.optBoolean("asked") ->
+                add("Spiel auch anfragen" to { onAct { wtf.lennard.thorbro.Gifts.askGame(ctx, gid) }; onClose() })
+            kind == "save" -> {
+                add("Übernehmen" to { start("take") })
+                add("Als Backup ablegen" to { start("backup") })
+            }
+            else -> add((if (state == "failed" || state == "wifi") "Weiter laden" else "Annehmen & laden") to { start("load") })
+        }
+        if (state == "new" || state == "failed" || state == "wifi") {
+            add("Später" to onClose)
+            add("Ablehnen" to { onAct { wtf.lennard.thorbro.Gifts.decline(ctx, gid); null }; onClose() })
+        }
+    }
+    ConsoleMenu(if (state == "done") "${g.optString("title")} ist da" else "$from schickt dir ${giftWhat(kind)}", text, options = options, onClose = onClose)
 }

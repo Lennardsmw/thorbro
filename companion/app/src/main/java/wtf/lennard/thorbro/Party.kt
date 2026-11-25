@@ -86,6 +86,7 @@ object Party {
     /** what this device tells its friends */
     fun status(ctx: Context): JSONObject {
         val st = JSONObject().put("on", true).put("app", "ThorBro")
+        runCatching { Gifts.rommServer(ctx) }.getOrNull()?.let { st.put("rs", it) } // same RomM server → gifts can load from there
         val p = mine(ctx)
         if (p != null) st.put("party", if (p.optString("leader") == Pals.myId(ctx))
             JSONObject().put("id", p.optString("id")).put("leader", Pals.myId(ctx)).put("open", Pals.partyOpen(ctx)).put("members", p.optJSONArray("members") ?: JSONArray())

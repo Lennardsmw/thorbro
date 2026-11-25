@@ -139,7 +139,7 @@ object SharedSaves {
     }
 
     /** where an emulator looks for a game's save when there is none yet */
-    private fun defaultTarget(system: String, rom: File, name: String): File? {
+    internal fun defaultTarget(system: String, rom: File, name: String): File? {
         val ext = name.substringAfterLast('.', "").lowercase()
         val base = rom.nameWithoutExtension
         return when {

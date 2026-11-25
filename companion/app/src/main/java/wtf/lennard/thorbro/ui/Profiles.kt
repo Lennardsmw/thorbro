@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.PublicOff
 import androidx.compose.material3.Icon
@@ -146,6 +147,7 @@ fun GameSaves(sys: String, path: String, title: String, onClose: () -> Unit) {
     var backupsOpen by remember { mutableStateOf(false) }
     var restorePick by remember { mutableStateOf<JSONObject?>(null) }
     var askPull by remember { mutableStateOf(false) }
+    var sendOpen by remember { mutableStateOf(false) }
     LaunchedEffect(tick) { g = withContext(Dispatchers.IO) { runCatching { GameSave.state(ctx, sys, path) }.getOrElse { JSONObject().put("error", it.message) } } }
     LaunchedEffect(tick) { data = withContext(Dispatchers.IO) { runCatching { SharedSaves.forGame(ctx, sys, path) }.getOrElse { JSONObject().put("error", it.message) } } }
     val first = remember { FocusRequester() }
@@ -196,13 +198,16 @@ fun GameSaves(sys: String, path: String, title: String, onClose: () -> Unit) {
                             }, highlight = cmp == "cloud-newer" || cmp == "cloud-only") { if (gs.has("cloud")) askPull = true }
                         }
                     }
-                    if (cloudOk) item {
+                    item {
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            val pullFirst = cmp == "cloud-newer" || cmp == "cloud-only"
-                            val pull: @Composable () -> Unit = { BigButton("Cloud-Stand aufs Thor holen", Icons.Filled.CloudDownload, primary = pullFirst, enabled = gs.has("cloud")) { askPull = true } }
-                            val push: @Composable () -> Unit = { BigButton("Thor-Stand hochladen", Icons.Filled.CloudUpload, primary = !pullFirst && cmp != "same", enabled = gs.has("device")) {
-                                act("Lädt hoch …") { GameSave.pushCloud(ctx, path) } } }
-                            if (pullFirst) { pull(); push() } else { push(); pull() }
+                            if (cloudOk) {
+                                val pullFirst = cmp == "cloud-newer" || cmp == "cloud-only"
+                                val pull: @Composable () -> Unit = { BigButton("Cloud-Stand aufs Thor holen", Icons.Filled.CloudDownload, primary = pullFirst, enabled = gs.has("cloud")) { askPull = true } }
+                                val push: @Composable () -> Unit = { BigButton("Thor-Stand hochladen", Icons.Filled.CloudUpload, primary = !pullFirst && cmp != "same", enabled = gs.has("device")) {
+                                    act("Lädt hoch …") { GameSave.pushCloud(ctx, path) } } }
+                                if (pullFirst) { pull(); push() } else { push(); pull() }
+                            }
+                            BigButton("An Freund schicken …", Icons.Filled.Send, enabled = gs.has("device")) { sendOpen = true }
                         }
                     }
                     val backups = gs.optJSONArray("backups").objs()
@@ -284,6 +289,7 @@ fun GameSaves(sys: String, path: String, title: String, onClose: () -> Unit) {
             ButtonHints("A" to "Auswählen", "B" to "Zurück")
         }
     }
+    if (sendOpen) SendSheet(sys, path, title, "save") { sendOpen = false; tick++ }
     if (askPull) g?.optJSONObject("cloud")?.let { c ->
         ConsoleMenu("Cloud-Stand holen?", "Stand vom ${stamp(c.optLong("time"))}" + (if (!c.isNull("device")) " (${c.optString("device")})" else "") +
             " ersetzt den auf dem Thor. Der jetzige wird vorher als Backup gesichert.",

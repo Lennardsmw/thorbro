@@ -45,7 +45,17 @@ object DataSaver {
     fun keep(ctx: Context) = Prefs.of(ctx).getInt("saveKeep", 10)
     fun setKeep(ctx: Context, n: Int) = Prefs.of(ctx).edit().putInt("saveKeep", n.coerceIn(1, 100)).apply()
 
+    /** saves from friends are kept as a backup on arrival, without asking (the own save stays live) */
+    fun giftAuto(ctx: Context) = Prefs.of(ctx).getBoolean("giftAuto", false)
+    fun setGiftAuto(ctx: Context, on: Boolean) = Prefs.of(ctx).edit().putBoolean("giftAuto", on).apply()
+
+    /** biggest game loaded from a friend over mobile data ("Mobil sparen"); bigger ones wait for WLAN */
+    val GIFT_MB_CHOICES = listOf(100, 500, 2000, 10000)
+    fun giftMaxMobile(ctx: Context): Long = Prefs.of(ctx).getInt("giftMaxMobileMb", 500).toLong() shl 20
+    fun setGiftMaxMobile(ctx: Context, mb: Int) = Prefs.of(ctx).edit().putInt("giftMaxMobileMb", mb.coerceIn(10, 100_000)).apply()
+
     fun json(ctx: Context): JSONObject = JSONObject().put("mode", mode(ctx).id).put("keep", keep(ctx)).put("auto", RommSync.auto(ctx))
+        .put("giftAuto", giftAuto(ctx)).put("giftMaxMobileMb", giftMaxMobile(ctx) shr 20).put("giftMbChoices", JSONArray(GIFT_MB_CHOICES))
         .put("wifi", SaveWatcher.onWifi(ctx))
         .put("modes", JSONArray(Mode.entries.map { JSONObject().put("id", it.id).put("label", it.label).put("sub", it.sub) }))
         .put("keepChoices", JSONArray(KEEP_CHOICES))

@@ -695,7 +695,7 @@ function openRom(path, sysId) {
           `<tr><td class="muted">${x.switchKind === 'base' ? 'Spiel' : x.switchKind === 'update' ? 'Update ' + esc(x.versionLabel) : 'DLC'}${r.group.oldUpdates.includes(x) ? ' <span class="badge warnbadge">veraltet</span>' : ''}</td><td>${esc(x.file)} <span class="muted">${fmt(x.size)}</span></td><td><button data-romdel="${esc(x.path)}">Löschen</button></td></tr>`).join('')}</table>` : ''}
         <div class="row">
           ${emus && emus.systems[sysId] && (!r.group || r.group.base) ? `<button class="primary" data-play="${esc(r.path)}" data-play-sys="${esc(sysId)}">▶ Auf dem Thor spielen</button>` : ''}
-          ${r.dir || sysId === 'ports' ? '' : `<button data-share-rom="${esc(r.path)}" data-share-sys="${esc(sysId)}">Weitergeben</button>`}
+          ${sysId === 'ports' ? '' : `<button data-send="${esc(r.path)}" data-send-sys="${esc(sysId)}" data-send-kind="game" data-send-title="${esc(r.name || r.file || '')}">Weitergeben</button>`}
           <button data-dir-roms="${esc(folder)}">Im Datei-Tab öffnen</button>
           ${r.dir ? '' : `<a class="btn" href="/api/files/raw?${q({ path: r.path, token })}">Herunterladen</a>`}
           <button data-romdel="${esc(r.path)}">Löschen</button>
@@ -739,7 +739,7 @@ function gameSaveHtml(g) {
   return `<h3>Spielstände${g.multiProfile ? ` <span class="muted">· Profil ${esc(g.profile)}</span>` : ''}${cmp ? `<span class="cmpchip" style="color:${cmp[1]}">${cmp[0]}</span>` : ''}</h3>
     <div class="gsave">${card('Auf dem Thor', g.device, 'Noch kein Spielstand auf dem Thor', g.compare === 'device-newer' || g.compare === 'device-only')}
       ${card('Neuester in RomM', g.cloud, cloudEmpty, pullFirst)}</div>
-    ${cloudOk ? `<div class="row">${pullFirst ? pull + push : push + pull}</div>` : ''}
+    <div class="row">${cloudOk ? (pullFirst ? pull + push : push + pull) : ''}<button data-send-save ${g.device ? '' : 'disabled'}>🎁 An Freund schicken …</button></div>
     <details class="snaps"><summary>Backups · ${b.length ? `${b.length} ältere Stände · ${fmt(b.reduce((a, x) => a + x.size, 0))}` : 'noch keins – entsteht beim nächsten Speichern'}</summary>
       <table class="savetable">${b.map((x) => `<tr><td>${when(x.time)}<div class="muted">${esc(x.reasonLabel)}${g.multiProfile && x.profile ? ' · ' + esc(x.profile) : ''} · ${fmt(x.size)}</div></td>
         <td><button data-gs-restore="${esc(x.path)}" data-gs-time="${esc(when(x.time))}">Zurückholen</button></td></tr>`).join('')}</table>
@@ -773,6 +773,12 @@ async function loadRomSaves(path, sys) {
       : '<div class="sub">Niemand hat für dieses Spiel einen Spielstand geteilt. In RomM beim Spielstand „öffentlich“ setzen, dann taucht er hier auf.</div>'}`}`;
 }
 $('#romDetail').addEventListener('click', async (e) => {
+  const s = e.target.closest('[data-send],[data-send-save]');
+  if (s) {
+    if (s.dataset.send) return openSend(s.dataset.send, s.dataset.sendSys, s.dataset.sendKind, s.dataset.sendTitle);
+    if (romSavesFor) return openSend(romSavesFor.path, romSavesFor.sys, 'save', $('#romDetail h2')?.textContent || '');
+    return;
+  }
   const t = e.target.closest('[data-sv-activate],[data-sv-share],[data-sv-install],[data-gs],[data-gs-restore]');
   if (!t || !romSavesFor) return;
   const { path, sys } = romSavesFor;
@@ -999,14 +1005,6 @@ $('#romDetail').onclick = async (e) => {
   const t = e.target, dlg = $('#romDetail');
   if (t === dlg || t.dataset.close !== undefined) return dlg.close();
   if (t.dataset.play) return play(t.dataset.play, t.dataset.playSys);
-  if (t.dataset.shareRom) {
-    try {
-      const { body } = await api('/api/netplay/host?' + q({ system: t.dataset.shareSys, path: t.dataset.shareRom, share: '1' }), { method: 'POST' });
-      if (body.error) throw new Error(body.error);
-      toast(body.direct ? 'Wird angeboten – der Thor in der Nähe bekommt eine Einladung' : `Wird angeboten · PIN ${body.pin}`);
-    } catch (err) { alert(err.message); }
-    return;
-  }
   try {
     if (t.dataset.dirRoms) { dlg.close(); showTab('files'); await loadFiles(t.dataset.dirRoms); }
     if (t.dataset.romdel && confirm(`${t.dataset.romdel} löschen?`)) {
@@ -1506,7 +1504,11 @@ async function loadDataSaver(set) {
   const { body } = await api('/api/datasaver' + (set ? '?' + q(set) : ''), set ? { method: 'POST' } : {});
   $('#dataModes').innerHTML = body.modes.map((m) => `<button class="prof${m.id === body.mode ? ' active' : ''}" data-dmode="${m.id}" title="${esc(m.sub)}">${esc(m.label)}<div class="muted" style="font-size:12px">${esc(m.sub)}</div></button>`).join('');
   $('#dataKeep').innerHTML = body.keepChoices.map((n) => `<option value="${n}"${n === body.keep ? ' selected' : ''}>${n}</option>`).join('');
+  $('#giftAuto').checked = !!body.giftAuto;
+  $('#giftMax').innerHTML = (body.giftMbChoices || []).map((n) => `<option value="${n}"${n === body.giftMaxMobileMb ? ' selected' : ''}>${n >= 1000 ? n / 1000 + ' GB' : n + ' MB'}</option>`).join('');
 }
+$('#giftAuto').onchange = (e) => loadDataSaver({ giftAuto: e.target.checked ? '1' : '0' });
+$('#giftMax').onchange = (e) => loadDataSaver({ giftMaxMobileMb: e.target.value });
 $('#dataModes').addEventListener('click', (e) => { const b = e.target.closest('[data-dmode]'); if (b) loadDataSaver({ mode: b.dataset.dmode }); });
 $('#dataKeep').onchange = (e) => loadDataSaver({ keep: e.target.value });
 
@@ -1514,19 +1516,54 @@ $('#dataKeep').onchange = (e) => loadDataSaver({ keep: e.target.value });
 let friends = null;
 const ago = (ms) => { if (!ms) return ''; const m = Math.floor((Date.now() - ms) / 60000);
   return m < 2 ? 'gerade eben' : m < 60 ? `vor ${m} Min.` : m < 2880 ? `vor ${Math.floor(m / 60)} Std.` : `vor ${Math.floor(m / 1440)} Tagen`; };
+let gifts = null;
 async function friendsLoad(path = '/api/friends', method = 'GET') {
   try { const { body } = await api(path, { method }); if (body.error) alert(body.error); else friends = body; } catch (e) { if (!(e instanceof AuthError)) console.warn(e); }
+  try { gifts = (await api('/api/gifts')).body; } catch (e) { /* older ThorBro */ }
   renderFriends();
+}
+const giftWhat = (k) => ({ save: 'einen Spielstand', both: 'ein Spiel mit Spielstand' }[k] || 'ein Spiel');
+const WAY = { lan: 'lokal', romm: 'RomM', tunnel: 'Tunnel' };
+function giftHtml(g) {
+  const from = g.from?.name || 'Freund';
+  const live = g.live;
+  const size = g.size || g.save?.size || 0;
+  const ways = g.kind === 'save' ? '' : `<div class="muted">Wege: ${['lan', 'romm', 'tunnel'].map((w) => `${WAY[w]} ${!g.ways?.[w] ? '–' : g.probe?.[w] ? g.probe[w] + ' MB/s' : '✓'}`).join(' · ')}</div>`;
+  let sub, btns = '';
+  if (g.state === 'loading') {
+    const pct = live?.total ? Math.floor(live.done * 100 / live.total) : 0;
+    sub = `von ${esc(from)}${live?.way ? ' · ' + WAY[live.way] : ''}${live?.total ? ` · ${fmt(live.done)} von ${fmt(live.total)}` : ''}<div class="bar"><i style="width:${pct}%"></i></div>`;
+  } else if (g.state === 'done') {
+    sub = `von ${esc(from)} · ${g.result?.save ? 'Spielstand ' + esc(g.result.save) : 'fertig'}`;
+  } else {
+    sub = [esc(g.title), size ? fmt(size) : '', g.kind === 'both' ? 'mit Spielstand' : '', g.missing ? 'Spiel fehlt' : ''].filter(Boolean).join(' · ')
+      + (g.state === 'failed' || g.state === 'wifi' ? `<div class="bad">${esc(g.error || '')}</div>` : '') + ways;
+    if (g.state !== 'expired') {
+      if (g.kind === 'save' && g.missing) btns = g.asked ? '<span class="muted">angefragt</span>' : `<button data-gift="ask" data-gid="${g.gid}">Spiel auch anfragen</button>`;
+      else if (g.kind === 'save') btns = `<button class="primary" data-gift="take" data-gid="${g.gid}">Übernehmen</button><button data-gift="backup" data-gid="${g.gid}">Als Backup</button>`;
+      else btns = `<button class="primary" data-gift="load" data-gid="${g.gid}">${g.state === 'new' ? 'Annehmen & laden' : 'Weiter laden'}</button>`;
+      btns += `<button data-gift="decline" data-gid="${g.gid}" title="ablehnen">✕</button>`;
+    }
+  }
+  const title = g.state === 'loading' ? `Lädt: ${esc(g.title)}` : g.state === 'done' ? `${esc(g.title)} ist da` : `${esc(from)} schickt dir ${giftWhat(g.kind)}`;
+  return `<div class="person gift"><div class="avatar">${esc(from[0].toUpperCase())}</div><div class="grow"><strong>${title}</strong><div class="muted">${sub}</div></div>${btns}</div>`;
 }
 function renderFriends() {
   const f = friends; if (!f) return;
-  const n = f.requests.length + (f.invites || []).length; const b = $('#friendsBadge'); b.hidden = !n; b.textContent = n;
+  const n = f.requests.length + (f.invites || []).length + (gifts?.waiting || 0); const b = $('#friendsBadge'); b.hidden = !n; b.textContent = n;
   const d = $('#friendsDlg'); if (!d.open) return;
   const person = (p, sub, btns) => `<div class="person"><div class="avatar${p.online ? ' on' : ''}">${esc((p.name || '?')[0].toUpperCase())}</div>
     <div class="grow"><strong>${esc(p.name)}</strong><div class="muted">${esc(sub)}</div></div>${btns}</div>`;
   d.innerHTML = `<div class="me"><div class="avatar big">👤</div><div class="grow"><strong style="font-size:19px">${esc(f.me.name)}</strong>
       <div class="muted">ID ${esc(f.me.id.slice(0, 6))}</div></div><button data-fr="name">Name</button></div>
     <div class="row"><button data-fr="party" class="grow">${f.partyOpen ? 'Party: offen' : 'Party: nur Einladung'}</button></div>
+    ${(() => {
+      const inc = (gifts?.incoming || []).filter((g) => g.state !== 'done' || Date.now() - g.at < 86400000);
+      const wants = (gifts?.outgoing || []).flatMap((o) => (o.to || []).filter((t) => t.want).map((t) => ({ o, t })));
+      if (!inc.length && !wants.length) return '';
+      return '<h4>Für dich</h4>' + inc.map(giftHtml).join('') + wants.map(({ o, t }) => person({ name: t.name }, `möchte auch das Spiel: ${o.title}`,
+        `<button class="primary" data-gift="sendwanted" data-gid="${o.gid}" data-id="${esc(t.id)}">Schicken</button>`)).join('');
+    })()}
     ${f.party ? `<h4>${f.party.pending ? 'Party – warte auf den Leiter …' : 'Party (' + f.party.members.length + ')'}</h4>` + f.party.members.map((m) => person({ ...m, online: true },
       [m.me ? 'du' : '', m.id === f.party.leader ? 'Leiter' : ''].filter(Boolean).join(' · '), '')).join('')
       + `<div class="row"><button data-fr="leave">${f.party.leaderMe ? 'Party auflösen' : 'Party verlassen'}</button></div>` : ''}
@@ -1549,7 +1586,29 @@ $('#friendsBtn').onclick = () => {
   friendsLoad('/api/friends/scan', 'POST');
   clearInterval(nearbyTimer); nearbyTimer = setInterval(() => $('#friendsDlg').open ? friendsLoad('/api/friends/scan', 'POST') : clearInterval(nearbyTimer), 15000);
 };
+$('#friendsDlg').addEventListener('click', async (e) => {
+  const t = e.target.closest('[data-gift]'); if (!t) return;
+  const a = t.dataset.gift, gid = t.dataset.gid;
+  try {
+    if (a === 'decline' && !confirm('Geschenk ablehnen?')) return;
+    const act = { take: 'accept?' + q({ gid, how: 'take' }), backup: 'accept?' + q({ gid, how: 'backup' }), load: 'accept?' + q({ gid, how: 'load' }),
+      decline: 'decline?' + q({ gid }), ask: 'ask?' + q({ gid }), sendwanted: 'sendwanted?' + q({ gid, id: t.dataset.id }) }[a];
+    t.disabled = true;
+    const { body } = await api('/api/gifts/' + act, { method: 'POST' });
+    if (body.error) return alert(body.error);
+    if (body.id && !body.done) {
+      toast(a === 'sendwanted' ? 'Wird verschickt …' : 'Wird geladen – Fortschritt hier und oben rechts');
+      friendsLoad();
+      const timer = setInterval(() => $('#friendsDlg').open ? friendsLoad() : clearInterval(timer), 1500);
+      const j = await waitJob(body.id);
+      clearInterval(timer);
+      if (j.error) alert(j.error); else toast(j.result?.done || 'Fertig');
+    }
+  } catch (err) { alert(err.message); }
+  friendsLoad();
+});
 $('#friendsDlg').onclick = async (e) => {
+  if (e.target.closest('[data-gift]')) return;
   const t = e.target.closest('[data-fr]'); if (!t) { if (e.target === $('#friendsDlg')) $('#friendsDlg').close(); return; }
   const a = t.dataset.fr, id = t.dataset.id;
   if (a === 'close') return $('#friendsDlg').close();
@@ -1605,3 +1664,54 @@ async function friendAddOpen() {
 }
 setTimeout(() => friendsLoad(), 1500);
 setInterval(() => { if (document.visibilityState === 'visible') friendsLoad(); }, 30000);
+
+// ---------- Verschicken (Gifts.kt): a save, a game or both to friends; the old nearby hand-over at the bottom ----------
+const KINDS = [['save', 'Nur Spielstand'], ['game', 'Nur Spiel'], ['both', 'Spiel + Spielstand']];
+async function openSend(path, sys, kind, title) {
+  const d = $('#sendDlg');
+  let what = kind, picked = new Set(), routes = null, busy = false, msg = '';
+  const kinds = sys === 'ports' ? KINDS.slice(0, 1) : KINDS;
+  const render = () => {
+    const fr = routes?.friends || [];
+    const names = fr.filter((f) => picked.has(f.id)).map((f) => f.name);
+    d.innerHTML = `<div class="muted">Verschicken</div><h3 style="margin:2px 0 10px">${esc(title || '')}</h3>
+      <div class="row">${kinds.map(([k, l]) => `<button class="${k === what ? 'primary' : ''}" data-sk="${k}">${l}</button>`).join('')}</div>
+      <h4>An wen</h4>
+      ${!routes ? '<div class="muted">Schaue, wer wie erreichbar ist …</div>' : routes.error ? `<div class="bad">${esc(routes.error)}</div>`
+        : !fr.length ? '<div class="muted">Noch keine Freunde – oben rechts im Freunde-Menü hinzufügen.</div>'
+        : fr.map((f) => `<label class="person${picked.has(f.id) ? ' on' : ''}"><input type="checkbox" data-sf="${esc(f.id)}" ${picked.has(f.id) ? 'checked' : ''}>
+          <div class="avatar${f.online ? ' on' : ''}">${esc(f.name[0].toUpperCase())}</div>
+          <div class="grow"><strong>${esc(f.name)}</strong><div class="muted">${f.near ? 'online · im selben Netz' : f.online ? 'online' : 'zuletzt ' + ago(f.seen)}</div></div>
+          <span class="cmpchip">${esc(f.label)}</span></label>`).join('')}
+      ${what === 'game' ? `<div class="person"><div class="grow"><strong>Thor in der Nähe (ohne Freundschaft)</strong><div class="muted">wie bisher: Wi-Fi Direct oder WLAN + PIN</div></div><button data-snear>Anbieten</button></div>` : ''}
+      ${msg ? `<div class="sub">${esc(msg)}</div>` : ''}
+      <div class="row" style="margin-top:14px"><button class="primary grow" data-sgo ${names.length && !busy ? '' : 'disabled'}>${busy ? 'Wird verschickt …' : !names.length ? 'Freunde auswählen'
+        : `An ${names.length <= 2 ? names.join(' & ') : names.length + ' Freunde'} schicken${routes?.size ? ' · ' + fmt(routes.size) : ''}`}</button><button data-sclose>Schließen</button></div>`;
+  };
+  const load = async () => { routes = null; render(); try { routes = (await api('/api/gifts/routes?' + q({ system: sys, path, kind: what }))).body; } catch (e) { routes = { error: e.message }; } render(); };
+  d.onclick = async (e) => {
+    const t = e.target;
+    if (t === d || t.dataset.sclose !== undefined) return d.close();
+    if (t.dataset.sk) { what = t.dataset.sk; return load(); }
+    if (t.dataset.sf) { t.checked ? picked.add(t.dataset.sf) : picked.delete(t.dataset.sf); return render(); }
+    if (t.dataset.snear !== undefined) {
+      try {
+        const { body } = await api('/api/netplay/host?' + q({ system: sys, path, share: '1' }), { method: 'POST' });
+        msg = body.error || (body.direct ? 'Wird angeboten – der Thor in der Nähe bekommt eine Einladung' : `Wird angeboten · PIN ${body.pin}`);
+      } catch (err) { msg = err.message; }
+      return render();
+    }
+    if (t.dataset.sgo !== undefined) {
+      busy = true; msg = 'Bereite vor …'; render();
+      try {
+        const { body } = await api('/api/gifts/send?' + q({ system: sys, path, kind: what, to: [...picked].join(',') }), { method: 'POST' });
+        if (body.error) throw new Error(body.error);
+        const j = await waitJob(body.id, (b) => { if (!b.done) { msg = (b.message || 'Bereite vor') + (b.progress ? ` · ${Math.floor(b.progress * 100)} %` : ''); render(); } });
+        if (j.error) throw new Error(j.error);
+        toast(j.result?.done || 'Verschickt'); d.close(); return;
+      } catch (err) { msg = err.message; }
+      busy = false; render();
+    }
+  };
+  d.showModal(); load();
+}

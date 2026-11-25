@@ -105,7 +105,9 @@
       <div class="row"><input id="profileName" placeholder="Name, z. B. Alex" maxlength="24"><button id="profileAdd">Profil anlegen</button></div></div>
     <div class="panel"><h3>Daten sparen</h3><div class="sub">Wann ThorBro Spielstände von allein mit RomM abgleicht. Backups pro Spiel bleiben immer auf dem Thor.</div>
       <div id="dataModes" class="proflist"></div>
-      <label>Backups pro Spiel behalten <select id="dataKeep"></select></label></div>
+      <label>Backups pro Spiel behalten <select id="dataKeep"></select></label>
+      <label><input type="checkbox" id="giftAuto"> Spielstände von Freunden automatisch als Backup ablegen (dein Stand bleibt aktiv)</label>
+      <label>Spiele von Freunden über Mobilfunk bis <select id="giftMax"></select> – größere warten aufs WLAN</label></div>
     <div class="panel"><h3>Verlauf</h3><div class="sub">Was zuletzt zwischen Thor und RomM passiert ist</div><div id="historyList"></div></div>
     <h3 style="margin:16px 0 6px">Spielstand zurücksetzen</h3>
     <div class="row">
@@ -218,6 +220,7 @@
 <dialog id="profilePick" class="profilepick"></dialog>
 <dialog id="friendsDlg" class="friends"></dialog>
 <dialog id="friendAdd" class="profilepick"></dialog>
+<dialog id="sendDlg" class="profilepick"></dialog>
 <script src="app.js"></script>
 </body>
 </html>

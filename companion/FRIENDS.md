@@ -86,3 +86,32 @@ beim laufenden Spiel `game = {system, title, mode, pin, addrs, azUser?, azConsol
 aus `game.addrs` per HTTP (7330) erreicht, tritt wie bisher bei (ROM vom Leiter, Emulator als Gast). Sonst, bei 3DS/Switch:
 das Spiel wird mit dem eigenen ROM gleichen Namens gestartet (Spieldateien gehen nicht durch den Tunnel), der Raum läuft
 über den Tunnel. RetroArch und PPSSPP gehen nur im gleichen Netz (WLAN, Wi-Fi Direct, NetBird).
+
+## Geschenke (Spielstände und Spiele an Freunde)
+`Gifts.kt` / `GiftWire.kt` (pure JVM, gehört später auch in RomBro). Alles läuft über Pals-Nachrichten, nur zwischen Freunden.
+
+**Nachrichten**
+- `gift {gid, kind: save|game|both, system, title, file, size?, sha1?, packed?, save?: {size, sha1, time, name, profile, att?: {u, k, until}},
+  ways: {lan: ["ip:7330", …], tunnel: bool, romm?: {srv, id}}, tok, exp}` Absender → Freund. `gid` = 8 Byte hex, `exp` = 7 Tage.
+  `tok` (16 Byte base64url) öffnet nur dieses Geschenk. `srv` = Hex(SHA-256("thorbro romm v1 " ‖ RomM-URL klein))[0:8 Byte].
+  ntfy hält Nachrichten 12 h: der Absender schickt `gift` erneut, wenn der Freund wieder online ist und die letzte älter als 11 h ist.
+- `gift-ok {gid, c: [Adressen]}` Empfänger → Absender: möchte den Tunnel. `c` wie bei `knock`.
+- `gift-net {gid, s, c, port, lan}` Absender → Empfänger: Geheimnis (16 Byte) eines eigenen `Tunnel.Host` nur für dieses Geschenk,
+  dessen Adressen, das Ziel `port` (der GiftWire-Server auf 127.0.0.1) und frische LAN-Adressen.
+- `gift-no {gid}` abgelehnt · `gift-done {gid}` angekommen · `gift-want {gid}` Empfänger möchte zum Spielstand auch das Spiel.
+
+**Dateien** (`part` = `save` | `game`; ein Ordner-Spiel wird als unkomprimiertes Zip verschickt, `packed: true`)
+- lokal: `GET http://<lan>/api/gift/<gid>/<part>?k=<tok>` mit `Range: bytes=a-b` (206). Ohne Kopplungscode.
+- RomM: nur wenn `romm.srv` gleich dem eigenen ist; `GET /api/roms/<id>/content/<fs_name>` mit eigenem Login und Range.
+- Tunnel (v2, wie Party-Netz, eigenes Geheimnis): im Tunnel Datagramme `'Q' part(1: 1=save, 2=game) offset(8) count(2)` →
+  bis zu 64 Antworten `'D' part offset(8) Daten(≤1150)`. Der Empfänger fragt Fenster an (wächst bei Antworten, halbiert bei Verlust),
+  fragt Verlorenes nach 700 ms erneut.
+- Spielstand ≤ 15 MB zusätzlich als ntfy-Anhang: `att.u` = URL, Inhalt = nonce(12) ‖ AES-256-GCM(`att.k`, save.zip).
+
+**Laden**: Empfänger testet die erlaubten Wege gleichzeitig mit je 4 MB ab dem ersten fehlenden Byte und nimmt den schnellsten;
+bricht einer ab, macht der nächste an derselben Stelle weiter. Am Ende SHA-1 prüfen. Daten sparen: „Nur lokal“ = nur `lan`;
+„Mobil sparen“ = Spiele über Mobilfunk nur bis `giftMaxMobileMb` (Standard 500 MB).
+
+**Spielstand** = Profil-Paket (`manifest.json` mit den Pfaden des Absenders + Dateien `i` bzw. `i/…`). Der Empfänger schreibt das
+Manifest auf seine eigenen Pfade um (vorhandener Spielstand, sonst wo der Emulator sucht), legt es als Backup „Geschenk von …“ ab und
+setzt es bei „Übernehmen“ ein (der eigene Stand wird vorher gesichert).

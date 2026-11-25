@@ -186,3 +186,11 @@ dialog.friends h4 { margin: 16px 0 6px; color: var(--muted); font-size: 13px; }
 .keycode { font-size: 28px; letter-spacing: 6px; margin: 8px 0; }
 #friendAdd { max-height: calc(100vh - 48px); overflow: auto; }
 .avatar.on { box-shadow: 0 0 0 2px #3fb950; }
+
+/* gifts (Für dich, Verschicken) */
+.person.gift .muted .bar { height: 4px; border-radius: 2px; background: rgba(255,255,255,.15); margin-top: 6px; overflow: hidden; }
+.person.gift .muted .bar i { display: block; height: 100%; background: #fff; }
+.person .bad, #sendDlg .bad { color: #ff8a80; }
+#sendDlg label.person { cursor: pointer; }
+#sendDlg label.person.on { background: rgba(255,255,255,.14); }
+#sendDlg label.person input { width: 18px; height: 18px; }
