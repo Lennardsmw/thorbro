@@ -68,10 +68,10 @@ import wtf.lennard.thorbro.Media
 import wtf.lennard.thorbro.Roms
 import java.io.File
 
-private class Sys(val id: String, val name: String, val roms: List<JSONObject>)
+internal class Sys(val id: String, val name: String, val roms: List<JSONObject>)
 
 /** Switch: one entry per game (base + updates + DLC); everything else as is */
-private fun entries(s: Sys): List<JSONObject> {
+internal fun entries(s: Sys): List<JSONObject> {
     if (s.id != "switch") return s.roms
     return s.roms.groupBy { it.optString("baseId").ifEmpty { it.getString("path") } }.values.map { items ->
         val base = items.firstOrNull { it.optString("switchKind") == "base" } ?: items.first()
@@ -129,7 +129,7 @@ fun GamesScreen() {
 }
 
 @Composable
-private fun cover(sys: String, r: JSONObject, m: JSONObject): File? {
+internal fun cover(sys: String, r: JSONObject, m: JSONObject): File? {
     val ctx = LocalContext.current
     val f by produceState<File?>(null, r.getString("path"), m.optString("cover")) {
         value = withContext(Dispatchers.IO) {
@@ -141,6 +141,7 @@ private fun cover(sys: String, r: JSONObject, m: JSONObject): File? {
     return f
 }
 
+internal fun gameTitle(r: JSONObject, m: JSONObject) = title(r, m)
 private fun title(r: JSONObject, m: JSONObject) = m.optString("title").ifEmpty { r.getString("name").substringBefore(" (").substringBefore(" [") }
 
 @Composable

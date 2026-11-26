@@ -51,12 +51,16 @@ import wtf.lennard.thorbro.Media
 import org.json.JSONObject
 import wtf.lennard.thorbro.Background
 
-/** top right, over every screen: what runs in the background (offload queue, downloads, RomM upload) with n/m */
+/**
+ * The activity drawer, top right over every screen: what runs in the background (offload queue, downloads, RomM upload).
+ * Closed by default; the pill in the top bar sums it up, Select (or a tap on the pill) opens it.
+ */
 @Composable
 fun BackgroundOverlay(modifier: Modifier = Modifier) {
     var items by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
     WhileVisible { while (true) { items = Background.list().objs(); delay(500) } }
-    AnimatedVisibility(items.isNotEmpty(), modifier, enter = fadeIn() + slideInHorizontally { it / 2 }, exit = fadeOut() + slideOutHorizontally { it / 2 }) {
+    if (items.isEmpty() && ActivityUi.open) ActivityUi.open = false
+    AnimatedVisibility(items.isNotEmpty() && (!UiMode.newDesign || ActivityUi.open), modifier, enter = fadeIn() + slideInHorizontally { it / 2 }, exit = fadeOut() + slideOutHorizontally { it / 2 }) {
         Column(Modifier.padding(top = 58.dp, end = 24.dp).width(320.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items.forEach { ActivityCard(it) }
         }

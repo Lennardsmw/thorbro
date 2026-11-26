@@ -243,7 +243,7 @@ private fun localPath(ctx: android.content.Context, sys: String, name: String): 
 
 /** one downloaded (or uploaded) game: cover, name, size, how long it took */
 @Composable
-private fun TransferRow(e: JSONObject) {
+internal fun TransferRow(e: JSONObject) {
     val ctx = LocalContext.current
     val down = e.optString("kind") == "download"
     val romId = e.optInt("romId")

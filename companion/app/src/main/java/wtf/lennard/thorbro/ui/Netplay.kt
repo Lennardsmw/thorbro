@@ -168,7 +168,7 @@ fun rememberDirect(): DirectUi {
     return d
 }
 
-private fun directOn(ctx: android.content.Context, d: DirectUi, scope: kotlinx.coroutines.CoroutineScope, then: String) {
+internal fun directOn(ctx: android.content.Context, d: DirectUi, scope: kotlinx.coroutines.CoroutineScope, then: String) {
     if (!wtf.lennard.thorbro.Direct.permitted(ctx)) {
         (ctx as? android.app.Activity)?.requestPermissions(arrayOf(wtf.lennard.thorbro.Direct.permissionName()), 7)
         return

@@ -315,6 +315,40 @@ object Server {
                     json(withContext(Dispatchers.IO) { Cleanup.removeJunk(ctx) })
                 }
 
+                // ---- debug: screenshot of one display via Shizuku (no tap on the Thor needed) ----
+                // without ?display= it lists the physical display ids (dumpsys SurfaceFlinger --display-id)
+                get("/api/debug/screencap") {
+                    if (denied(ctx)) return@get
+                    if (!Shell.ready()) return@get fail("Shizuku nicht bereit (${Shell.state()})", HttpStatusCode.ServiceUnavailable)
+                    val id = call.request.queryParameters["display"]
+                    if (id.isNullOrEmpty()) {
+                        val list = withContext(Dispatchers.IO) { Shell.out("dumpsys", "SurfaceFlinger", "--display-id") }.orEmpty()
+                        return@get json(JSONObject().put("displays", JSONArray(list.lines().filter { it.isNotBlank() })))
+                    }
+                    if (!id.all { it.isDigit() }) return@get fail("display muss eine Zahl sein", HttpStatusCode.BadRequest)
+                    val png = withContext(Dispatchers.IO) { Shell.bytes("screencap", "-p", "-d", id) }
+                        ?: return@get fail("screencap fehlgeschlagen", HttpStatusCode.InternalServerError)
+                    call.response.header(HttpHeaders.CacheControl, "no-store")
+                    call.respondBytes(png, ContentType.Image.PNG)
+                }
+
+                // ---- debug: jump to a page (screenshots of every page without touching the Thor) ----
+                // ?screen=GAMES|STORE|…|start &folder=<console id> &design=new|old &friends=0|1 &gifts=0|1 &focus=friends
+                get("/api/debug/nav") {
+                    if (denied(ctx)) return@get
+                    val q = call.request.queryParameters
+                    withContext(Dispatchers.Main) {
+                        q["design"]?.let { wtf.lennard.thorbro.ui.UiMode.set(ctx, it != "old") }
+                        q["friends"]?.let { wtf.lennard.thorbro.ui.FriendsUi.open = it == "1" }
+                        q["gifts"]?.let { wtf.lennard.thorbro.ui.FriendsUi.gifts = it == "1" }
+                        q["focus"]?.let { wtf.lennard.thorbro.ui.SystemNav.focus.value = it }
+                        q["screen"]?.let { s -> wtf.lennard.thorbro.ui.Nav.go(if (s == "start") null else wtf.lennard.thorbro.ui.Screen.valueOf(s)) }
+                        wtf.lennard.thorbro.ui.NewGamesNav.folder.value = q["folder"]
+                        wtf.lennard.thorbro.ui.StoreNav.query.value = q["q"] ?: ""
+                    }
+                    json(JSONObject().put("ok", true))
+                }
+
                 // ---- screen mirror ----
                 get("/api/screen") {
                     if (denied(ctx)) return@get

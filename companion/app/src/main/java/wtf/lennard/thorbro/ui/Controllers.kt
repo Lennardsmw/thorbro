@@ -133,7 +133,7 @@ object Pads {
     }
 }
 
-private val buttons = listOf(
+internal val padButtons = listOf(
     KeyEvent.KEYCODE_BUTTON_A to "A", KeyEvent.KEYCODE_BUTTON_B to "B", KeyEvent.KEYCODE_BUTTON_X to "X", KeyEvent.KEYCODE_BUTTON_Y to "Y",
     KeyEvent.KEYCODE_BUTTON_L1 to "L1", KeyEvent.KEYCODE_BUTTON_R1 to "R1", KeyEvent.KEYCODE_BUTTON_L2 to "L2", KeyEvent.KEYCODE_BUTTON_R2 to "R2",
     KeyEvent.KEYCODE_BUTTON_THUMBL to "L3", KeyEvent.KEYCODE_BUTTON_THUMBR to "R3", KeyEvent.KEYCODE_BUTTON_START to "Start",
@@ -220,7 +220,7 @@ fun ControllerPanels(panel: String) {
                 Label("Tastentest – einfach drücken" + if (Pads.lastFrom.isNotEmpty()) " · ${Pads.lastFrom}" else "")
                 Spacer(Modifier.height(8.dp))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    buttons.forEach { (code, label) ->
+                    padButtons.forEach { (code, label) ->
                         val on = Pads.pressed[code] == true
                         Box(Modifier.clip(RoundedCornerShape(10.dp)).background(if (on) Accent else Panel).padding(horizontal = 12.dp, vertical = 8.dp)) {
                             Text(label, fontSize = 15.sp, color = if (on) OnAccent else Ink)
@@ -303,7 +303,7 @@ fun ControllerPanels(panel: String) {
 }
 
 @Composable
-private fun Stick(label: String, x: Float, y: Float) {
+internal fun Stick(label: String, x: Float, y: Float) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.size(80.dp).clip(CircleShape).background(Bg), contentAlignment = Alignment.Center) {
             Box(Modifier.offset((x * 30).dp, (y * 30).dp).size(18.dp).clip(CircleShape).background(Accent))
@@ -313,7 +313,7 @@ private fun Stick(label: String, x: Float, y: Float) {
 }
 
 @Composable
-private fun Trigger(label: String, v: Float) {
+internal fun Trigger(label: String, v: Float) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.width(28.dp))
         Box(Modifier.width(120.dp).height(10.dp).clip(RoundedCornerShape(5.dp)).background(Bg)) {
@@ -384,9 +384,9 @@ private fun LedCard(tick: Int, changed: () -> Unit) {
 /** which part of the controller page is open (null = overview); B goes back to the overview */
 object ControllerNav { val panel = mutableStateOf<String?>(null) }
 
-private class LivePad(val id: Int, val name: String, val model: wtf.lennard.thorbro.PadModel, val battery: Float, val slot: Int)
+internal class LivePad(val id: Int, val name: String, val model: wtf.lennard.thorbro.PadModel, val battery: Float, val slot: Int)
 
-private fun livePads(ctx: Context): List<LivePad> {
+internal fun livePads(ctx: Context): List<LivePad> {
     val slots = wtf.lennard.thorbro.Players.assigned(ctx).map { it?.optString("descriptor") }
     return InputDevice.getDeviceIds().toList().mapNotNull { id: Int -> InputDevice.getDevice(id) }
         .filter { d -> !d.isVirtual && (d.sources and InputDevice.SOURCE_GAMEPAD == InputDevice.SOURCE_GAMEPAD) }
@@ -406,7 +406,7 @@ private fun PlayerDots(slot: Int) {
 }
 
 @Composable
-private fun Battery(level: Float) {
+internal fun Battery(level: Float) {
     if (level.isNaN()) return
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(28.dp, 13.dp).border(1.5.dp, androidx.compose.ui.graphics.Color(0xFF9AA0AE), RoundedCornerShape(3.dp)).padding(2.dp)) {
@@ -529,7 +529,7 @@ private fun PadOnStage(p: LivePad) {
 
 /** four small player lamps; the controller's slot is lit */
 @Composable
-private fun PlayerLights(slot: Int) {
+internal fun PlayerLights(slot: Int) {
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
         for (i in 1..4) {
             val on = i <= slot && slot > 0 && (i == slot)
@@ -542,7 +542,7 @@ private fun PlayerLights(slot: Int) {
 
 /** "Reihenfolge ändern": four places that fill as players press L + R */
 @Composable
-private fun OrderScreen(pads: List<LivePad>) {
+internal fun OrderScreen(pads: List<LivePad>) {
     val done = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(Unit) { delay(200); runCatching { done.requestFocus() } }
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {

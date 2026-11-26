@@ -86,7 +86,8 @@ import java.net.NetworkInterface
 
 /** Native ThorBro on the device: gamepad first, only what matters. */
 class ThorActivity : ComponentActivity() {
-    private val screen = androidx.compose.runtime.mutableStateOf<Screen?>(null)
+    // shared with the new design's navigation (Nav); the old design just sets it
+    private val screen = Nav.screen
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -98,8 +99,9 @@ class ThorActivity : ComponentActivity() {
         immersive(window)
         // console icons from RomM are SVG
         coil3.SingletonImageLoader.setSafe { c -> coil3.ImageLoader.Builder(c).components { add(coil3.svg.SvgDecoder.Factory()) }.build() }
+        UiMode.load(this)
         setContent { ThorTheme { Box(Modifier.fillMaxSize()) {
-            Root(screen.value) { screen.value = it }
+            if (UiMode.newDesign) NewRoot(screen.value) else Root(screen.value) { screen.value = it }
             BackgroundOverlay(Modifier.align(Alignment.TopEnd))
             FriendsPanel()
         } } }
@@ -120,6 +122,7 @@ class ThorActivity : ComponentActivity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         // the live tester and player assignment only matter on the controller page
         if (screen.value == Screen.CONTROLLER) Pads.onKey(event)
+        if (UiMode.newDesign && event.action == KeyEvent.ACTION_DOWN && openDialogs <= 0 && newNavKey(event.keyCode, screen.value)) return true
         if (event.action == KeyEvent.ACTION_DOWN) when (event.keyCode) {
             KeyEvent.KEYCODE_BUTTON_B, KeyEvent.KEYCODE_BACK -> if (openDialogs <= 0) {
                 // on the start screen B does nothing (a console does not quit with B); only the system back gesture leaves
@@ -254,6 +257,7 @@ private fun SettingsScreen() {
                     androidx.compose.material.icons.Icons.Filled.Palette, accent = Theme.p.id == t.id) { Theme.set(ctx, t.id) }
             }
         }
+        item { ConsoleTile("Neues Design", "aus · antippen zum Einschalten", androidx.compose.material.icons.Icons.Filled.Autorenew) { UiMode.set(ctx, true); Nav.go(Screen.SETTINGS) } }
         header("Daten sparen", "wann ThorBro Spielstände und Spiele übers Netz bewegt (RomM, Freunde)")
         val mode = dataTick.let { wtf.lennard.thorbro.DataSaver.mode(ctx) }
         wtf.lennard.thorbro.DataSaver.Mode.entries.forEach { m ->
