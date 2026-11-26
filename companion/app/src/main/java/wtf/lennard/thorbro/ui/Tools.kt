@@ -212,7 +212,7 @@ fun DriversScreen() {
         o.optJSONArray("sources").objs().forEach { src ->
             item(key = "src-" + src.optString("name")) {
                 SettingsGroup(src.optString("name") + (src.optString("error").ifEmpty { src.optString("note") }.takeIf { it.isNotEmpty() }?.let { " · $it" } ?: "")) {
-                    src.optJSONArray("releases").objs().take(3).flatMap { r -> r.optJSONArray("assets").objs().map { r to it } }.take(6).forEach { (r, a) ->
+                    src.optJSONArray("releases").objs().take(4).flatMap { r -> r.optJSONArray("assets").objs().map { r to it } }.take(8).forEach { (r, a) ->
                         val name = a.optString("name")
                         val p = progress[name]
                         // the full name, wrapped if needed – never cut off

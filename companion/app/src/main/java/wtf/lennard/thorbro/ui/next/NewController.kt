@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -53,7 +52,7 @@ import wtf.lennard.thorbro.PadModel
 import wtf.lennard.thorbro.Players
 
 /**
- * System › Controller: the four player places as cards (who is P1–P4, assign with A), a live tester right below,
+ * System › Controller: the four player places as cards (who is P1–P4, assign with A), a live view of the pressed buttons and sticks right below,
  * the rarer things (pairing, LEDs, L+R order, Thor as gamepad) as one row of buttons. They open the old panels.
  */
 @OptIn(ExperimentalLayoutApi::class)
@@ -87,21 +86,17 @@ fun ControllerScreenNew() {
                 }
             }
         }
-        // live tester: just press
+        // live view: the pad that was touched last, what is held right now, both sticks and triggers
+        val src = pads.firstOrNull { it.name == Pads.lastFrom } ?: pads.firstOrNull { it.model != PadModel.THOR } ?: pads.firstOrNull()
+        val held = Pads.held()
         Row(Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(20.dp)).background(GlassFill).border(1.dp, GlassLine, RoundedCornerShape(20.dp)).padding(16.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-            Column(Modifier.weight(1f)) {
-                Text("Tastentest" + if (Pads.lastFrom.isNotEmpty()) " · ${Pads.lastFrom}" else " · einfach drücken", fontSize = 13.sp, color = Muted,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.height(8.dp))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    padButtons.forEach { (code, label) ->
-                        val on = Pads.pressed[code] == true
-                        Box(Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) Accent else Panel).padding(horizontal = 10.dp, vertical = 5.dp)) {
-                            Text(label, fontSize = 13.sp, color = if (on) OnAccent else Color.White)
-                        }
-                    }
-                }
+            if (src != null) PadArt(src.model, Modifier.weight(0.8f).fillMaxHeight())
+            Column(Modifier.weight(1.2f)) {
+                Text(src?.name ?: "Kein Controller", fontSize = 13.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(6.dp))
+                Text(if (held.isEmpty()) "Taste drücken …" else held.joinToString(" + "), fontSize = if (held.isEmpty()) 18.sp else 28.sp,
+                    fontWeight = FontWeight.Bold, color = if (held.isEmpty()) Color(0x66FFFFFF) else Accent, maxLines = 2)
             }
             Stick("Links", Pads.lx, Pads.ly)
             Stick("Rechts", Pads.rx, Pads.ry)

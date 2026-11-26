@@ -55,6 +55,7 @@ function showTab(name) {
   if (name === 'netplay') { loadNetplay(); loadDirect(); }
   if (name === 'store') loadStore(false);
   if (name === 'drivers') loadDrivers(false);
+  if (name === 'controller') startPads();
   if (name === 'files') loadFiles(currentDir);
   if (name === 'device') loadDevice();
 }
@@ -1545,6 +1546,23 @@ $('#dxStart').onclick = async () => {
   try { const { body } = await api('/api/direct/start', { method: 'POST' }); if (body.error) alert(body.error); showDirect(body); } catch (err) { alert(err.message); }
 };
 $('#dxStop').onclick = async () => { try { showDirect((await api('/api/direct/stop', { method: 'POST' })).body); } catch (err) { alert(err.message); } };
+
+// ---------- controllers: player places + live pressed buttons ----------
+let padTimer = null;
+async function pollPads() {
+  if ($('#controller').hidden) { padTimer = null; return; }
+  try {
+    const [pl, live] = await Promise.all([api('/api/players'), api('/api/pads/live')]);
+    $('#padPlayers').innerHTML = pl.body.players.map((p) => `<div class="row"><strong>P${p.slot}</strong>
+      <span class="grow">${p.name ? esc(p.name) : '<span class="muted">frei</span>'}</span>
+      ${p.name ? (p.connected ? '<span class="ok">verbunden</span>' : '<span class="muted">nicht verbunden</span>') : ''}</div>`).join('');
+    const l = live.body, st = (v) => `${Math.round(v[0] * 100)} / ${Math.round(v[1] * 100)}`;
+    $('#padLive').innerHTML = `<div><strong style="font-size:1.6em">${l.held.length ? esc(l.held.join(' + ')) : '<span class="muted">Taste drücken …</span>'}</strong></div>
+      <div class="muted">${l.from ? esc(l.from) + ' · ' : ''}Stick links ${st(l.left)} · rechts ${st(l.right)} · L2 ${Math.round(l.lt * 100)} % · R2 ${Math.round(l.rt * 100)} %</div>`;
+  } catch (err) { $('#padLive').textContent = 'Fehler: ' + err.message; }
+  padTimer = setTimeout(pollPads, 500);
+}
+function startPads() { if (!padTimer) pollPads(); }
 
 // ---------- GPU drivers ----------
 let drv = null;
