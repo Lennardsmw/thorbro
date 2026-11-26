@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Gamepad
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
@@ -129,6 +130,7 @@ enum class Screen(val label: String, val icon: ImageVector) {
     STREAM("Streaming", Icons.Filled.Cast),
     NETPLAY("Multiplayer", Icons.Filled.Groups),
     DRIVERS("Treiber", Icons.Filled.Memory),
+    TRANSFERS("Downloads", Icons.Filled.Download),
     SETTINGS("Einstellungen", Icons.Filled.Settings),
 }
 
@@ -178,9 +180,19 @@ object BottomStatus {
     }
 }
 
+/** the running download / upload as one line for the bottom bar (polled by every hint bar) */
+object TransferLine { var text by androidx.compose.runtime.mutableStateOf<Pair<String, Float>?>(null) }
+
 @Composable
 fun ButtonHints(vararg hints: Pair<String, String>) {
+    val ctx = LocalContext.current
+    WhileVisible { while (true) { TransferLine.text = withContext(Dispatchers.IO) { wtf.lennard.thorbro.TransferQueue.line(ctx) }; delay(1000) } }
     Box(Modifier.fillMaxWidth().background(Theme.p.hintBar).padding(horizontal = 32.dp, vertical = 10.dp)) {
+        val transfer = TransferLine.text
+        if (BottomStatus.text == null && transfer != null) Row(Modifier.align(Alignment.CenterStart).fillMaxWidth(0.55f), verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.material3.CircularProgressIndicator(progress = { transfer.second }, modifier = Modifier.size(18.dp), strokeWidth = 2.5.dp, color = Ink, trackColor = Soft)
+            Text("  ${transfer.first}", fontSize = 14.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        }
         BottomStatus.text?.let { t -> // e.g. "Verbinde mit Thor-8b8e …" while a job runs, then its result for a moment
             Row(Modifier.align(Alignment.CenterStart).fillMaxWidth(0.62f), verticalAlignment = Alignment.CenterVertically) {
                 val p = BottomStatus.progress

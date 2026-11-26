@@ -28,6 +28,9 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.WatchLater
+import kotlinx.coroutines.launch
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
@@ -69,6 +72,31 @@ import java.io.File
 /** the search of the new Store; B clears it */
 object StoreNav { val query = mutableStateOf("") }
 
+/** the transfer queue as seen by the store: romId → entry (state, progress, transfer); polled while the store is open */
+object StoreQueue {
+    var byRom by mutableStateOf<Map<Int, JSONObject>>(emptyMap())
+    var count by mutableIntStateOf(0)
+    suspend fun poll(ctx: android.content.Context) {
+        val l = withContext(Dispatchers.IO) { wtf.lennard.thorbro.TransferQueue.list(ctx).objs() }
+        byRom = l.filter { it.optString("kind") == "download" }.associateBy { it.optInt("romId") }
+        count = l.size
+    }
+}
+
+/** what a store game is doing: null = nothing; else (short text, progress or null) */
+private fun storeState(id: Int): Pair<String, Float?>? {
+    val q = StoreQueue.byRom[id]
+    val job = Library.downloads[id]
+    return when {
+        q?.optString("state") == "running" -> "${(q.optDouble("progress", 0.0) * 100).toInt()} %" + (q.optString("transfer").substringAfter("noch ", "").takeIf { it.isNotEmpty() && q.has("transfer") }?.let { " · noch $it" } ?: "") to q.optDouble("progress", 0.0).toFloat()
+        q?.optString("state") == "waiting" -> "wartet" to 0f
+        q?.optString("state") == "later" -> "für später" to null
+        q?.optString("state") == "error" -> "Fehler" to null
+        job?.done == true && job.error == null -> "auf dem Thor ✓" to null
+        else -> null
+    }
+}
+
 private class StoreGame(val g: JSONObject, val sys: String, val sysName: String) {
     val id get() = g.optInt("id")
     val name: String get() = displayTitle(g.optString("name"))
@@ -98,7 +126,7 @@ fun StoreScreenNew() {
         data = withContext(Dispatchers.IO) { runCatching { Library.store(ctx, refresh) }.getOrElse { JSONObject().put("error", it.message) } }
         refresh = false
     }
-    WhileVisible { while (true) { delay(500); if (Library.downloads.values.any { !it.done }) frame++ } }
+    WhileVisible { while (true) { StoreQueue.poll(ctx); frame++; delay(700) } }
     val free = remember(frame / 20, tick) { runCatching { Storage.free(Library.romsRoot(ctx)) }.getOrDefault(-1L) }
 
     val d = data
@@ -124,16 +152,11 @@ fun StoreScreenNew() {
     /** one game: cover (or the console icon + title), size or progress; [badge] = the console badge on the cover (search) */
     @Composable
     fun tile(s: StoreGame, mod: Modifier, badge: Boolean) {
-        val job = Library.downloads[s.id]
-        val sub = when {
-            job == null -> fmtBytes(s.size)
-            job.error != null -> "Fehler"
-            job.done -> "auf dem Thor ✓"
-            else -> "${(job.progress * 100).toInt()} %"
-        }
+        // reads StoreQueue (state) → this tile redraws by itself while its download runs
+        val st = storeState(s.id)
         val img = storeCover(s)
-        ArtTile(s.name, sub, img, mod, progress = job?.takeIf { !it.done }?.progress?.toFloat(),
-            badge = if (badge || img == null) s.sys else null, hint = if (job?.done == true) "Details" else "Laden") { pick = s }
+        ArtTile(s.name, st?.first ?: fmtBytes(s.size), img, mod, progress = st?.second,
+            badge = if (badge || img == null) s.sys else null, hint = if (st == null) "Laden" else "Details") { pick = s }
     }
 
     // search, reload and the free space: part of the list, so they scroll away with it
@@ -142,6 +165,8 @@ fun StoreScreenNew() {
         horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         BigButton(if (q.isEmpty()) "Suchen" else "„$q“", Icons.Filled.Search, modifier = Modifier.width(240.dp).focusRequester(first).hintA("Suchen")) { searching = true }
         BigButton("Neu laden", Icons.Filled.Refresh) { refresh = true; tick++ }
+        BigButton(if (StoreQueue.count > 0) "Downloads · ${StoreQueue.count}" else "Downloads", Icons.Filled.CloudDownload,
+            modifier = Modifier.hintA("Öffnen")) { Nav.go(Screen.TRANSFERS) }
         Spacer(Modifier.weight(1f))
         if (free >= 0) Text("${fmtBytes(free)} frei", fontSize = 15.sp, color = Muted)
     }
@@ -217,6 +242,7 @@ private fun Banner(s: StoreGame, free: Long, onOpen: () -> Unit) {
 @Composable
 private fun StoreDetail(s: StoreGame, free: Long, @Suppress("UNUSED_PARAMETER") frame: Int, onClose: () -> Unit) {
     val ctx = LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     val img = storeCover(s)
     val job = Library.downloads[s.id]
     val fits = !(free in 0 until s.size)
@@ -235,7 +261,7 @@ private fun StoreDetail(s: StoreGame, free: Long, @Suppress("UNUSED_PARAMETER") 
                     if (img != null) Img(img, 900, Modifier.fillMaxSize(), ContentScale.Crop)
                     else ConsoleIcon(s.sys, 140.dp)
                 }
-                Column(Modifier.weight(1f)) {
+                Column(Modifier.weight(1f).verticalScroll(androidx.compose.foundation.rememberScrollState())) {
                     Text(s.sysName, fontSize = 16.sp, color = Muted, maxLines = 1)
                     Text(s.name, fontSize = 38.sp, lineHeight = 42.sp, fontWeight = FontWeight.Bold, maxLines = 3, overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(vertical = 8.dp))
@@ -244,19 +270,42 @@ private fun StoreDetail(s: StoreGame, free: Long, @Suppress("UNUSED_PARAMETER") 
                         else "Passt nicht · es fehlen ${fmtBytes(s.size - free)}", fontSize = 16.sp, color = if (fits) Ok else Bad,
                         modifier = Modifier.padding(top = 2.dp))
                     Spacer(Modifier.height(28.dp))
-                    val running = job != null && !job.done
-                    val done = job?.done == true && job.error == null
+                    val q = StoreQueue.byRom[s.id]
+                    val state = q?.optString("state")
+                    val running = state == "running"
+                    val waiting = state == "waiting"
+                    val done = q == null && job?.done == true && job.error == null
+                    val p = q?.optDouble("progress", 0.0)?.toFloat() ?: 0f
+                    fun add(later: Boolean) = scope.launch {
+                        withContext(Dispatchers.IO) { wtf.lennard.thorbro.TransferQueue.addDownload(ctx, s.id, s.name, s.size, s.sys, later) }
+                        StoreQueue.poll(ctx)
+                    }
                     BigButton(when {
-                        running -> "Lädt … ${(job!!.progress * 100).toInt()} %"
+                        running -> "Lädt … ${(p * 100).toInt()} %"
+                        waiting -> "In der Warteschlange"
                         done -> "Auf dem Thor"
                         else -> "Laden · ${fmtBytes(s.size)}"
-                    }, if (done) Icons.Filled.CheckCircle else Icons.Filled.CloudDownload, primary = true, enabled = fits && !running && !done,
-                        modifier = Modifier.width(320.dp).focusRequester(first).hintA("Laden")) { Library.download(ctx, s.id) }
-                    if (running) LinearProgressIndicator(progress = { job!!.progress.toFloat() }, modifier = Modifier.width(320.dp).padding(top = 10.dp).height(6.dp).clip(RoundedCornerShape(3.dp)),
-                        color = Accent, trackColor = Soft)
-                    job?.error?.let { Text("Letzter Versuch: $it", color = Bad, fontSize = 14.sp, maxLines = 2, modifier = Modifier.padding(top = 10.dp)) }
+                    }, if (done) Icons.Filled.CheckCircle else Icons.Filled.CloudDownload, primary = true, enabled = fits && !running && !waiting && !done,
+                        modifier = Modifier.width(320.dp).focusRequester(first).hintA("Laden")) { add(false) }
+                    if (running) {
+                        LinearProgressIndicator(progress = { p }, modifier = Modifier.width(320.dp).padding(top = 10.dp).height(6.dp).clip(RoundedCornerShape(3.dp)),
+                            color = Accent, trackColor = Soft)
+                        q?.optString("transfer")?.takeIf { q.has("transfer") && it.isNotEmpty() }?.let {
+                            Text(it, color = Muted, fontSize = 14.sp, maxLines = 1, modifier = Modifier.padding(top = 6.dp))
+                        }
+                    }
+                    if (state == "error") Text("Letzter Versuch: ${q.optString("error")}", color = Bad, fontSize = 14.sp, maxLines = 2, modifier = Modifier.padding(top = 10.dp))
                     if (done) Text("Zu finden unter Spiele › ${s.sysName}", color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 10.dp))
                     Spacer(Modifier.height(12.dp))
+                    if (q == null && !done) {
+                        BigButton("Für später merken", Icons.Filled.WatchLater, modifier = Modifier.width(320.dp).hintA("Merken")) { add(true) }
+                        Spacer(Modifier.height(12.dp))
+                    } else if (state == "later" || state == "error") {
+                        BigButton("Jetzt laden", Icons.Filled.CloudDownload, modifier = Modifier.width(320.dp)) {
+                            scope.launch { withContext(Dispatchers.IO) { wtf.lennard.thorbro.TransferQueue.start(ctx, q.optString("id")) }; StoreQueue.poll(ctx) }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                    }
                     BigButton("Zurück", Icons.Filled.ArrowBack, modifier = Modifier.width(320.dp)) { onClose() }
                 }
             }

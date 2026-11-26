@@ -200,12 +200,12 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
     val paths = remember(group) { group.map { it.getString("path") }.toSet() }
     var upJob by remember { mutableStateOf(wtf.lennard.thorbro.RommSync.current?.takeIf { !it.done && it.file in paths }) }
     var upLabel by remember { mutableStateOf("") }
+    var upQueued by remember { mutableStateOf(false) }
     var uploaded by remember(lib) { mutableStateOf(lib?.optBoolean("uploaded") == true) }
     upJob?.let { j ->
         LaunchedEffect(j) {
             while (!j.done) {
                 upLabel = "Lädt hoch … ${(j.progress * 100).toInt()} %"
-                msg = listOfNotNull(j.message.ifEmpty { null }, j.transfer()).joinToString(" · ")
                 kotlinx.coroutines.delay(500)
             }
             val res = j.result
@@ -246,17 +246,20 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
             val queued = Background.isQueued(r.getString("path"))
             if (sys != "ports" && lib != null && !queued) add(Triple(if (lib.optBoolean("inRomm")) "Auslagern" else "Hochladen + auslagern", Icons.Filled.CloudUpload, { confirm = true }))
             if (queued) add(Triple("Wird ausgelagert …", Icons.Filled.CloudUpload, {}))
-            if (sys != "ports" && lib != null && !lib.optBoolean("inRomm") && !queued) when {
-                upJob != null -> add(Triple(upLabel.ifEmpty { "Lädt hoch …" }, Icons.Filled.CloudUpload, {}))
-                uploaded -> add(Triple("In RomM hochgeladen ✓", Icons.Filled.CloudUpload, {}))
-                else -> add(Triple("Zu RomM hochladen", Icons.Filled.CloudUpload, {
-                    msg = "Verbinde mit RomM …"
-                    scope.launch {
-                        runCatching { withContext(Dispatchers.IO) { wtf.lennard.thorbro.RommSync.uploadGame(ctx, paths) } }
-                            .onSuccess { j -> if (j.name == "Zu RomM hochladen") upJob = j else msg = "RomM-Abgleich läuft schon – Fortschritt oben rechts" }
-                            .onFailure { msg = it.message ?: "Fehler" }
-                    }
-                }))
+            // to RomM: through the transfer queue (one after another, survives a restart); progress shows in the bottom bar
+            if (sys != "ports" && lib != null && !lib.optBoolean("inRomm") && !queued) {
+                val inQueue = upQueued || wtf.lennard.thorbro.TransferQueue.isQueuedPath(ctx, r.getString("path"))
+                when {
+                    uploaded -> add(Triple("In RomM ✓", Icons.Filled.CloudUpload, {}))
+                    inQueue -> add(Triple("Wird hochgeladen", Icons.Filled.CloudUpload, { Nav.go(Screen.TRANSFERS); onClose() }))
+                    else -> add(Triple("Zu RomM hochladen", Icons.Filled.CloudUpload, {
+                        scope.launch {
+                            withContext(Dispatchers.IO) { wtf.lennard.thorbro.TransferQueue.addUpload(ctx, paths, title(r, m), size, sys) }
+                            upQueued = true
+                            BottomStatus.done("${title(r, m)}: in der Warteschlange – Fortschritt unten", false, scope)
+                        }
+                    }))
+                }
             }
             add(Triple("Zurück", Icons.Filled.ArrowBack, onClose))
         }

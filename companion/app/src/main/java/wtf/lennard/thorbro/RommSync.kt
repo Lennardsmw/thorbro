@@ -357,13 +357,19 @@ object RommSync {
      * folders take the newest save of the slot, files only saves with the ROM's or the file's base name and a save extension
      */
     internal fun cloudNewest(ctx: Context, romId: Int, rom: JSONObject, s: SaveItem?): JSONObject? {
-        val slot = Profiles.slot(ctx, Profiles.owner(ctx, rom.optString("path")))
-        val all = Romm.listSaves(ctx, romId).filter { Romm.slotOf(it) == slot }
+        val owner = Profiles.owner(ctx, rom.optString("path"))
+        val slot = Profiles.slot(ctx, owner)
+        val saves = Romm.listSaves(ctx, romId)
+        // the first profile also sees saves without a slot (RomBro on the Mac, RomM's web upload) – they are this game's saves too
+        val all = saves.filter { Romm.slotOf(it) == slot }.ifEmpty {
+            if (owner == Profiles.MAIN) saves.filter { Romm.slotOf(it) == null } else emptyList()
+        }
         if (s != null && s.isFolder) return all.maxByOrNull { remoteTime(it) }
         val romBase = rom.optString("file").substringBeforeLast('.').lowercase()
         val saveBase = s?.file?.name?.substringBeforeLast('.')?.lowercase() ?: romBase
         val files = all.filter { r -> remoteBaseExt(r)?.first?.let { it == romBase || it == saveBase } == true }
-        return (files.ifEmpty { if (s == null) all else emptyList() }).maxByOrNull { remoteTime(it) }
+        // the list is already this game's (per RomM id): if no name matches (GameCube .gci / memory cards, other names), the newest one counts
+        return files.ifEmpty { all }.maxByOrNull { remoteTime(it) }
     }
 
     private val saveExtOnly = Regex("(?i)^(sav|srm|dsv|eep|fla|sra|mpk|mcr)$")

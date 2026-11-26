@@ -33,6 +33,7 @@ class ThorService : Service() {
             val data = intent.getParcelableExtra<Intent>("data")
             if (data != null) runCatching { Screen.start(applicationContext, intent.getIntExtra("code", 0), data) }
         }
+        TransferQueue.resume(applicationContext) // queued downloads / uploads go on after a restart
         if (server == null) {
             val s = Server.create(applicationContext, PORT)
             server = s

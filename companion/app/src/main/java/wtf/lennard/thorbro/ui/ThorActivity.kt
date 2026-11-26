@@ -185,6 +185,7 @@ private fun Root(screen: Screen?, open: (Screen?) -> Unit) {
                     Screen.STREAM -> StreamScreen()
                     Screen.NETPLAY -> NetplayScreen()
                     Screen.DRIVERS -> DriversScreen()
+                    Screen.TRANSFERS -> TransfersScreen()
                 }
             }
             ButtonHints("A" to "Auswählen", "B" to "Zurück")

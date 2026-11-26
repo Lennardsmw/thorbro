@@ -67,7 +67,7 @@ import java.util.Locale
 enum class Area(val label: String, val icon: ImageVector, val pages: List<Screen?>) {
     START("Start", Icons.Filled.Home, listOf(null)),
     GAMES("Spiele", Icons.Filled.ViewModule, listOf(Screen.GAMES)),
-    STORE("Store", Icons.Filled.Storefront, listOf(Screen.STORE)),
+    STORE("Store", Icons.Filled.Storefront, listOf(Screen.STORE, Screen.TRANSFERS)),
     TOGETHER("Zusammen", Icons.Filled.Groups, listOf(Screen.NETPLAY)),
     // Sync (RomM, Spielstände, Profile) is part of System: five tabs, the store gets its own
     SYSTEM("System", Icons.Filled.Settings, listOf(Screen.SETTINGS, Screen.SYNC, Screen.CONTROLLER, Screen.DRIVERS));
@@ -103,7 +103,7 @@ object Nav {
 val Screen.short: String get() = when (this) {
     Screen.GAMES -> "Bibliothek"; Screen.STORE -> "Store"; Screen.SYNC -> "Sync"
     Screen.NETPLAY -> "Zusammen"; Screen.STREAM -> "Streaming"
-    Screen.SETTINGS -> "Allgemein"; Screen.CONTROLLER -> "Controller"; Screen.DRIVERS -> "Treiber"
+    Screen.SETTINGS -> "Allgemein"; Screen.CONTROLLER -> "Controller"; Screen.DRIVERS -> "Treiber"; Screen.TRANSFERS -> "Downloads"
 }
 
 /** a button glyph like the ones in the hint bar: white pill with black text */

@@ -486,8 +486,10 @@ object Server {
                     if (denied(ctx)) return@post
                     val paths = call.request.queryParameters.getAll("path").orEmpty().mapNotNull { Storage.resolve(it)?.path }.toSet()
                     if (paths.isEmpty()) return@post fail("path missing")
-                    val j = withContext(Dispatchers.IO) { runCatching { RommSync.uploadGame(ctx, paths) } }
-                    j.fold({ json(it.json()) }, { fail(it.message ?: "Fehler") })
+                    // through the transfer queue like the Thor app: one after another, survives a restart
+                    val size = paths.sumOf { java.io.File(it).length() }
+                    val e = withContext(Dispatchers.IO) { TransferQueue.addUpload(ctx, paths, q("name") ?: java.io.File(paths.first()).nameWithoutExtension, size, q("system") ?: "", q("later") == "1") }
+                    json(e)
                 }
                 post("/api/romm/firmware") {
                     if (denied(ctx)) return@post
@@ -605,10 +607,27 @@ object Server {
                     if (denied(ctx)) return@get
                     json(withContext(Dispatchers.IO) { runCatching { Library.store(ctx, q("refresh") == "1") }.getOrElse { JSONObject().put("error", it.message) } })
                 }
+                // store download → the transfer queue (one at a time, survives a restart); later=1 = "für später"
                 post("/api/store/download") {
                     if (denied(ctx)) return@post
                     val id = q("id")?.toIntOrNull() ?: return@post fail("id missing")
-                    json(Library.download(ctx, id).json())
+                    json(withContext(Dispatchers.IO) { TransferQueue.addDownload(ctx, id, q("name") ?: "Spiel $id", q("size")?.toLongOrNull() ?: 0L, q("system") ?: "", q("later") == "1") })
+                }
+                get("/api/transfers") {
+                    if (denied(ctx)) return@get
+                    json(JSONObject().put("items", withContext(Dispatchers.IO) { TransferQueue.list(ctx) })
+                        .put("line", TransferQueue.line(ctx)?.let { JSONObject().put("text", it.first).put("progress", it.second.toDouble()) }))
+                }
+                post("/api/transfers/start") {
+                    if (denied(ctx)) return@post
+                    withContext(Dispatchers.IO) { TransferQueue.start(ctx, q("id")) }
+                    json(JSONObject().put("ok", true))
+                }
+                post("/api/transfers/remove") {
+                    if (denied(ctx)) return@post
+                    val id = q("id") ?: return@post fail("id missing")
+                    withContext(Dispatchers.IO) { TransferQueue.remove(ctx, id) }
+                    json(JSONObject().put("ok", true))
                 }
                 get("/api/store/downloads") {
                     if (denied(ctx)) return@get
