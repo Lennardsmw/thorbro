@@ -104,7 +104,6 @@ class ThorActivity : ComponentActivity() {
         setContent { ThorTheme { Box(Modifier.fillMaxSize()) {
             if (UiMode.newDesign) NewRoot(screen.value) else Root(screen.value) { screen.value = it }
             BackgroundOverlay(Modifier.align(Alignment.TopEnd))
-            VersionTag(Modifier.align(Alignment.BottomStart))
             FriendsPanel()
             if (DevUi.open) DevDialog()
         } } }

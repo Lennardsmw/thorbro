@@ -166,7 +166,7 @@ fun BigButton(label: String, icon: ImageVector? = null, primary: Boolean = false
     val shape = if (doodle) RoundedCornerShape(30.dp, 24.dp, 28.dp, 22.dp) else RoundedCornerShape(14.dp)
     val bg = when { focused -> Modifier.background(Accent); primary -> Modifier.background(if (doodle) Primary else Color(0x40FFFFFF)); else -> Modifier.background(GlassFill) }
     val shadow = when { focused -> Theme.p.shadow; primary -> Theme.p.primaryShadow; else -> null }
-    Box(modifier.height(56.dp).hardShadow(shape, shadow).fx(fx, shape, lift = 1.04f, frame = false, enabled = enabled, onClick = onClick).then(bg),
+    Box(modifier.height(56.dp).hardShadow(shape, shadow).fx(fx, shape, lift = 1.04f, enabled = enabled, onClick = onClick).then(bg),
         contentAlignment = Alignment.Center) {
         androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 18.dp)) {
             val fg = if (focused) OnAccent else if (primary && doodle) OnPrimary else if (enabled) Ink else Muted

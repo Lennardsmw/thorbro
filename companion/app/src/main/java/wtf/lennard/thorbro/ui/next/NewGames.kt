@@ -95,6 +95,7 @@ fun ArtTile(title: String, sub: String = "", image: File?, modifier: Modifier = 
 @Composable
 fun ArtGrid(min: Dp = ART, content: androidx.compose.foundation.lazy.grid.LazyGridScope.() -> Unit) {
     val (st, fl) = snapGrid()
+    HeaderFollows(st)
     CenteredFocus {
         LazyVerticalGrid(GridCells.Adaptive(min), state = st, flingBehavior = fl, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp), content = content)

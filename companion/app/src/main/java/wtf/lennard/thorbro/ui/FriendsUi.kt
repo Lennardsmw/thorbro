@@ -102,12 +102,12 @@ fun FriendsButton() {
     val ctx = LocalContext.current
     var waiting by remember { mutableStateOf(0) }
     WhileVisible { while (true) { waiting = withContext(Dispatchers.IO) { Pals.requests(ctx).size + wtf.lennard.thorbro.Party.invites(ctx).size + wtf.lennard.thorbro.Gifts.waiting(ctx) }; delay(3000) } }
-    val fx = rememberFx()
+    // tap only: L2 opens it from the pad; d-pad up from the page chips must never land here
     Box {
-        Box(Modifier.size(38.dp).fx(fx, CircleShape, lift = 1.1f) { FriendsUi.open = true }
-            .then(if (fx.active) Modifier.background(Accent) else Modifier.background(GlassFill)), contentAlignment = Alignment.Center) {
-            Icon(Icons.Filled.Group, "Freunde (L2)", Modifier.size(22.dp), tint = if (fx.active) OnAccent else Ink)
+        Box(Modifier.size(38.dp).clip(CircleShape).tap { FriendsUi.open = true }.background(GlassFill), contentAlignment = Alignment.Center) {
+            Icon(Icons.Filled.Person, "Freunde (L2)", Modifier.size(22.dp), tint = Ink)
         }
+        KeyCapSmall("L2", Modifier.align(Alignment.BottomStart).offset((-10).dp, 6.dp))
         CountBadge(waiting, Modifier.align(Alignment.TopEnd))
     }
 }

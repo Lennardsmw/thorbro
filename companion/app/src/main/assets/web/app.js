@@ -83,7 +83,7 @@ let info = null;
 async function loadDevice() {
   const { body } = await api('/api/info');
   info = body;
-  if ($('#verTag')) { $('#verTag').textContent = 'v' + body.appVersion; $('#verTag').hidden = false; }
+  // the build string lives once in Gerät › ThorBro, not in a footer
   updMood();
   $('#conn').textContent = `${body.manufacturer} ${body.model} · ${body.ip}:${body.port}`;
   const p = body.permissions;

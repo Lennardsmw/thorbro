@@ -106,8 +106,8 @@ val Screen.short: String get() = when (this) {
 
 /** a button glyph like the ones in the hint bar: white pill with black text */
 @Composable
-fun KeyCapSmall(text: String) {
-    Box(Modifier.height(22.dp).clip(RoundedCornerShape(11.dp)).background(Color(0xD9FFFFFF)).padding(horizontal = 7.dp),
+fun KeyCapSmall(text: String, modifier: Modifier = Modifier) {
+    Box(modifier.height(22.dp).clip(RoundedCornerShape(11.dp)).background(Color(0xD9FFFFFF)).padding(horizontal = 7.dp),
         contentAlignment = Alignment.Center) {
         Text(text, color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
     }
@@ -172,9 +172,9 @@ fun PageRow(area: Area, current: Screen?) {
         area.pages.filterNotNull().forEach { p ->
             val fx = rememberFx()
             val on = p == current
-            Box(Modifier.fx(fx, RoundedCornerShape(50), lift = 1.06f, restLine = !on) { Nav.go(p) }
-                .background(if (on) Soft else Color.Transparent).padding(horizontal = 16.dp, vertical = 6.dp)) {
-                Text(p.short, fontSize = 15.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, color = if (on) Ink else Muted)
+            Box(Modifier.fx(fx, RoundedCornerShape(50), lift = 1.06f) { Nav.go(p) }
+                .background(if (on) Accent else Color.Transparent).padding(horizontal = 16.dp, vertical = 6.dp)) {
+                Text(p.short, fontSize = 15.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, color = if (on) OnAccent else Muted)
             }
         }
     }
