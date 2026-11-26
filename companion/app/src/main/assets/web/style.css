@@ -336,3 +336,4 @@ body:has(.transferbar:not([hidden])) main { padding-bottom: 48px; }
 /* console badges and avatars: light disc, the robots have dark outlines */
 .fart .cbadge { background: rgba(239, 231, 210, .95); }
 .avatar { background: #EFE7D2; }
+.transferbar[hidden] { display: none; }
