@@ -1339,6 +1339,9 @@ async function loadStream() {
     $('#mlStatus').innerHTML = `<span class="ok">Moonlight ${esc(s.version || '')} installiert</span>`;
     btn.hidden = true;
   }
+  const t = s.tunnel || {};
+  $('#mlVia').textContent = !s.installed ? '' : !s.usb ? 'über WLAN – Moonlight spricht direkt mit dem Mac'
+    : 'über USB' + (t.connected ? ' ✓ (Tunnel steht)' : t.running ? ' – Tunnel wartet auf den Mac' : ' – RomBro startet den Tunnel');
   $('#mlLaunch').hidden = !s.installed;
   loadScrcpy();
 }
@@ -1386,7 +1389,7 @@ $('#mlInstall').onclick = async () => {
 };
 $('#mlScreen').onclick = () => { showTab('screen'); $('#screenStart').click(); };
 $('#mlLaunch').onclick = async () => {
-  try { await api('/api/apps/com.limelight/launch', { method: 'POST' }); toast('Moonlight startet …'); } catch (err) { alert(err.message); }
+  try { await api('/api/stream/moonlight/open', { method: 'POST' }); toast('Moonlight startet …'); } catch (err) { alert(err.message); }
 };
 $('#mlScan').onclick = async () => {
   $('#mlScanInfo').textContent = 'Suche Sunshine-Rechner …'; $('#mlHosts').innerHTML = '';

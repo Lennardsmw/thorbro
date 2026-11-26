@@ -28,7 +28,48 @@ object Streaming {
             out.put("latest", v)
             if (info?.versionName != null) out.put("updateAvailable", Updater.newer(v, info.versionName!!))
         }
+        out.put("package", moonlightPackage(ctx)).put("usb", usbAdb(ctx)).put("tunnel", MoonTunnel.status())
         return out
+    }
+
+    // ---- Play on Thor: based on catzeyea/ThorBro src/pcstream/thor.rs (MIT, (c) 2026 ThorBro contributors) ----
+    // Moonlight's exported ShortcutTrampoline with the Sunshine host UUID and an app, the same intent its own pinned
+    // shortcuts use. Every extra must be a *string* (Moonlight reads them with getStringExtra). No app → the host's app grid.
+
+    const val MOONLIGHT_ROOT = "com.limelight.root"
+    private const val TRAMPOLINE = "com.limelight.ShortcutTrampoline"
+    private val UUID_RE = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+    /** installed Moonlight package, normal build preferred (both flavors share the com.limelight namespace) */
+    fun moonlightPackage(ctx: Context): String? = listOf(MOONLIGHT, MOONLIGHT_ROOT).firstOrNull { p ->
+        runCatching { ctx.packageManager.getPackageInfo(p, 0) }.isSuccess
+    }
+
+    /** starts [app] (name as in Sunshine's list) or [appId] on host [uuid]; throws with a German message on bad input */
+    fun moonlightPlay(ctx: Context, uuid: String, app: String?, appId: String?, hdr: Boolean): JSONObject {
+        val pkg = moonlightPackage(ctx) ?: throw IllegalStateException("Moonlight ist nicht installiert")
+        if (!UUID_RE.matches(uuid)) throw IllegalArgumentException("uuid ist keine Sunshine-Host-ID (uniqueid aus /serverinfo)")
+        val name = app?.trim()?.takeIf { it.isNotEmpty() }
+        if (name != null && (name.length > 512 || name.any { it.isISOControl() })) throw IllegalArgumentException("ungültiger App-Name")
+        val id = appId?.trim()?.takeIf { it.isNotEmpty() }
+        if (id != null && !id.all { it.isDigit() }) throw IllegalArgumentException("appId muss eine Zahl sein")
+        val i = android.content.Intent(android.content.Intent.ACTION_VIEW)
+            .setClassName(pkg, TRAMPOLINE)
+            .putExtra("UUID", uuid)
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (name != null) i.putExtra("AppName", name)
+        if (id != null) i.putExtra("AppId", id)
+        if (hdr) i.putExtra("HDR", "1")
+        Emulators.startOnDisplay(ctx, i)
+        Logs.i("stream", "Moonlight: ${name ?: id ?: "App-Liste"} auf $uuid" + if (usbAdb(ctx)) " (über USB)" else "")
+        return JSONObject().put("ok", true).put("package", pkg).put("usb", usbAdb(ctx))
+    }
+
+    /** opens Moonlight's host list (PcView) */
+    fun moonlightOpen(ctx: Context): JSONObject {
+        val pkg = moonlightPackage(ctx) ?: throw IllegalStateException("Moonlight ist nicht installiert")
+        if (!Apps.launch(ctx, pkg)) throw IllegalStateException("Moonlight lässt sich nicht starten")
+        return JSONObject().put("ok", true).put("package", pkg)
     }
 
     @Volatile private var latestCache: Triple<Long, String, String>? = null

@@ -612,6 +612,28 @@ object Server {
                     if (denied(ctx)) return@get
                     json(JSONObject().put("hosts", withContext(Dispatchers.IO) { Streaming.hosts(ctx) }))
                 }
+                // Play on Thor (RomBro): Moonlight's ShortcutTrampoline, ported from catzeyea/ThorBro pcstream (MIT)
+                post("/api/stream/moonlight/play") {
+                    if (denied(ctx)) return@post
+                    try {
+                        json(Streaming.moonlightPlay(ctx, q("uuid") ?: "", q("app"), q("appId"), q("hdr") == "1" || q("hdr") == "true"))
+                    } catch (e: IllegalArgumentException) { fail(e.message ?: "Fehler") }
+                    catch (e: Exception) { fail(e.message ?: "Fehler", HttpStatusCode.Conflict) }
+                }
+                post("/api/stream/moonlight/open") {
+                    if (denied(ctx)) return@post
+                    try { json(Streaming.moonlightOpen(ctx)) } catch (e: Exception) { fail(e.message ?: "Fehler", HttpStatusCode.Conflict) }
+                }
+                // USB: Moonlight's UDP through one TCP stream (adb reverse tcp:48100); RomBro switches it with the cable
+                get("/api/stream/moonlight/tunnel") {
+                    if (denied(ctx)) return@get
+                    json(MoonTunnel.status().put("usb", Streaming.usbAdb(ctx)))
+                }
+                post("/api/stream/moonlight/tunnel") {
+                    if (denied(ctx)) return@post
+                    try { json((if (q("on") == "0") MoonTunnel.stop() else MoonTunnel.start()).put("usb", Streaming.usbAdb(ctx))) }
+                    catch (e: Exception) { fail(e.message ?: "Fehler", HttpStatusCode.Conflict) }
+                }
                 // scrcpy (Thor screen on the Mac over wireless debugging)
                 get("/api/stream/scrcpy") {
                     if (denied(ctx)) return@get
