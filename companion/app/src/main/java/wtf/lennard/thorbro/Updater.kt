@@ -201,13 +201,21 @@ object Updater {
             val e = m.groupValues[1]
             val code = Regex("/releases/tag/dev-(\\d+)").find(e)?.groupValues?.get(1)?.toLong() ?: return@mapNotNull null
             val title = Regex("<title>(.*?)</title>").find(e)?.groupValues?.get(1)?.removePrefix("ThorBro ") ?: "dev-$code"
+            // <content> holds the rendered notes, HTML-escaped: branch in the first <code>, features as <li>
+            val html = Regex("<content[^>]*>(.*?)</content>", RegexOption.DOT_MATCHES_ALL).find(e)?.groupValues?.get(1)?.let(::unescape) ?: ""
+            val features = Regex("<li>(.*?)</li>", RegexOption.DOT_MATCHES_ALL).findAll(html)
+                .map { unescape(it.groupValues[1].replace(Regex("<[^>]+>"), "")).trim() }.filter { it.isNotEmpty() }.toList()
             JSONObject().put("versionName", title).put("versionCode", code)
-                .put("branch", Regex("-([^+]+)\\+").find(title)?.groupValues?.get(1) ?: "")
+                .put("branch", Regex("Zweig <code>([^<]+)</code>").find(html)?.groupValues?.get(1)
+                    ?: Regex("-([^+]+)\\+").find(title)?.groupValues?.get(1) ?: "")
                 .put("published", Regex("<updated>(.*?)</updated>").find(e)?.groupValues?.get(1) ?: "")
-                .put("features", org.json.JSONArray())
+                .put("features", org.json.JSONArray(features))
                 .put("url", "https://github.com/Lennardsmw/thorbro/releases/download/dev-$code/ThorBro-dev.apk")
         }.toList()
     }
+
+    private fun unescape(s: String) = s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"")
+        .replace("&#39;", "'").replace("&amp;", "&")
 
     /** downloads [url] (a ThorBro APK from the Dev list) and installs it; {session, status, latest} or {error} */
     fun installDev(ctx: Context, url: String): JSONObject {
