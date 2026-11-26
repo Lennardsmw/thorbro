@@ -189,7 +189,7 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
     val start = rememberPlay(onError = { msg = it }, onStarted = onClose)
     val size = group.sumOf { it.optLong("size") }
     val first = remember { androidx.compose.ui.focus.FocusRequester() }
-    LaunchedEffect(Unit) { kotlinx.coroutines.delay(200); runCatching { first.requestFocus() } }
+    LaunchedEffect(Unit) { first.focusSoon() }
     job?.let { j ->
         LaunchedEffect(j) {
             while (!j.done) { msg = "${j.message} · ${(j.progress * 100).toInt()} %"; kotlinx.coroutines.delay(400) }

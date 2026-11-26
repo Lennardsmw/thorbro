@@ -138,7 +138,7 @@ fun Modifier.firstFocus(f: FocusRequester?, isFirst: Boolean) = if (f != null &&
 fun ConsoleMenu(title: String, text: String = "", mono: Boolean = false, options: List<Pair<String, () -> Unit>>,
                 qrs: List<Pair<String, String>> = emptyList(), onClose: () -> Unit) {
     val first = remember { FocusRequester() }
-    LaunchedEffect(Unit) { kotlinx.coroutines.delay(150); runCatching { first.requestFocus() } }
+    LaunchedEffect(Unit) { first.focusSoon() }
     DialogOpen()
     Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         ImmersiveDialog()

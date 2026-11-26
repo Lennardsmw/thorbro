@@ -22,6 +22,8 @@ object Drivers {
         Source("k11", "K11MCH1 AdrenoToolsDrivers", "K11MCH1/AdrenoToolsDrivers", "Turnip-Builds und originale Qualcomm-Treiber"),
         Source("purple", "MrPurple Turnip", "MrPurple666/purple-turnip", "Turnip mit Fixes für Switch-Emulatoren"),
         Source("mainline", "Mainline Turnip (whitebelyash)", "whitebelyash/freedreno_turnip-CI", "Turnip direkt aus Mesa"),
+        Source("steven", "StevenMXZ Turnip + Qualcomm", "StevenMXZ/freedreno_turnip-CI", "aktuell: Turnip v27, Gen8 und neue Qualcomm-Treiber (v891)"),
+        Source("weab", "Weab-chan Turnip", "Weab-chan/freedreno_turnip-CI", "Turnip-Builds mit Patches für Adreno 7xx"),
     )
 
     /** emulators that load custom drivers, with where the import lives in their menus */

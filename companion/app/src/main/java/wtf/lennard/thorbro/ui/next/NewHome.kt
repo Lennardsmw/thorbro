@@ -98,7 +98,7 @@ fun HomeScreenNew(showDetail: (HomeGame) -> Unit) {
     var message by remember { mutableStateOf("") }
     var focusedTitle by remember { mutableStateOf<String?>(null) }
     val start = rememberPlay(onError = { message = it })
-    LaunchedEffect(RecentData.loaded) { delay(250); runCatching { first.requestFocus() } }
+    LaunchedEffect(RecentData.loaded, RecentData.games.firstOrNull()?.g?.rom?.optString("path")) { first.focusSoon() }
     val recent = RecentData.games
     val hero = recent.firstOrNull()
     val rest = recent.drop(1).take(4)
@@ -207,7 +207,7 @@ private fun LibraryTile(count: Int, onClick: () -> Unit) {
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text("Bibliothek", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = if (fx.active) OnAccent else Ink)
-            if (count > 0) Text("$count Spiele · Konsolen als Ordner", fontSize = 12.sp, color = if (fx.active) OnAccent else Muted, maxLines = 1)
+            if (count > 0) Text("$count Spiele", fontSize = 12.sp, color = if (fx.active) OnAccent else Muted, maxLines = 1)
         }
     }
 }
@@ -223,6 +223,6 @@ fun ConsoleIcon(sys: String, size: Dp, modifier: Modifier = Modifier) {
 /** THE badge system: the console as a small round icon, top left on a tile (folders, store, recent games) */
 @Composable
 fun BoxScope.ConsoleBadge(sys: String) {
-    Box(Modifier.align(Alignment.TopStart).padding(7.dp).size(30.dp).clip(CircleShape).background(Color(0xD9101214)).padding(4.dp),
+    Box(Modifier.align(Alignment.TopStart).padding(7.dp).size(30.dp).clip(CircleShape).background(Color(0xF2EFE7D2)).padding(3.dp),
         contentAlignment = Alignment.Center) { ConsoleIcon(sys, 22.dp) }
 }

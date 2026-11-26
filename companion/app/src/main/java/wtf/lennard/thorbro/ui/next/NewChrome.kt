@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.height
@@ -24,14 +25,30 @@ import androidx.compose.ui.unit.sp
  * the hint bar says what A does on the focused element, and the head (tabs, chips) scrolls away with the content.
  */
 
-/** what A does right now ("Öffnen", "Laden", "Spielen" …); null = the page default */
+/**
+ * What A does right now ("Öffnen", "Laden", "Spielen" …); null = the page default.
+ * Every element with [hintA] that holds the focus is in [held]; the newest one wins. Losing focus or leaving
+ * the screen removes it, so the order of focus events does not matter and nothing stays behind.
+ */
 object Hints {
-    var a by mutableStateOf<String?>(null)
+    private val held = androidx.compose.runtime.mutableStateListOf<Pair<Any, String>>()
+    val a: String? get() = held.lastOrNull()?.second
+    internal fun hold(key: Any, text: String) { held.removeAll { it.first === key }; held.add(key to text) }
+    internal fun drop(key: Any) { held.removeAll { it.first === key } }
 }
 
 /** while this element has the focus, the hint bar shows "A [text]" */
-fun Modifier.hintA(text: String): Modifier = this.onFocusChanged { s ->
-    if (s.hasFocus) Hints.a = text else if (Hints.a == text) Hints.a = null
+fun Modifier.hintA(text: String): Modifier = this.composed(factory = {
+    val key = androidx.compose.runtime.remember { Any() }
+    val focused = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    LaunchedEffect(focused.value, text) { if (focused.value) Hints.hold(key, text) else Hints.drop(key) }
+    DisposableEffect(key) { onDispose { Hints.drop(key) } }
+    Modifier.onFocusChanged { focused.value = it.hasFocus }
+})
+
+/** request focus once a dialog window can take it: dialogs attach late, a single early request gets lost */
+suspend fun androidx.compose.ui.focus.FocusRequester.focusSoon() {
+    for (wait in longArrayOf(200, 350, 500)) { kotlinx.coroutines.delay(wait); runCatching { requestFocus() } }
 }
 
 /** the head of a page (top bar, sub page chips) is hidden while the content is scrolled down */

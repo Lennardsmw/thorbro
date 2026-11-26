@@ -104,15 +104,22 @@ fun ArtTile(title: String, sub: String = "", image: File?, modifier: Modifier = 
  * [rows] > 0: tiles sized so exactly that many rows (with title + sub line) fit on screen.
  */
 @Composable
-fun ArtGrid(min: Dp = ART, rows: Int = 0, content: androidx.compose.foundation.lazy.grid.LazyGridScope.() -> Unit) {
+fun ArtGrid(min: Dp = ART, rows: Int = 0, head: Dp = 0.dp, content: androidx.compose.foundation.lazy.grid.LazyGridScope.() -> Unit) {
     val (st, fl) = snapGrid()
     HeaderFollows(st)
     androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
         // measured once per page: the head hiding must not resize the tiles
         val h = remember { maxHeight }
-        val side = if (rows > 0) ((h - 28.dp - 14.dp * (rows - 1) - 44.dp * rows) / rows).coerceIn(96.dp, 220.dp) else min
-        CenteredFocus {
-            LazyVerticalGrid(GridCells.Adaptive(side), state = st, flingBehavior = fl, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 14.dp),
+        val w = maxWidth
+        if (rows > 0) {
+            // [head] = a full-width first item (folder name, search) that shares the screen with the rows
+            val side = ((h - head - 28.dp - 14.dp * (rows - 1) - 50.dp * rows) / rows).coerceIn(90.dp, 220.dp)
+            val cols = kotlin.math.ceil(((w - 24.dp + 18.dp) / (side + 18.dp)).toDouble()).toInt().coerceAtLeast(2)
+            // plain scrolling (no centering): a row moves in only when the focus leaves the visible ones
+            LazyVerticalGrid(GridCells.Fixed(cols), state = st, flingBehavior = fl, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp), content = content)
+        } else CenteredFocus {
+            LazyVerticalGrid(GridCells.Adaptive(min), state = st, flingBehavior = fl, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 14.dp),
                 horizontalArrangement = Arrangement.spacedBy(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp), content = content)
         }
     }
@@ -209,7 +216,7 @@ private fun FolderContent(cur: Sys, reload: Int, changed: () -> Unit) {
     var open by remember { mutableStateOf<JSONObject?>(null) }
     val first = remember { FocusRequester() }
     LaunchedEffect(cur.id) { delay(200); runCatching { first.requestFocus() } }
-    ArtGrid(rows = 2) {
+    ArtGrid(rows = 2, head = 44.dp) {
         item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }, key = "head") {
             Row(Modifier.padding(start = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (icon != null) { Img(icon, 96, Modifier.size(30.dp)); Spacer(Modifier.width(12.dp)) }

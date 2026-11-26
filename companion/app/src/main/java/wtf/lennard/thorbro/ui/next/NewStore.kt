@@ -149,7 +149,7 @@ fun StoreScreenNew() {
     val list = androidx.compose.foundation.lazy.rememberLazyListState()
     if (q.isNotEmpty()) {
         val hits = all.filter { it.name.contains(q, ignoreCase = true) }
-        ArtGrid(rows = 2) {
+        ArtGrid(rows = 2, head = 76.dp) {
             item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }, key = "head") {
                 Column {
                     head()
@@ -221,7 +221,7 @@ private fun StoreDetail(s: StoreGame, free: Long, @Suppress("UNUSED_PARAMETER") 
     val job = Library.downloads[s.id]
     val fits = !(free in 0 until s.size)
     val first = remember { FocusRequester() }
-    LaunchedEffect(Unit) { delay(200); runCatching { first.requestFocus() } }
+    LaunchedEffect(Unit) { first.focusSoon() }
     DialogOpen()
     Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         ImmersiveDialog()
@@ -251,7 +251,7 @@ private fun StoreDetail(s: StoreGame, free: Long, @Suppress("UNUSED_PARAMETER") 
                         done -> "Auf dem Thor"
                         else -> "Laden · ${fmtBytes(s.size)}"
                     }, if (done) Icons.Filled.CheckCircle else Icons.Filled.CloudDownload, primary = true, enabled = fits && !running && !done,
-                        modifier = Modifier.width(320.dp).focusRequester(first)) { Library.download(ctx, s.id) }
+                        modifier = Modifier.width(320.dp).focusRequester(first).hintA("Laden")) { Library.download(ctx, s.id) }
                     if (running) LinearProgressIndicator(progress = { job!!.progress.toFloat() }, modifier = Modifier.width(320.dp).padding(top = 10.dp).height(6.dp).clip(RoundedCornerShape(3.dp)),
                         color = Accent, trackColor = Soft)
                     job?.error?.let { Text("Letzter Versuch: $it", color = Bad, fontSize = 14.sp, maxLines = 2, modifier = Modifier.padding(top = 10.dp)) }

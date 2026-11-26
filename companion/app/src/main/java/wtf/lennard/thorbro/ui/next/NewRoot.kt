@@ -45,15 +45,14 @@ fun NewRoot(screen: Screen?) {
     } else {
         val area = Area.of(screen)
         // a new page starts with its head visible and the default hint
-        androidx.compose.runtime.LaunchedEffect(screen, NewGamesNav.folder.value) { Hints.a = null; Header.hidden = false }
+        androidx.compose.runtime.LaunchedEffect(screen, NewGamesNav.folder.value) { Header.hidden = false }
         Column(Modifier.fillMaxSize().glassBackground()) {
             androidx.compose.animation.AnimatedVisibility(!Header.hidden) {
-                Column {
-                    NewTopBar(area)
-                    PageRow(area, screen)
-                }
+                NewTopBar(area)
             }
-            Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 28.dp, vertical = 4.dp)) {
+            androidx.compose.foundation.layout.Row(Modifier.weight(1f).fillMaxWidth()) {
+            if (area.pages.size > 1) SideRail(area, screen)
+            Box(Modifier.weight(1f).fillMaxWidth().padding(start = if (area.pages.size > 1) 8.dp else 28.dp, end = 28.dp, top = 4.dp, bottom = 4.dp)) {
                 when (screen) {
                     Screen.GAMES -> GamesScreenNew()
                     Screen.STORE -> StoreScreenNew()
@@ -63,6 +62,7 @@ fun NewRoot(screen: Screen?) {
                     Screen.CONTROLLER -> ControllerScreenNew()
                     Screen.DRIVERS -> DriversScreen()
                 }
+            }
             }
             ButtonHints("A" to (Hints.a ?: "Auswählen"), "B" to "Zurück", "L1 R1" to "Bereich")
         }

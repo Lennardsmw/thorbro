@@ -201,5 +201,5 @@ private fun SaveGameTile(g: SaveGame, onClick: () -> Unit) {
         value = withContext(Dispatchers.IO) { runCatching { Media.metaFor(ctx, g.sys, listOf(g.rom)).optJSONObject(g.rom.getString("path")) }.getOrNull() ?: JSONObject() }
     }
     val sysName = remember(g.sys) { g.sys }
-    ArtTile(gameTitle(g.rom, m), sysName, cover(g.sys, g.rom, m), Modifier.width(ART), fit = g.sys == "ports", onClick = onClick)
+    ArtTile(gameTitle(g.rom, m), sysName, cover(g.sys, g.rom, m), Modifier.width(128.dp), fit = g.sys == "ports", onClick = onClick)
 }

@@ -136,20 +136,20 @@ fun TopBar(area: Area, extra: @Composable () -> Unit = {}) {
         Area.entries.forEach { a ->
             val on = a == area
             Row(Modifier.clip(RoundedCornerShape(50)).background(if (on) Accent else Color.Transparent)
-                .tap { Nav.area(a) }.padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(a.icon, null, Modifier.size(18.dp), tint = if (on) OnAccent else Muted)
-                Spacer(Modifier.width(6.dp))
-                Text(a.label, fontSize = 16.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.SemiBold, color = if (on) OnAccent else Muted)
+                .tap { Nav.area(a) }.padding(horizontal = 11.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(a.icon, null, Modifier.size(17.dp), tint = if (on) OnAccent else Muted)
+                Spacer(Modifier.width(5.dp))
+                Text(a.label, fontSize = 15.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.SemiBold, color = if (on) OnAccent else Muted, maxLines = 1, softWrap = false)
             }
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(2.dp))
         }
         Spacer(Modifier.width(6.dp))
         KeyCapSmall("R1")
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.weight(1f).widthIn(min = 4.dp))
         ActivityPill()
         extra()
         Spacer(Modifier.width(14.dp))
-        Text(time, fontSize = 16.sp)
+        Text(time, fontSize = 16.sp, maxLines = 1, softWrap = false)
         Spacer(Modifier.width(12.dp))
         Icon(if (wifi) Icons.Filled.Wifi else Icons.Filled.WifiOff, null, Modifier.size(18.dp))
         Spacer(Modifier.width(10.dp))
@@ -177,6 +177,29 @@ fun PageRow(area: Area, current: Screen?) {
             Box(Modifier.fx(fx, RoundedCornerShape(50), lift = 1.06f) { Nav.go(p) }
                 .background(if (on) Accent else Color.Transparent).padding(horizontal = 16.dp, vertical = 6.dp)) {
                 Text(p.short, fontSize = 15.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, color = if (on) OnAccent else Muted)
+            }
+        }
+    }
+}
+
+/**
+ * The sub pages of an area (System: Allgemein · Sync · Controller · Treiber) as a rail on the left side.
+ * One horizontal bar (the areas) is enough; d-pad left from the content reaches the rail.
+ */
+@Composable
+fun SideRail(area: Area, current: Screen?, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.layout.Column(modifier.width(150.dp).padding(start = 20.dp, top = 8.dp, end = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        area.pages.filterNotNull().forEach { p ->
+            val fx = rememberFx()
+            val on = p == current
+            Row(Modifier.fillMaxWidth().hintA("Öffnen").fx(fx, RoundedCornerShape(14.dp), lift = 1.04f) { Nav.go(p) }
+                .background(if (on) Accent else if (fx.active) Soft else Color.Transparent).padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Icon(p.icon, null, Modifier.size(18.dp), tint = if (on) OnAccent else Muted)
+                Spacer(Modifier.width(8.dp))
+                Text(p.short, fontSize = 15.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.SemiBold, color = if (on) OnAccent else Ink,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -193,8 +194,14 @@ fun ButtonHints(vararg hints: Pair<String, String>) {
         Row(Modifier.align(Alignment.CenterEnd), horizontalArrangement = Arrangement.spacedBy(22.dp)) {
             hints.forEach { (btn, what) ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(24.dp).clip(CircleShape).background(Accent), contentAlignment = Alignment.Center) {
-                        Text(btn, color = OnAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    // "L1 R1" = two glyphs; each one a pill that is at least round, the label centered in it
+                    btn.split(' ').forEachIndexed { i, b ->
+                        if (i > 0) Spacer(Modifier.width(4.dp))
+                        Box(Modifier.height(24.dp).widthIn(min = 24.dp).clip(RoundedCornerShape(12.dp)).background(Accent).padding(horizontal = if (b.length > 1) 6.dp else 0.dp),
+                            contentAlignment = Alignment.Center) {
+                            Text(b, color = OnAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold, lineHeight = 12.sp, maxLines = 1,
+                                style = androidx.compose.ui.text.TextStyle(platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)))
+                        }
                     }
                     Text("  $what", fontSize = 14.sp)
                 }

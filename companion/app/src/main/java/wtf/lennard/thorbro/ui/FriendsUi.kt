@@ -97,7 +97,7 @@ fun avatarConsole(name: String): String = AVATAR_CONSOLES[Math.floorMod(name.tri
 /** round avatar: a console robot by default (no grey initials); [me] gets a thin ring */
 @Composable
 fun Avatar(name: String, size: Int = 40, me: Boolean = false) {
-    Box(Modifier.size(size.dp).clip(CircleShape).background(Card)
+    Box(Modifier.size(size.dp).clip(CircleShape).background(Color(0xFFEFE7D2))
         .then(if (me) Modifier.border(2.dp, Ink.copy(alpha = 0.7f), CircleShape) else Modifier).padding((size * 0.12).dp),
         contentAlignment = Alignment.Center) {
         ConsoleIcon(avatarConsole(name), (size * 0.76).dp)
@@ -175,7 +175,7 @@ fun FriendsPanel() {
     }
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) { Pals.importDownloads(ctx) }
-        refresh(); delay(200); runCatching { first.requestFocus() }
+        refresh(); first.focusSoon()
     }
     // nearby: same WLAN / hotspot, looked for again every 15 s while the menu is open
     LaunchedEffect(Unit) { while (true) { withContext(Dispatchers.IO) { runCatching { Pals.scanNearby(ctx) } }; refresh(); delay(15_000) } }
