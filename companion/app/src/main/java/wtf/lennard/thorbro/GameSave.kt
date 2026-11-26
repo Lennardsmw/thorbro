@@ -131,6 +131,12 @@ object GameSave {
             val romId = SharedSaves.romId(ctx, system, romPath)
             out.put("inRomm", romId != null)
             if (romId != null) {
+                val all = Romm.listSaves(ctx, romId)
+                val slots = all.map { Romm.slotOf(it) ?: "Standard" }.groupingBy { it }.eachCount().entries.joinToString(", ") { "${it.key}×${it.value}" }
+                val mine = Profiles.slot(ctx, Profiles.owner(ctx, romPath)) ?: "Standard"
+                out.put("diag", "RomM-ID $romId · ${all.size} Spielstände in RomM (Slots: ${slots.ifEmpty { "-" }}) · Profil-Slot $mine · lokal: ${items.size} Treffer")
+            }
+            if (romId != null) {
                 val rom = primary?.rom ?: JSONObject().put("path", romPath).put("file", File(romPath).name)
                 cloud = RommSync.cloudNewest(ctx, romId, rom, primary)
             }
