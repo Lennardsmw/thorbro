@@ -152,7 +152,7 @@ fun TopBar(area: Area, extra: @Composable () -> Unit = {}) {
         Icon(if (wifi) Icons.Filled.Wifi else Icons.Filled.WifiOff, null, Modifier.size(18.dp))
         Spacer(Modifier.width(10.dp))
         Icon(Icons.Filled.BatteryFull, null, Modifier.size(18.dp))
-        Text(" $battery %", fontSize = 14.sp)
+        Text(" $battery %", fontSize = 14.sp, maxLines = 1, softWrap = false)
     }
 }
 
