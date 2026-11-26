@@ -200,7 +200,7 @@ object Library {
     val downloads = java.util.concurrent.ConcurrentHashMap<Int, Jobs.Job>()
 
     fun download(ctx: Context, romId: Int): Jobs.Job {
-        downloads[romId]?.takeIf { !it.done }?.let { return it }
+        downloads[romId]?.takeIf { !it.done && it.stop == 0 }?.let { return it }
         val app = ctx.applicationContext
         val j = Jobs.start("RomM-Download") { job ->
             val t0 = System.currentTimeMillis()

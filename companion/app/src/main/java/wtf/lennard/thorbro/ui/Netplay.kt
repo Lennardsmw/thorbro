@@ -168,6 +168,15 @@ fun rememberDirect(): DirectUi {
     return d
 }
 
+/** the Wi-Fi Direct switch: on → off, off → on (asks for "Geräte in der Nähe" first if needed) */
+internal fun directToggle(ctx: android.content.Context, d: DirectUi, scope: kotlinx.coroutines.CoroutineScope) {
+    if (d.busy) return
+    if (d.st?.optBoolean("active") == true) {
+        d.busy = true
+        scope.launch { d.st = withContext(Dispatchers.IO) { runCatching { wtf.lennard.thorbro.Direct.stop(ctx) }.getOrNull() } ?: d.st; d.busy = false }
+    } else directOn(ctx, d, scope, "")
+}
+
 internal fun directOn(ctx: android.content.Context, d: DirectUi, scope: kotlinx.coroutines.CoroutineScope, then: String) {
     if (!wtf.lennard.thorbro.Direct.permitted(ctx)) {
         (ctx as? android.app.Activity)?.requestPermissions(arrayOf(wtf.lennard.thorbro.Direct.permissionName()), 7)
@@ -178,7 +187,7 @@ internal fun directOn(ctx: android.content.Context, d: DirectUi, scope: kotlinx.
     scope.launch {
         val r = withContext(Dispatchers.IO) { runCatching { wtf.lennard.thorbro.Direct.start(ctx) }.getOrElse { JSONObject().put("error", it.message) } }
         d.st = r; d.busy = false
-        d.menu = if (r.has("error")) "error:" + r.optString("error") else then
+        d.menu = if (r.has("error")) "error:" + r.optString("error") else then.ifEmpty { null }
     }
 }
 

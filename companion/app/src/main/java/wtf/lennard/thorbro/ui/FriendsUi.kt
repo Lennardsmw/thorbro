@@ -87,12 +87,20 @@ object SystemNav { val focus = mutableStateOf<String?>(null) }
 
 private fun org.json.JSONArray?.list(): List<JSONObject> = if (this == null) emptyList() else (0 until length()).map { getJSONObject(it) }
 
-/** grey round avatar (own icons come later) */
+/** the console robots (assets/consoles) that stand in as profile pictures – the same figures as the folder badges */
+val AVATAR_CONSOLES = listOf("snes", "n64", "gba", "psx", "megadrive", "gc", "nes", "ps2", "dreamcast", "switch", "nds", "psp",
+    "gb", "saturn", "wii", "xbox", "n3ds", "gbc", "pcengine", "wonderswan")
+
+/** a person's console: the same for the same name on every Thor */
+fun avatarConsole(name: String): String = AVATAR_CONSOLES[Math.floorMod(name.trim().lowercase().hashCode(), AVATAR_CONSOLES.size)]
+
+/** round avatar: a console robot by default (no grey initials); [me] gets a thin ring */
 @Composable
 fun Avatar(name: String, size: Int = 40, me: Boolean = false) {
-    Box(Modifier.size(size.dp).clip(CircleShape).background(Color(0xFF5A5E68)), contentAlignment = Alignment.Center) {
-        if (me) Icon(Icons.Filled.Person, null, Modifier.size((size * 0.62).dp), tint = Color(0xFFD5D8DE))
-        else Text(name.take(1).uppercase(), fontSize = (size * 0.45).sp, fontWeight = FontWeight.Bold, color = Color(0xFFE9EBEF))
+    Box(Modifier.size(size.dp).clip(CircleShape).background(Color(0xFFEFE7D2))
+        .then(if (me) Modifier.border(2.dp, Ink.copy(alpha = 0.7f), CircleShape) else Modifier).padding((size * 0.12).dp),
+        contentAlignment = Alignment.Center) {
+        ConsoleIcon(avatarConsole(name), (size * 0.76).dp)
     }
 }
 
@@ -102,12 +110,12 @@ fun FriendsButton() {
     val ctx = LocalContext.current
     var waiting by remember { mutableStateOf(0) }
     WhileVisible { while (true) { waiting = withContext(Dispatchers.IO) { Pals.requests(ctx).size + wtf.lennard.thorbro.Party.invites(ctx).size + wtf.lennard.thorbro.Gifts.waiting(ctx) }; delay(3000) } }
-    val fx = rememberFx()
+    // tap only: L2 opens it from the pad; d-pad up from the page chips must never land here
     Box {
-        Box(Modifier.size(38.dp).fx(fx, CircleShape, lift = 1.1f) { FriendsUi.open = true }
-            .then(if (fx.active) Modifier.background(Accent) else Modifier.background(GlassFill)), contentAlignment = Alignment.Center) {
-            Icon(Icons.Filled.Group, "Freunde (L2)", Modifier.size(22.dp), tint = if (fx.active) OnAccent else Ink)
+        Box(Modifier.size(38.dp).clip(CircleShape).tap { FriendsUi.open = true }.background(GlassFill), contentAlignment = Alignment.Center) {
+            Icon(Icons.Filled.Person, "Freunde (L2)", Modifier.size(22.dp), tint = Ink)
         }
+        KeyCapSmall("L2", Modifier.align(Alignment.BottomStart).offset((-10).dp, 6.dp))
         CountBadge(waiting, Modifier.align(Alignment.TopEnd))
     }
 }
@@ -167,7 +175,7 @@ fun FriendsPanel() {
     }
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) { Pals.importDownloads(ctx) }
-        refresh(); delay(200); runCatching { first.requestFocus() }
+        refresh(); first.focusSoon()
     }
     // nearby: same WLAN / hotspot, looked for again every 15 s while the menu is open
     LaunchedEffect(Unit) { while (true) { withContext(Dispatchers.IO) { runCatching { Pals.scanNearby(ctx) } }; refresh(); delay(15_000) } }
@@ -315,8 +323,9 @@ fun FriendsPanel() {
 private fun Hint(btn: String, what: String, onClick: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clip(RoundedCornerShape(12.dp))
         .then(Modifier.background(Color.Transparent))) {
-        Box(Modifier.size(24.dp).clip(CircleShape).background(when (btn) { "Y" -> Color(0xFF3FB950); "X" -> Color(0xFF3B82F6); else -> Color.White }), contentAlignment = Alignment.Center) {
-            Text(btn, color = if (btn == "Y" || btn == "X") Color.White else Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        // the same glyph as the hint bar for every button (A, B, X, Y): no extra colours
+        Box(Modifier.size(24.dp).clip(CircleShape).background(Accent), contentAlignment = Alignment.Center) {
+            Text(btn, color = OnAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         }
         androidx.compose.material3.TextButton(onClick) { Text(what, fontSize = 14.sp, color = Ink) }
     }

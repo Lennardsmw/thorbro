@@ -229,6 +229,7 @@ object RommSync {
             job.message = "Lade ${f.name} hoch"
             /** the file actually sent can differ from the listed size (zipped folders): scale it onto the rom's share */
             fun report(file: File): (Long) -> Unit { val len = file.length().coerceAtLeast(1); return { sent ->
+                job.check() // cancelled from the transfer list: ends the upload right here
                 val now = done + sent * romSize / len
                 job.progress = now.toDouble() / total
                 job.bytes(now, total); job.gameBytes(sent, len)
@@ -244,6 +245,7 @@ object RommSync {
                 } else upload(ctx, pid, f.name, f, assembling, report(f))
                 remember(ctx, slug, rom.getString("file"), romSize)
                 romsUp++; History.add(ctx, "rom_up", rom.optString("name").ifEmpty { f.name }, sys, ms = System.currentTimeMillis() - t0, size = romSize, path = f.path)
+            } catch (e: Jobs.Stopped) { throw e // cancelled: the queue handles it
             } catch (e: Exception) { errors.put("${f.name}: ${e.message}"); Logs.e("romm", "Upload ${f.name}", e) }
             done += romSize
             job.progress = done.toDouble() / total
@@ -357,13 +359,24 @@ object RommSync {
      * folders take the newest save of the slot, files only saves with the ROM's or the file's base name and a save extension
      */
     internal fun cloudNewest(ctx: Context, romId: Int, rom: JSONObject, s: SaveItem?): JSONObject? {
-        val slot = Profiles.slot(ctx, Profiles.owner(ctx, rom.optString("path")))
-        val all = Romm.listSaves(ctx, romId).filter { Romm.slotOf(it) == slot }
+        val owner = Profiles.owner(ctx, rom.optString("path"))
+        val slot = Profiles.slot(ctx, owner)
+        val saves = Romm.listSaves(ctx, romId)
+        // the first profile also sees saves in slots no other ThorBro profile uses: none, "autosave" (RomBro on the Mac,
+        // RomM's web upload / autosave) – they are this game's saves too
+        val all = saves.filter { Romm.slotOf(it) == slot }.ifEmpty {
+            if (owner != Profiles.MAIN) emptyList()
+            else {
+                val others = Profiles.list(ctx).filter { it.id != Profiles.MAIN }.mapNotNull { it.slot }.toSet()
+                saves.filter { Romm.slotOf(it) !in others }
+            }
+        }
         if (s != null && s.isFolder) return all.maxByOrNull { remoteTime(it) }
         val romBase = rom.optString("file").substringBeforeLast('.').lowercase()
         val saveBase = s?.file?.name?.substringBeforeLast('.')?.lowercase() ?: romBase
         val files = all.filter { r -> remoteBaseExt(r)?.first?.let { it == romBase || it == saveBase } == true }
-        return (files.ifEmpty { if (s == null) all else emptyList() }).maxByOrNull { remoteTime(it) }
+        // the list is already this game's (per RomM id): if no name matches (GameCube .gci / memory cards, other names), the newest one counts
+        return files.ifEmpty { all }.maxByOrNull { remoteTime(it) }
     }
 
     private val saveExtOnly = Regex("(?i)^(sav|srm|dsv|eep|fla|sra|mpk|mcr)$")

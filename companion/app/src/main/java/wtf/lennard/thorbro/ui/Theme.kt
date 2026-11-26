@@ -71,7 +71,7 @@ val DoodlePalette = Palette(
     accent = Color(0xFFA5B98C), onAccent = Color(0xFF1A1E1F),
     primary = Color(0xFFF0A94B), onPrimary = Color(0xFF1A1E1F),
     panel = Color(0xFF252A2A), fillTop = Color(0xFF252A2A), fillBottom = Color(0xFF252A2A),
-    line = Color(0xC7EFE7D2), lineW = 2.dp, frame = Color(0xFFA5B98C), frameW = 3.dp,
+    line = Color(0xC7EFE7D2), lineW = 2.dp, frame = Color(0xFFFFF8E6), frameW = 3.dp,
     soft = Color(0x29A5B98C), sheet = Color(0xFA252A2A), card = Color(0xFF2F3535), hintBar = Color(0xFF141718),
     ok = Color(0xFFA5B98C), bad = Color(0xFFFF9C84),
     shadow = Color(0xFF4A5C38), primaryShadow = Color(0xFF7A4A0F), headFont = FontFamily.Serif, mascot = true,
@@ -101,11 +101,8 @@ object Theme {
 }
 
 /** hard offset shadow (doodle buttons): the shape again, shifted down-right, in [color] */
-fun Modifier.hardShadow(shape: Shape, color: Color?, offset: Dp = 4.dp): Modifier =
-    if (color == null) this else this.drawBehind {
-        val o = shape.createOutline(size, layoutDirection, this)
-        translate(offset.toPx(), offset.toPx()) { drawOutline(o, color) }
-    }
+@Suppress("UNUSED_PARAMETER")
+fun Modifier.hardShadow(shape: Shape, color: Color?, offset: Dp = 4.dp): Modifier = this // flat: the offset shadow is gone (redesign)
 
 /** the little ThorBro robot (doodle theme); moods: base, ask, busy, done, tired, stuffed, wait */
 enum class Mood(val res: Int, val line: String) {

@@ -44,10 +44,15 @@ fun NewRoot(screen: Screen?) {
         HomeScreenNew(showDetail = { detail = it })
     } else {
         val area = Area.of(screen)
+        // a new page starts with its head visible and the default hint
+        androidx.compose.runtime.LaunchedEffect(screen, NewGamesNav.folder.value) { Header.hidden = false }
         Column(Modifier.fillMaxSize().glassBackground()) {
-            NewTopBar(area)
-            PageRow(area, screen)
-            Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 28.dp, vertical = 4.dp)) {
+            androidx.compose.animation.AnimatedVisibility(!Header.hidden) {
+                NewTopBar(area)
+            }
+            androidx.compose.foundation.layout.Row(Modifier.weight(1f).fillMaxWidth()) {
+            if (area == Area.SYSTEM) SideRail(area, screen)
+            Box(Modifier.weight(1f).fillMaxWidth().padding(start = if (area == Area.SYSTEM) 8.dp else 28.dp, end = 28.dp, top = 4.dp, bottom = 4.dp)) {
                 when (screen) {
                     Screen.GAMES -> GamesScreenNew()
                     Screen.STORE -> StoreScreenNew()
@@ -56,9 +61,12 @@ fun NewRoot(screen: Screen?) {
                     Screen.SETTINGS -> SystemScreenNew()
                     Screen.CONTROLLER -> ControllerScreenNew()
                     Screen.DRIVERS -> DriversScreen()
+                    Screen.TRANSFERS -> TransfersScreen()
                 }
             }
-            ButtonHints("A" to "Auswählen", "B" to "Zurück", "L1 R1" to "Bereich")
+            }
+            if (screen == Screen.TRANSFERS) ButtonHints("A" to (Hints.a ?: "Auswählen"), "X" to "Abbrechen", "B" to "Zurück", "L1 R1" to "Bereich")
+            else ButtonHints("A" to (Hints.a ?: "Auswählen"), "B" to "Zurück", "L1 R1" to "Bereich")
         }
     }
     detail?.let { g ->
@@ -87,6 +95,7 @@ fun newNavKey(code: Int, s: Screen?): Boolean {
             ActivityUi.open -> { ActivityUi.open = false; true }
             s == Screen.GAMES && NewGamesNav.folder.value != null -> { NewGamesNav.folder.value = null; true }
             s == Screen.STORE && StoreNav.query.value.isNotEmpty() -> { StoreNav.query.value = ""; true }
+            s == Screen.TRANSFERS -> { Nav.go(Screen.STORE); true }
             s != null && s != Screen.CONTROLLER -> { Nav.go(null); true }
             else -> false
         }

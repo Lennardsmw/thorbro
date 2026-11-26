@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -18,6 +20,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Download
@@ -127,20 +130,29 @@ fun TogetherScreenNew() {
         scope.launch { while (!j.done) { prog = j.progress.toFloat(); delay(300) }; delay(2500); job = null; tick += 5 }
     }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    HeaderFollows(list)
+    CenteredFocus {
+    androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize(), state = list,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+      item(key = "cards") {
+        Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
             TogetherCard("Mit Freunden", Icons.Filled.Groups, Modifier.weight(1f).fillMaxHeight()) {
                 Text(when {
                     party == null -> "Freunde einladen – dann startet ein Spiel bei allen, auch übers Internet."
-                    party.optBoolean("leaderMe") -> "Du leitest die Party · ${members.size} dabei"
+                    party.optBoolean("leaderMe") -> "Du leitest die Party"
                     net.optBoolean("connected") -> "Verbunden mit ${net.optString("leader")}"
                     net.optBoolean("following") -> "Verbinde mit ${net.optString("leader")} …"
                     else -> "Wartet auf ${members.firstOrNull { !it.optBoolean("me") }?.optString("name") ?: "den Leiter"}"
-                }, fontSize = 15.sp, color = Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                if (party != null) Text(members.joinToString(", ") { if (it.optBoolean("me")) "du" else it.optString("name") },
-                    fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }, fontSize = 14.sp, color = Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                // the party at a glance: you, the others, and a place to invite someone
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Top) {
+                    PartyFace(wtf.lennard.thorbro.Pals.myName(ctx), "Du", me = true)
+                    members.filter { !it.optBoolean("me") }.take(4).forEach { m -> PartyFace(m.optString("name"), m.optString("name")) }
+                    InviteFace(Modifier.focusRequester(first)) { FriendsUi.open = true }
+                }
                 if (lobby != null) Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)).background(Panel)) { Img(lobbyArt, 200, Modifier.fillMaxSize(), ContentScale.Crop) }
+                    Box(Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).background(Panel)) { Img(lobbyArt, 200, Modifier.fillMaxSize(), ContentScale.Crop) }
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(lobby.optString("game"), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -148,13 +160,8 @@ fun TogetherScreenNew() {
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                BigButton(if (party == null) "Freunde einladen" else "Party öffnen", Icons.Filled.Groups, primary = true,
-                    modifier = Modifier.fillMaxWidth().focusRequester(first)) { FriendsUi.open = true }
                 if (lobby != null) BigButton("Spiel für alle beenden", Icons.Filled.Close, modifier = Modifier.fillMaxWidth()) { Netplay.close(ctx); tick++ }
-                else if (services.isNotEmpty()) BigButton("So geht's", Icons.Filled.Info, modifier = Modifier.fillMaxWidth()) {
-                    info = "Zusammen spielen" to services.joinToString("\n\n") { "${it.optString("name")}\n${it.optString("how")}" } +
-                        "\n\nIn einer Party führt 127.0.0.1 von selbst zum Raum des Leiters – im WLAN, über NetBird oder übers Internet."
-                }
+                else if (party != null) BigButton("Party öffnen", Icons.Filled.Groups, primary = true, modifier = Modifier.fillMaxWidth()) { FriendsUi.open = true }
                 lobby?.let { l -> if (l.optString("mode") in listOf("azahar", "eden")) Text(
                     if (l.optString("mode") == "azahar") "Azahar → Mehrspieler → Direkt verbinden → 127.0.0.1:${Azahar.PORT}"
                     else "Eden → Mehrspieler → Raum beitreten → 127.0.0.1:${wtf.lennard.thorbro.EdenRoom.PORT}",
@@ -162,13 +169,12 @@ fun TogetherScreenNew() {
             }
             TogetherCard("Vom PC spielen", Icons.Filled.Computer, Modifier.weight(1f).fillMaxHeight()) {
                 Text(if (installed) "Moonlight ${stream?.optString("version")} · Sunshine auf dem PC" else "Moonlight auf dem Thor, Sunshine auf dem PC",
-                    fontSize = 15.sp, color = Muted, maxLines = 2)
-                Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    hosts?.let { list ->
-                        if (list.isEmpty()) Text("Kein PC mit Sunshine im WLAN gefunden.", fontSize = 14.sp, color = Muted)
-                        list.forEach { h -> SettingRow(h.optString("name"), h.optString("address"), Icons.Filled.Computer, value = "Koppeln") { hostMenu = h } }
-                    }
+                    fontSize = 14.sp, color = Muted, maxLines = 2)
+                hosts?.let { list ->
+                    if (list.isEmpty()) Text("Kein PC mit Sunshine im WLAN gefunden.", fontSize = 14.sp, color = Muted)
+                    list.take(3).forEach { h -> SettingRow(h.optString("name"), h.optString("address"), Icons.Filled.Computer, value = "Koppeln") { hostMenu = h } }
                 }
+                Spacer(Modifier.weight(1f))
                 val j = job
                 when {
                     j != null -> BigButton(if (j.done) (j.error ?: "Am Thor bestätigen") else "Lädt … ${(prog * 100).toInt()} %", Icons.Filled.Download,
@@ -186,29 +192,41 @@ fun TogetherScreenNew() {
                 }
             }
         }
-        // rarer tools in one row
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            BigButton("Emulatoren einrichten", Icons.Filled.Tune, modifier = Modifier.weight(1f)) {
-                scope.launch {
-                    BottomStatus.working("Richte Emulatoren ein …", 0.5f)
-                    val r = withContext(Dispatchers.IO) { runCatching { Netplay.prepare(ctx) }.getOrElse { JSONObject().put("Fehler", it.message) } }
-                    BottomStatus.text = null
-                    info = "Emulatoren" to r.keys().asSequence().joinToString("\n") { "$it: ${r.optString(it)}" }.ifEmpty { "Nichts zu tun" }
+      }
+      // the rarer tools: 2×2 tiles with a line that says what they do (no cut-off pills)
+      item(key = "tools") {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ToolTile("Emulatoren einrichten", "Netplay in RetroArch, PPSSPP, Eden …", Icons.Filled.Tune, Modifier.weight(1f)) {
+                    scope.launch {
+                        BottomStatus.working("Richte Emulatoren ein …", 0.5f)
+                        val r = withContext(Dispatchers.IO) { runCatching { Netplay.prepare(ctx) }.getOrElse { JSONObject().put("Fehler", it.message) } }
+                        BottomStatus.text = null
+                        info = "Emulatoren" to r.keys().asSequence().joinToString("\n") { "$it: ${r.optString(it)}" }.ifEmpty { "Nichts zu tun" }
+                    }
+                }
+                ToolTile(if (live) "Übertragung stoppen" else "Bildschirm am PC", if (live) "läuft gerade" else "Thor-Bild im Browser zeigen", Icons.Filled.Tv, Modifier.weight(1f)) {
+                    if (live) { wtf.lennard.thorbro.Screen.stop(); live = false }
+                    else {
+                        ctx.startActivity(android.content.Intent(ctx, wtf.lennard.thorbro.MainActivity::class.java)
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK).putExtra(wtf.lennard.thorbro.MainActivity.EXTRA_CAPTURE, true))
+                        screenMenu = true
+                    }
                 }
             }
-            BigButton(if (live) "Übertragung stoppen" else "Bildschirm am PC", Icons.Filled.Tv, modifier = Modifier.weight(1f)) {
-                if (live) { wtf.lennard.thorbro.Screen.stop(); live = false }
-                else {
-                    ctx.startActivity(android.content.Intent(ctx, wtf.lennard.thorbro.MainActivity::class.java)
-                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK).putExtra(wtf.lennard.thorbro.MainActivity.EXTRA_CAPTURE, true))
-                    screenMenu = true
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ToolTile("Thor als Controller", "für PC oder einen anderen Thor", Icons.Filled.Gamepad, Modifier.weight(1f)) {
+                    ctx.startActivity(android.content.Intent(ctx, GamepadActivity::class.java))
                 }
+                ToolTile("ThorBro weitergeben", "an einen Thor in der Nähe", Icons.Filled.Share, Modifier.weight(1f)) { direct.menu = "share" }
             }
-            BigButton("Thor als Controller", Icons.Filled.Gamepad, modifier = Modifier.weight(1f)) {
-                ctx.startActivity(android.content.Intent(ctx, GamepadActivity::class.java))
+            if (lobby == null && services.isNotEmpty()) ToolTile("So geht's", "Zusammen spielen in den einzelnen Emulatoren", Icons.Filled.Info, Modifier.fillMaxWidth()) {
+                info = "Zusammen spielen" to services.joinToString("\n\n") { "${it.optString("name")}\n${it.optString("how")}" } +
+                    "\n\nIn einer Party führt 127.0.0.1 von selbst zum Raum des Leiters – im WLAN, über NetBird oder übers Internet."
             }
-            BigButton("ThorBro weitergeben", Icons.Filled.Share, modifier = Modifier.weight(1f)) { direct.menu = "share" }
         }
+      }
+    }
     }
 
     info?.let { (t, x) -> ConsoleMenu(t, x, options = emptyList()) { info = null } }
@@ -224,3 +242,40 @@ fun TogetherScreenNew() {
     DirectDialog(direct)
 }
 
+
+/** one face in the party row: avatar + name below */
+@Composable
+private fun PartyFace(name: String, label: String, me: Boolean = false) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(64.dp)) {
+        Avatar(name, 52, me = me)
+        Text(label, fontSize = 12.sp, color = if (me) Ink else Muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
+/** the empty seat: "+" → friends panel (invite) */
+@Composable
+private fun InviteFace(modifier: Modifier, onClick: () -> Unit) {
+    val fx = rememberFx()
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(64.dp)) {
+        Box(modifier.size(52.dp).hintA("Einladen").fx(fx, CircleShape, lift = 1.1f, onClick = onClick).background(if (fx.active) Accent else Panel),
+            contentAlignment = Alignment.Center) {
+            Icon(Icons.Filled.Add, "Einladen", Modifier.size(26.dp), tint = if (fx.active) OnAccent else Ink)
+        }
+        Text("Einladen", fontSize = 12.sp, color = if (fx.active) Ink else Muted, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
+/** a small tool tile: icon, title, one line what it does */
+@Composable
+private fun ToolTile(title: String, sub: String, icon: ImageVector, modifier: Modifier, onClick: () -> Unit) {
+    val fx = rememberFx()
+    Row(modifier.height(68.dp).fx(fx, RoundedCornerShape(18.dp), lift = 1.03f, onClick = onClick).background(if (fx.active) Soft else Panel)
+        .padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, Modifier.size(24.dp))
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(sub, fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}

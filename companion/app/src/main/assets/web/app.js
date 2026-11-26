@@ -83,7 +83,7 @@ let info = null;
 async function loadDevice() {
   const { body } = await api('/api/info');
   info = body;
-  if ($('#verTag')) { $('#verTag').textContent = 'v' + body.appVersion; $('#verTag').hidden = false; }
+  // the build string lives once in Gerät › ThorBro, not in a footer
   updMood();
   $('#conn').textContent = `${body.manufacturer} ${body.model} · ${body.ip}:${body.port}`;
   const p = body.permissions;
@@ -614,7 +614,8 @@ async function loadRoms(refresh) {
   if (refresh) Object.keys(metaCache).forEach((k) => delete metaCache[k]);
   // Upload target: the Thor's ROM folder (Settings)
   if (romData.romRoot && document.activeElement !== $('#romRoot')) { $('#romRoot').value = romData.romRoot; renderQueue(); }
-  if (!romData.systems.some((s) => s.id === romSys)) romSys = romData.systems[0]?.id || '';
+  // '' = all consoles as folders (the start of the Spiele page)
+  if (romSys && !romData.systems.some((s) => s.id === romSys)) romSys = '';
   renderRoms();
 }
 
@@ -645,13 +646,31 @@ function renderStats() {
     `gescannt ${new Date(romData.scannedAt).toLocaleTimeString()}` + ($('#romStats').dataset.extra || '');
 }
 
+/** sort names as they are said: "Legend of Zelda, The - Breath of the Wild" → "The Legend of Zelda: Breath of the Wild" */
+const displayTitle = (t) => {
+  const m = /^(.+?), (The|A|An|Der|Die|Das|Le|La|Les|El|Il)((?:\s*[-:].*)?)$/.exec(String(t || '').trim());
+  return m ? `${m[2]} ${m[1]}${m[3].replace(/^\s*-\s*/, ': ')}` : t;
+};
+const romTitle = (r, m) => displayTitle(m.title || r.name.replace(/\s*[([].*$/, '') || r.name);
+
+/** a console as a folder: a 2×2 collage of its covers (Cocoon art), the console as a small badge; no covers → the console big */
+function folderTile(s) {
+  const games = s.id === 'switch' ? groupSwitch(s.roms) : s.roms;
+  const four = games.slice(0, 4);
+  const size = games.reduce((a, r) => a + (r.group ? r.group.size : r.size), 0);
+  const imgs = s.id === 'ports' ? '' : four.map((r) => `<img alt="" loading="lazy" src="${mediaUrl(s.id, r.path, 'icon')}" onerror="this.remove()">`).join('');
+  return `<button class="folder" data-sys-pick="${esc(s.id)}" title="${esc(s.name)}">
+    <div class="fart">${sysIcon(s.id, 'fbig')}<div class="collage">${imgs}</div>${sysIcon(s.id, 'cbadge')}</div>
+    <div class="rtitle">${esc(s.name)}</div><div class="rmeta">${games.length} · ${fmt(size)}</div></button>`;
+}
+
 const sysIcon = (id, cls = 'sysicon') => id === '_unassigned'
   ? `<span class="${cls} noicon">?</span>`
   : `<img class="${cls}" alt="" loading="lazy" src="${iconUrl(id)}" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'${cls} noicon',textContent:'${id.slice(0, 2).toUpperCase()}'}))">`;
 
 function romCard(r, sysId) {
   const m = (metaCache[sysId] || {})[r.path] || {};
-  const title = m.title || r.name.replace(/\s*[([].*$/, '') || r.name;
+  const title = romTitle(r, m);
   const line = [m.year, m.developer || m.publisher].filter(Boolean).join(' · ');
   const src = coverOf(sysId, r, m);
   const cover = src
@@ -671,15 +690,14 @@ function romCard(r, sysId) {
     <div class="rtitle">${m.favorite ? '<span class="fav">★</span> ' : ''}${esc(title)}</div>
     ${(() => { const ra = (raCache[sysId] || {})[r.path]; return ra && ra.gameId ? `<div class="rmeta ra">🏆 ${ra.awarded ?? 0}/${ra.achievements} Erfolge</div>` : ''; })()}
     <div class="rmeta">${esc(line) || '&nbsp;'}</div>
-    ${(() => { const g = lib?.games?.[r.path]; if (!g) return ''; return `<div class="rommicons"><span class="ri ${g.inRomm ? 'on' : ''}" title="${g.inRomm ? 'Spiel in RomM' : 'Spiel nicht in RomM'}">☁</span>${g.save !== 'none' ? `<span class="ri ${g.save === 'synced' ? 'on' : ''}" title="Spielstand ${g.save === 'synced' ? 'in RomM' : 'noch nicht in RomM'}">💾</span>` : ''}</div>`; })()}
-    <div class="rbadges">${m.region ? `<span class="badge">${esc(m.region)}</span>` : ''}${swBadges || `<span class="badge">${esc(r.ext)}</span>`}<span class="muted">${fmt(sw ? sw.size : r.size)}</span></div>
+    <div class="rbadges">${swBadges}<span class="muted">${[m.region, fmt(sw ? sw.size : r.size)].filter(Boolean).join(' · ')}</span></div>
   </div>`;
 }
 
 function renderRoms() {
   if (!romData) return;
   renderStats();
-  $('#sysList').innerHTML = romData.systems.map((s) =>
+  $('#sysList').innerHTML = `<button data-sys-pick="" class="${romSys ? '' : 'active'}"><span class="grow">▦ Alle Konsolen</span></button>` + romData.systems.map((s) =>
     `<button data-sys-pick="${s.id}" class="${s.id === romSys ? 'active' : ''}">${sysIcon(s.id)}<span class="grow ${s.id === '_unassigned' ? 'warn' : ''}">${esc(s.name)}</span><span class="n">${s.count}</span></button>`).join('');
   const f = $('#romFilter').value.trim().toLowerCase();
   const region = $('#romRegion').value;
@@ -700,7 +718,9 @@ function renderRoms() {
       (hits.length ? `<div class="covergrid">${hits.join('')}</div>` : '<p class="muted">Nichts gefunden.</p>');
   } else {
     const s = romData.systems.find((x) => x.id === romSys);
-    if (!s) html = '<p class="muted">Keine ROMs gefunden. Lege sie z. B. unter ROMs/&lt;konsole&gt; ab.</p>';
+    const consoles = romData.systems.filter((x) => x.id !== '_unassigned' && x.count > 0);
+    if (!romSys && consoles.length) html = `<div class="covergrid folders">${consoles.map(folderTile).join('')}</div>`;
+    else if (!s) html = '<p class="muted">Keine ROMs gefunden. Lege sie z. B. unter ROMs/&lt;konsole&gt; ab.</p>';
     else {
       loadMeta(s.id);
       let list = s.roms.filter((r) => match(r, s.id));
@@ -709,7 +729,7 @@ function renderRoms() {
       const emuSel = ev ? `<label class="muted">Emulator <select data-emu-sys="${s.id}">${ev.options.map((o) => `<option value="${o.id}" ${o.id === ev.current ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select></label>` : '';
       const grantHint = ev && emus.folderGrants.length === 0 && !(ev.current === 'retroarch')
         ? `<p class="muted">Zum Starten braucht ThorBro einmal die Freigabe deines ROM-Ordners. <button data-grant>Freigabe auf dem Thor öffnen</button></p>` : '';
-      html = `<div class="romhead">${sysIcon(s.id, 'headicon')}<h2>${esc(s.name)}</h2><span class="muted">${s.id === 'switch' ? list.length + ' Spiele · ' + s.count + ' Dateien' : s.count + ' Spiele'} · ${fmt(s.size)}</span><span class="grow"></span>${emuSel}</div>` + grantHint +
+      html = `<div class="romhead"><button data-sys-pick="" class="back">← Alle Konsolen</button>${sysIcon(s.id, 'headicon')}<h2>${esc(s.name)}</h2><span class="muted">${s.id === 'switch' ? list.length + ' Spiele · ' + s.count + ' Dateien' : s.count + ' Spiele'} · ${fmt(s.size)}</span><span class="grow"></span>${emuSel}</div>` + grantHint +
         (s.id === '_unassigned' ? '<p class="muted">Diese Dateien liegen nicht in einem Konsolen-Ordner und die Endung passt zu mehreren Konsolen. Öffne eine, um sie einer Konsole zuzuordnen.</p>' : '') +
         `<div class="covergrid">${list.map((r) => romCard(r, s.id)).join('')}</div>`;
     }
@@ -734,7 +754,9 @@ function openRom(path, sysId) {
       ${src ? `<img class="dcover" alt="" src="${src}">` : `<div class="dcover nocover">${sysIcon(sysId, 'bigicon')}</div>`}
       <div class="dinfo">
         <div class="romhead">${sysIcon(sysId, 'headicon')}<span class="muted">${esc(sys.name)}</span></div>
-        <h2>${esc(m.title || r.name.replace(/\s*[([].*$/, ''))}</h2>
+        <h2>${esc(romTitle(r, m))}</h2>
+        <p class="quiet">${[fmt(r.group ? r.group.size : r.size), lib?.games?.[r.path] ? (lib.games[r.path].inRomm ? 'in RomM' : 'nicht in RomM') : '',
+          ({ synced: 'Spielstand in RomM', pending: 'Spielstand geändert', local: 'Spielstand nur auf dem Thor' })[lib?.games?.[r.path]?.save] || ''].filter(Boolean).join(' · ')}</p>
         <table class="meta">
           ${row('Jahr', m.year)}${row('Entwickler', m.developer)}${row('Publisher', m.publisher)}
           ${row('Genre', m.genre)}${row('Spieler', m.players)}${row('Bewertung', m.rating ? m.rating + ' / 10' : '')}
@@ -751,7 +773,7 @@ function openRom(path, sysId) {
         ${r.group ? `<h3 style="margin:12px 0 4px;font-size:15px">Dateien dieses Spiels</h3><table class="meta">${r.group.all.map((x) =>
           `<tr><td class="muted">${x.switchKind === 'base' ? 'Spiel' : x.switchKind === 'update' ? 'Update ' + esc(x.versionLabel) : 'DLC'}${r.group.oldUpdates.includes(x) ? ' <span class="badge warnbadge">veraltet</span>' : ''}</td><td>${esc(x.file)} <span class="muted">${fmt(x.size)}</span></td><td><button data-romdel="${esc(x.path)}">Löschen</button></td></tr>`).join('')}</table>` : ''}
         <div class="row">
-          ${emus && emus.systems[sysId] && (!r.group || r.group.base) ? `<button class="primary" data-play="${esc(r.path)}" data-play-sys="${esc(sysId)}">▶ Auf dem Thor spielen</button>` : ''}
+          ${emus && emus.systems[sysId] && (!r.group || r.group.base) ? `<button class="primary" data-play="${esc(r.path)}" data-play-sys="${esc(sysId)}">▶ Spielen</button>` : ''}
           ${sysId === 'ports' ? '' : `<button data-send="${esc(r.path)}" data-send-sys="${esc(sysId)}" data-send-kind="game" data-send-title="${esc(r.name || r.file || '')}">Weitergeben</button>`}
           <button data-dir-roms="${esc(folder)}">Im Datei-Tab öffnen</button>
           ${r.dir ? '' : `<a class="btn" href="/api/files/raw?${q({ path: r.path, token })}">Herunterladen</a>`}
@@ -759,7 +781,7 @@ function openRom(path, sysId) {
           ${lib?.connected && sysId !== 'ports' && sysId !== '_unassigned' ? `<button data-offload="${esc(JSON.stringify(r.group ? r.group.all.map((x) => x.path) : [r.path]))}" data-offload-size="${r.group ? r.group.size : r.size}" data-offload-in="${lib.games?.[r.path]?.inRomm ? 1 : 0}" data-offload-name="${esc(m.title || r.name.replace(/\s*[([].*$/, ''))}">${lib.games?.[r.path]?.inRomm ? 'In RomM auslagern' : 'Hochladen + auslagern'}</button>` : ''}
           ${lib?.connected && sysId !== 'ports' && sysId !== '_unassigned' && lib.games?.[r.path] && !lib.games[r.path].inRomm
             ? (lib.games[r.path].uploaded ? '<button disabled title="RomM zeigt es nach dem nächsten Scan">✓ In RomM hochgeladen</button>'
-              : `<button data-romm-up="${esc(JSON.stringify(r.group ? r.group.all.map((x) => x.path) : [r.path]))}">☁ Zu RomM hochladen</button>`) : ''}
+              : `<button data-romm-up="${esc(JSON.stringify(r.group ? r.group.all.map((x) => x.path) : [r.path]))}" data-name="${esc(romTitle(r, m))}" data-sys="${esc(sysId)}">☁ Zu RomM hochladen</button>`) : ''}
           <span class="grow"></span>
           <button data-close>Schließen</button>
         </div>
@@ -894,25 +916,61 @@ $('#romDetail').addEventListener('click', async (e) => {
   } catch (err) { alert(err.message); }
 });
 
-// one game to RomM without deleting it; progress on the button, the bubble top right shows it too
+// one game to RomM without deleting it: goes on the transfer queue (one after another, survives a restart); progress in the bar at the bottom
 $('#romDetail').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-romm-up]');
   if (!b) return;
   const paths = JSON.parse(b.dataset.rommUp);
-  b.disabled = true; b.textContent = 'Verbinde …';
+  b.disabled = true;
   try {
-    const { body: job } = await api('/api/romm/upload?' + paths.map((p) => 'path=' + encodeURIComponent(p)).join('&'), { method: 'POST' });
-    if (job.error && !job.id) throw new Error(job.error);
-    if (job.name !== 'Zu RomM hochladen') { b.textContent = 'RomM-Abgleich läuft schon'; toast('Ein RomM-Abgleich läuft schon – Fortschritt oben rechts'); return; }
-    pollActivity();
-    const res = await waitJob(job.id, (j) => { b.textContent = `Lädt hoch … ${Math.round(j.progress * 100)} %`; b.title = [j.message, j.transfer].filter(Boolean).join(' · '); });
-    const err = res.error || res.result?.errors?.[0];
-    if (err) { b.disabled = false; b.textContent = '☁ Zu RomM hochladen'; alert('Upload fehlgeschlagen: ' + err); return; }
-    b.textContent = '✓ In RomM hochgeladen'; b.title = 'RomM zeigt es nach dem nächsten Scan';
-    const g = lib?.games?.[paths[0]]; if (g) g.uploaded = true;
-    toast('In RomM hochgeladen');
-  } catch (err) { b.disabled = false; b.textContent = '☁ Zu RomM hochladen'; alert(err.message); }
+    const { body } = await api('/api/romm/upload?' + paths.map((p) => 'path=' + encodeURIComponent(p)).join('&') + '&' + q({ name: b.dataset.name || '', system: b.dataset.sys || '' }), { method: 'POST' });
+    if (body.error && !body.id) throw new Error(body.error);
+    b.textContent = '⬆ In der Warteschlange';
+    toast('Zu RomM: in der Warteschlange – Fortschritt unten');
+    pollTransfers();
+  } catch (err) { b.disabled = false; alert(err.message); }
 });
+
+// ---------- transfers: the queue for store downloads and RomM uploads ----------
+let transfers = { items: [], line: null };
+let trTimer = null;
+async function pollTransfers() {
+  clearTimeout(trTimer);
+  try { transfers = (await api('/api/transfers')).body; } catch { return; }
+  // the bar at the bottom: what runs, how far, how long still
+  const bar = $('#transferBar'), l = transfers.line;
+  bar.hidden = !l;
+  if (l) { bar.querySelector('span').textContent = l.text; bar.querySelector('i').style.width = Math.round(l.progress * 100) + '%'; }
+  bar.dataset.id = (transfers.items || []).find((t) => t.state === 'running')?.id || '';
+  if (!$('#store').hidden) { renderTransfers(); updateStoreCards(); }
+  if (!document.hidden) trTimer = setTimeout(pollTransfers, l ? 1000 : 5000);
+}
+const trState = { running: 'läuft', waiting: 'wartet', later: 'für später', error: 'Fehler', cancelled: 'abgebrochen' };
+/** stop a waiting or running transfer (the running one really stops, its half file is deleted); it stays as "abgebrochen" */
+async function cancelTransfer(id) { await api(`/api/transfers/${encodeURIComponent(id)}/cancel`, { method: 'POST' }); pollTransfers(); }
+function renderTransfers() {
+  const list = transfers.items || [];
+  $('#trCount').textContent = list.length ? `· ${list.length}` : '';
+  $('#trList').innerHTML = list.length ? `<table class="files"><tbody>${list.map((t) => `<tr>
+    <td>${t.kind === 'upload' ? '⬆ RomM · ' : '⬇ '}${esc(displayTitle(t.name))}<div class="muted">${t.state === 'running'
+      ? `${Math.round((t.progress || 0) * 100)} %${t.transfer ? ' · ' + esc(t.transfer) : ''}` : t.state === 'error' ? '<span class="err">' + esc(t.error) + '</span>' : trState[t.state]}</div>
+      ${t.state === 'running' ? `<div class="bar"><i style="width:${Math.round((t.progress || 0) * 100)}%"></i></div>` : ''}</td>
+    <td class="size">${fmt(t.size || 0)}</td>
+    <td class="acts">${['running', 'waiting', 'later'].includes(t.state) ? `<button class="small" data-tr-cancel="${esc(t.id)}">Abbrechen</button>` : ''}
+      ${['later', 'error', 'cancelled'].includes(t.state) ? `<button class="small" data-tr-start="${esc(t.id)}">${t.state === 'cancelled' ? 'Neu starten' : 'Jetzt starten'}</button>` : ''}
+      ${t.state !== 'running' ? `<button class="small" data-tr-remove="${esc(t.id)}">Entfernen</button>` : ''}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="muted">Nichts in der Warteschlange. Im Store „Laden“ oder „Später“ wählen.</p>';
+}
+$('#trList').addEventListener('click', async (e) => {
+  const s = e.target.closest('[data-tr-start]'), r = e.target.closest('[data-tr-remove]'), c = e.target.closest('[data-tr-cancel]');
+  if (c) return cancelTransfer(c.dataset.trCancel);
+  if (s) await api('/api/transfers/start?' + q({ id: s.dataset.trStart }), { method: 'POST' });
+  else if (r) await api('/api/transfers/remove?' + q({ id: r.dataset.trRemove }), { method: 'POST' });
+  else return;
+  pollTransfers();
+});
+$('#transferBar button').onclick = () => { const id = $('#transferBar').dataset.id; if (id && confirm('Übertragung abbrechen?')) cancelTransfer(id); };
+$('#trStartAll').onclick = async () => { await api('/api/transfers/start', { method: 'POST' }); pollTransfers(); };
 
 // ---------- store: games only in RomM ----------
 let storeData = null;
@@ -927,45 +985,53 @@ function renderStore() {
   if (d.error) { $('#storeInfo').textContent = 'RomM nicht erreichbar: ' + d.error; return; }
   if (!d.connected) { $('#storeInfo').textContent = 'RomM ist nicht verbunden (Tab Bibliothek).'; $('#storeList').innerHTML = ''; return; }
   const f = $('#storeFilter').value.trim().toLowerCase();
-  const n = d.systems.reduce((a, s) => a + s.games.length, 0);
-  $('#storeInfo').textContent = `${n} Spiele nur in RomM`;
+  // what counts for loading: the free space on the Thor's ROM volume, not how many games RomM has
+  const free = info?.storage?.[0]?.free;
+  $('#storeInfo').textContent = free != null ? `${fmt(free)} frei` : '';
+  // one row per console with its name; no cover → the console icon + the title
   $('#storeList').innerHTML = d.systems.map((s) => {
     const games = s.games.filter((g) => !f || g.name.toLowerCase().includes(f));
     if (!games.length) return '';
     return `<div class="romhead">${sysIcon(s.system, 'headicon')}<h2>${esc(s.name)}</h2><span class="muted">${games.length}</span></div>
-      <div class="covergrid">${games.map((g) => `<div class="romcard" data-store="${g.id}">
-        ${g.hasCover ? `<img class="cover" loading="lazy" alt="" src="/api/romm/cover/${g.id}?token=${encodeURIComponent(token)}">` : `<div class="cover nocover">${sysIcon(s.system, 'bigicon')}<span>${esc(g.name)}</span></div>`}
-        <div class="rtitle">${esc(g.name)}</div>
-        <div class="rmeta" id="st-${g.id}">${fmt(g.size)}</div>
+      <div class="shelf">${games.map((g) => `<div class="romcard" tabindex="0" data-store="${g.id}" data-name="${esc(g.name)}" data-size="${g.size}" data-sys="${esc(s.system)}" title="Laden · ${fmt(g.size)}">
+        <button class="small later" data-later="${g.id}" title="Für später merken">Später</button>
+        ${g.hasCover ? `<img class="cover" loading="lazy" alt="" src="/api/romm/cover/${g.id}?token=${encodeURIComponent(token)}">` : `<div class="cover nocover">${sysIcon(s.system, 'bigicon')}<span>${esc(displayTitle(g.name))}</span></div>`}
+        <div class="rtitle">${esc(displayTitle(g.name))}</div>
+        <div class="rmeta" id="st-${g.id}">Laden · ${fmt(g.size)}</div>
         <div class="bar"><i id="sb-${g.id}" style="width:0"></i></div>
       </div>`).join('')}</div>`;
   }).join('');
-  pollStore();
+  updateStoreCards();
+  pollTransfers();
 }
-let storePoll = null;
-async function pollStore() {
-  clearTimeout(storePoll);
-  let busy = false;
-  try {
-    const { body } = await api('/api/store/downloads');
-    for (const [id, j] of Object.entries(body)) {
-      const t = $('#st-' + id), bar = $('#sb-' + id);
-      if (!t) continue;
-      if (j.error) t.textContent = 'Fehler: ' + j.error;
-      else if (j.done) { t.textContent = '✓ auf dem Thor'; bar.style.width = '100%'; }
-      else { busy = true; t.textContent = `${Math.round(j.progress * 100)} %`; bar.style.width = (j.progress * 100) + '%'; }
-    }
-  } catch {}
-  if (busy && !$('#store').hidden) storePoll = setTimeout(pollStore, 1000);
+/** each card shows what the queue does with it: wartet, 45 % · noch 2 min, für später */
+function updateStoreCards() {
+  for (const t of transfers.items || []) {
+    if (t.kind !== 'download') continue;
+    const id = String(t.romId), m = $('#st-' + id), bar = $('#sb-' + id);
+    if (!m) continue;
+    const eta = (t.transfer || '').includes('noch ') ? ' · noch ' + t.transfer.split('noch ').pop() : '';
+    m.textContent = t.state === 'running' ? `${Math.round((t.progress || 0) * 100)} %${eta}` : t.state === 'error' ? 'Fehler: ' + t.error : trState[t.state];
+    bar.style.width = t.state === 'running' ? Math.round((t.progress || 0) * 100) + '%' : '0';
+    const card = m.closest('.romcard'), later = card?.querySelector('[data-later]');
+    const active = ['running', 'waiting', 'later'].includes(t.state);
+    if (later) { later.textContent = active ? 'Abbrechen' : 'Später'; later.dataset.cancel = active ? t.id : ''; }
+  }
 }
 $('#storeList').addEventListener('click', async (e) => {
   const c = e.target.closest('[data-store]');
   if (!c) return;
-  const id = c.dataset.store;
-  const t = $('#st-' + id);
-  if (t.textContent.includes('%') || t.textContent.startsWith('✓')) return;
-  try { await api('/api/store/download?' + q({ id }), { method: 'POST' }); t.textContent = '0 %'; pollStore(); }
-  catch (err) { alert(err.message); }
+  const lb = e.target.closest('[data-later]');
+  if (lb?.dataset.cancel) return cancelTransfer(lb.dataset.cancel);
+  const later = !!lb;
+  const t = $('#st-' + c.dataset.store);
+  if (!later && /%|wartet|✓/.test(t.textContent)) return;
+  try {
+    await api('/api/store/download?' + q({ id: c.dataset.store, name: c.dataset.name, size: c.dataset.size, system: c.dataset.sys, later: later ? 1 : 0 }), { method: 'POST' });
+    t.textContent = later ? 'für später' : 'wartet';
+    toast(later ? 'Für später gemerkt – Store › Downloads' : 'In der Warteschlange');
+    pollTransfers();
+  } catch (err) { alert(err.message); }
 });
 $('#storeFilter').oninput = renderStore;
 $('#storeReload').onclick = () => loadStore(true);
@@ -986,6 +1052,14 @@ $('#sysList').onclick = (e) => {
   $('#romFilter').value = '';
   renderRoms();
 };
+// folders and the back button live in the list itself
+$('#romList').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-sys-pick]');
+  if (!b) return;
+  romSys = b.dataset.sysPick; store.set('romSys', romSys);
+  renderRoms();
+  $('#romList').querySelector('.romcard, .folder')?.focus();
+});
 // ---------- profiles (like the Switch: who is playing?) ----------
 const profColor = (p) => p.color || '#4F8EF7';
 const profDot = (p) => `<span class="pdot" style="background:${esc(profColor(p))}">${esc((p.name || '?').slice(0, 1).toUpperCase())}</span>`;
@@ -1104,11 +1178,9 @@ async function loadSyncPlan() {
     <h4 style="margin:12px 0 4px">Spiele, die RomM noch nicht hat</h4>
     ${missing.length ? missing.map((s) => `<label style="display:block"><input type="checkbox" data-sync-sys="${s.system}"> ${esc((romData?.systems.find((x) => x.id === s.system) || {}).name || s.system)}: ${s.missing} Spiele, ${fmt(s.missingSize)}</label>`).join('') : '<span class="ok">✓ RomM hat alle Spiele vom Thor</span>'}
     <div class="row"><label class="muted">Heimnetz-Adresse (direkt statt übers Internet):</label><input id="rommLan" value="${esc(st.lanUrl || '')}" placeholder="aus" style="flex:1"><button id="rommLanSave">Speichern</button><span class="muted">${st.viaLan ? '✓ gerade im Heimnetz' : 'zuletzt nicht erreichbar'}</span></div>
-    <div class="row"><button id="syncRun" class="primary">Jetzt abgleichen</button><span id="syncState" class="muted"></span></div>
-    <h4 style="margin:12px 0 4px">Switch-Keys &amp; Firmware</h4>
-    <div class="muted">Lädt prod.keys, title.keys und die Firmware aus Eden als RomM-Firmware hoch, damit RomBro auf dem Mac sie installiert. Läuft auch bei jedem Abgleich mit (nur wenn sich etwas geändert hat).</div>
-    ${p.canFirmware ? '' : '<p class="err">Dafür braucht ThorBro das Recht firmware.write: RomM neu koppeln für Firmware. <button id="rommRepair2">Neu koppeln</button></p>'}
-    <div class="row"><button id="fwRun">Switch-Keys &amp; Firmware zu RomM</button><span id="fwState" class="muted"></span></div>`;
+    <div class="row"><button id="syncRun" class="primary">Jetzt abgleichen</button><span id="syncState" class="muted"></span></div>`;
+  // Switch-Keys & Firmware live under Gerät (System); only the missing right is pointed out there
+  $('#fwRight').innerHTML = p.canFirmware ? '' : '<p class="err">Dafür braucht ThorBro das Recht firmware.write: RomM neu koppeln für Firmware. <button id="rommRepair2">Neu koppeln</button></p>';
 }
 document.addEventListener('change', (e) => { if (e.target.id === 'syncAuto') api('/api/romm/sync/config?' + q({ auto: e.target.checked ? 1 : 0 }), { method: 'POST' }); });
 document.addEventListener('click', async (e) => {
@@ -1460,6 +1532,15 @@ $('#mlScan').onclick = async () => {
 // ---------- multiplayer (the party plays together) ----------
 let np = null;
 const npModes = { retroarch: 'RetroArch', ppsspp: 'PPSSPP', eden: 'Eden', azahar: 'Azahar', share: 'Weitergeben' };
+// ---------- avatars: a console robot per person (same pick as the Thor app: Java hashCode of the name) ----------
+const AVATAR_CONSOLES = ['snes', 'n64', 'gba', 'psx', 'megadrive', 'gc', 'nes', 'ps2', 'dreamcast', 'switch', 'nds', 'psp',
+  'gb', 'saturn', 'wii', 'xbox', 'n3ds', 'gbc', 'pcengine', 'wonderswan'];
+const avatarConsole = (name) => {
+  let h = 0; for (const c of String(name || '').trim().toLowerCase()) h = (Math.imul(31, h) + c.charCodeAt(0)) | 0;
+  return AVATAR_CONSOLES[((h % AVATAR_CONSOLES.length) + AVATAR_CONSOLES.length) % AVATAR_CONSOLES.length];
+};
+const avatar = (name, cls = '') => `<div class="avatar ${cls}"><img alt="" src="${iconUrl(avatarConsole(name))}"></div>`;
+
 async function loadNetplay() {
   try { np = (await api('/api/netplay')).body; } catch (err) { $('#npStatus').textContent = 'Fehler: ' + err.message; return; }
   const p = np.party, n = np.partyNet || {}, l = np.lobby;
@@ -1469,12 +1550,17 @@ async function loadNetplay() {
     : n.connected ? `In der Party von ${n.leader} · verbunden ✓`
     : n.following ? `In der Party von ${n.leader} · verbinde …` : 'In einer Party · warte auf den Leiter';
   $('#npClose').hidden = !l;
+  // the party at a glance: you, the others, a seat to invite someone
+  $('#npParty').innerHTML = `<div class="face">${avatar(friends?.me?.name || 'Du', 'big me')}<span>Du</span></div>` +
+    (p ? p.members.filter((m) => !m.me).map((m) => `<div class="face">${avatar(m.name, 'big')}<span>${esc(m.name)}</span></div>`).join('') : '') +
+    `<button class="face invite" data-np-invite><div class="avatar big">+</div><span>Einladen</span></button>`;
   const room = np.azahar && np.azahar.server;
   $('#npLobby').innerHTML = l ? `<p><strong>${esc(l.game)}</strong> · ${esc(npModes[l.mode] || l.mode)}${l.mode === 'azahar' && room ? ' · im 3DS-Raum: ' + esc((room.members || []).join(', ') || 'niemand') : ''}</p>` : '';
   $('#npHow').textContent = (np.services || []).map((x) => `${x.name}\n  ${x.how}`).join('\n\n');
   clearTimeout(loadNetplay.t); loadNetplay.t = setTimeout(() => { if (!$('#netplay').hidden) loadNetplay(); }, 4000);
 }
 $('#npFriends').onclick = () => $('#friendsBtn').click();
+$('#npParty').addEventListener('click', (e) => { if (e.target.closest('[data-np-invite]')) $('#friendsBtn').click(); });
 $('#npClose').onclick = async () => { await api('/api/netplay/close', { method: 'POST' }); loadNetplay(); };
 $('#npPrepare').onclick = async () => {
   $('#npInfo').textContent = 'Richte ein …';
@@ -1614,7 +1700,7 @@ function updMood() {
 async function start() {
   if (!token) return showLogin();
   loadTheme();
-  pollActivity();
+  pollActivity(); pollTransfers();
   try { await loadDevice(); showTab(store.get('tab', 'upload')); if (!romData) loadRoms(false); }
   catch (err) { if (!(err instanceof AuthError)) $('#conn').textContent = 'Thor nicht erreichbar'; }
 }
@@ -1673,15 +1759,15 @@ function giftHtml(g) {
     }
   }
   const title = g.state === 'loading' ? `Lädt: ${esc(g.title)}` : g.state === 'done' ? `${esc(g.title)} ist da` : `${esc(from)} schickt dir ${giftWhat(g.kind)}`;
-  return `<div class="person gift"><div class="avatar">${esc(from[0].toUpperCase())}</div><div class="grow"><strong>${title}</strong><div class="muted">${sub}</div></div>${btns}</div>`;
+  return `<div class="person gift">${avatar(from)}<div class="grow"><strong>${title}</strong><div class="muted">${sub}</div></div>${btns}</div>`;
 }
 function renderFriends() {
   const f = friends; if (!f) return;
   const n = f.requests.length + (f.invites || []).length + (gifts?.waiting || 0); const b = $('#friendsBadge'); b.hidden = !n; b.textContent = n;
   const d = $('#friendsDlg'); if (!d.open) return;
-  const person = (p, sub, btns) => `<div class="person"><div class="avatar${p.online ? ' on' : ''}">${esc((p.name || '?')[0].toUpperCase())}</div>
+  const person = (p, sub, btns) => `<div class="person">${avatar(p.name, p.online ? 'on' : '')}
     <div class="grow"><strong>${esc(p.name)}</strong><div class="muted">${esc(sub)}</div></div>${btns}</div>`;
-  d.innerHTML = `<div class="me"><div class="avatar big">👤</div><div class="grow"><strong style="font-size:19px">${esc(f.me.name)}</strong>
+  d.innerHTML = `<div class="me">${avatar(f.me.name, 'big me')}<div class="grow"><strong style="font-size:19px">${esc(f.me.name)}</strong>
       <div class="muted">ID ${esc(f.me.id.slice(0, 6))}</div></div><button data-fr="name">Name</button></div>
     <div class="row"><button data-fr="party" class="grow">${f.partyOpen ? 'Party: offen' : 'Party: nur Einladung'}</button></div>
     ${(() => {
@@ -1807,7 +1893,7 @@ async function openSend(path, sys, kind, title) {
       ${!routes ? '<div class="muted">Schaue, wer wie erreichbar ist …</div>' : routes.error ? `<div class="bad">${esc(routes.error)}</div>`
         : !fr.length ? '<div class="muted">Noch keine Freunde – oben rechts im Freunde-Menü hinzufügen.</div>'
         : fr.map((f) => `<label class="person${picked.has(f.id) ? ' on' : ''}"><input type="checkbox" data-sf="${esc(f.id)}" ${picked.has(f.id) ? 'checked' : ''}>
-          <div class="avatar${f.online ? ' on' : ''}">${esc(f.name[0].toUpperCase())}</div>
+          ${avatar(f.name, f.online ? 'on' : '')}
           <div class="grow"><strong>${esc(f.name)}</strong><div class="muted">${f.near ? 'online · im selben Netz' : f.online ? 'online' : 'zuletzt ' + ago(f.seen)}</div></div>
           <span class="cmpchip">${esc(f.label)}</span></label>`).join('')}
       ${what === 'game' ? `<div class="person"><div class="grow"><strong>Thor in der Nähe (ohne Freundschaft)</strong><div class="muted">wie bisher: Wi-Fi Direct oder WLAN + PIN</div></div><button data-snear>Anbieten</button></div>` : ''}

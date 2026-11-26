@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,7 +25,7 @@ import androidx.compose.material.icons.filled.BatteryFull
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.ViewModule
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiOff
@@ -65,10 +66,11 @@ import java.util.Locale
 /** The five areas of ThorBro. L1/R1 step through them; every page belongs to exactly one. */
 enum class Area(val label: String, val icon: ImageVector, val pages: List<Screen?>) {
     START("Start", Icons.Filled.Home, listOf(null)),
-    GAMES("Spiele", Icons.Filled.ViewModule, listOf(Screen.GAMES, Screen.STORE)),
-    SYNC("Sync", Icons.Filled.Sync, listOf(Screen.SYNC)),
+    GAMES("Spiele", Icons.Filled.ViewModule, listOf(Screen.GAMES)),
+    STORE("Store", Icons.Filled.Storefront, listOf(Screen.STORE, Screen.TRANSFERS)),
     TOGETHER("Zusammen", Icons.Filled.Groups, listOf(Screen.NETPLAY)),
-    SYSTEM("System", Icons.Filled.Settings, listOf(Screen.SETTINGS, Screen.CONTROLLER, Screen.DRIVERS));
+    // Sync (RomM, Spielstände, Profile) is part of System: five tabs, the store gets its own
+    SYSTEM("System", Icons.Filled.Settings, listOf(Screen.SETTINGS, Screen.SYNC, Screen.CONTROLLER, Screen.DRIVERS));
 
     // streaming lives on the Zusammen page in the new design
     companion object { fun of(s: Screen?): Area = entries.firstOrNull { s in it.pages } ?: TOGETHER }
@@ -101,13 +103,13 @@ object Nav {
 val Screen.short: String get() = when (this) {
     Screen.GAMES -> "Bibliothek"; Screen.STORE -> "Store"; Screen.SYNC -> "Sync"
     Screen.NETPLAY -> "Zusammen"; Screen.STREAM -> "Streaming"
-    Screen.SETTINGS -> "Allgemein"; Screen.CONTROLLER -> "Controller"; Screen.DRIVERS -> "Treiber"
+    Screen.SETTINGS -> "Allgemein"; Screen.CONTROLLER -> "Controller"; Screen.DRIVERS -> "Treiber"; Screen.TRANSFERS -> "Downloads"
 }
 
 /** a button glyph like the ones in the hint bar: white pill with black text */
 @Composable
-fun KeyCapSmall(text: String) {
-    Box(Modifier.height(22.dp).clip(RoundedCornerShape(11.dp)).background(Color(0xD9FFFFFF)).padding(horizontal = 7.dp),
+fun KeyCapSmall(text: String, modifier: Modifier = Modifier) {
+    Box(modifier.height(22.dp).clip(RoundedCornerShape(11.dp)).background(Color(0xD9FFFFFF)).padding(horizontal = 7.dp),
         contentAlignment = Alignment.Center) {
         Text(text, color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
     }
@@ -134,25 +136,25 @@ fun TopBar(area: Area, extra: @Composable () -> Unit = {}) {
         Area.entries.forEach { a ->
             val on = a == area
             Row(Modifier.clip(RoundedCornerShape(50)).background(if (on) Accent else Color.Transparent)
-                .tap { Nav.area(a) }.padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(a.icon, null, Modifier.size(18.dp), tint = if (on) OnAccent else Muted)
-                Spacer(Modifier.width(6.dp))
-                Text(a.label, fontSize = 16.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.SemiBold, color = if (on) OnAccent else Muted)
+                .tap { Nav.area(a) }.padding(horizontal = 11.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(a.icon, null, Modifier.size(17.dp), tint = if (on) OnAccent else Muted)
+                Spacer(Modifier.width(5.dp))
+                Text(a.label, fontSize = 15.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.SemiBold, color = if (on) OnAccent else Muted, maxLines = 1, softWrap = false)
             }
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(2.dp))
         }
         Spacer(Modifier.width(6.dp))
         KeyCapSmall("R1")
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.weight(1f).widthIn(min = 4.dp))
         ActivityPill()
         extra()
         Spacer(Modifier.width(14.dp))
-        Text(time, fontSize = 16.sp)
+        Text(time, fontSize = 16.sp, maxLines = 1, softWrap = false)
         Spacer(Modifier.width(12.dp))
         Icon(if (wifi) Icons.Filled.Wifi else Icons.Filled.WifiOff, null, Modifier.size(18.dp))
         Spacer(Modifier.width(10.dp))
         Icon(Icons.Filled.BatteryFull, null, Modifier.size(18.dp))
-        Text(" $battery %", fontSize = 14.sp)
+        Text(" $battery %", fontSize = 14.sp, maxLines = 1, softWrap = false)
     }
 }
 
@@ -172,9 +174,32 @@ fun PageRow(area: Area, current: Screen?) {
         area.pages.filterNotNull().forEach { p ->
             val fx = rememberFx()
             val on = p == current
-            Box(Modifier.fx(fx, RoundedCornerShape(50), lift = 1.06f, restLine = !on) { Nav.go(p) }
-                .background(if (on) Soft else Color.Transparent).padding(horizontal = 16.dp, vertical = 6.dp)) {
-                Text(p.short, fontSize = 15.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, color = if (on) Ink else Muted)
+            Box(Modifier.fx(fx, RoundedCornerShape(50), lift = 1.06f) { Nav.go(p) }
+                .background(if (on) Accent else Color.Transparent).padding(horizontal = 16.dp, vertical = 6.dp)) {
+                Text(p.short, fontSize = 15.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, color = if (on) OnAccent else Muted)
+            }
+        }
+    }
+}
+
+/**
+ * The sub pages of an area (System: Allgemein · Sync · Controller · Treiber) as a rail on the left side.
+ * One horizontal bar (the areas) is enough; d-pad left from the content reaches the rail.
+ */
+@Composable
+fun SideRail(area: Area, current: Screen?, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.layout.Column(modifier.width(150.dp).padding(start = 20.dp, top = 8.dp, end = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        area.pages.filterNotNull().forEach { p ->
+            val fx = rememberFx()
+            val on = p == current
+            Row(Modifier.fillMaxWidth().hintA("Öffnen").fx(fx, RoundedCornerShape(14.dp), lift = 1.04f) { Nav.go(p) }
+                .background(if (on) Accent else if (fx.active) Soft else Color.Transparent).padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Icon(p.icon, null, Modifier.size(18.dp), tint = if (on) OnAccent else Muted)
+                Spacer(Modifier.width(8.dp))
+                Text(p.short, fontSize = 15.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.SemiBold, color = if (on) OnAccent else Ink,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
@@ -272,16 +297,17 @@ fun SettingsGroup(title: String, modifier: Modifier = Modifier, content: @Compos
  */
 @Composable
 fun SettingRow(label: String, sub: String = "", icon: ImageVector? = null, value: String = "", on: Boolean? = null,
-               warn: Boolean = false, modifier: Modifier = Modifier, onClick: () -> Unit) {
+               warn: Boolean = false, modifier: Modifier = Modifier, labelLines: Int = 1, onClick: () -> Unit) {
     val fx = rememberFx()
     val shape = RoundedCornerShape(14.dp)
-    Row(modifier.fillMaxWidth().height(if (sub.isEmpty()) 54.dp else 62.dp)
+    Row(modifier.fillMaxWidth().heightIn(min = if (sub.isEmpty()) 54.dp else 62.dp)
         .fx(fx, shape, lift = 1.015f, frame = true, restLine = false, onClick = onClick)
         .background(if (fx.active) Soft else Color.Transparent).padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically) {
         if (icon != null) { Icon(icon, null, Modifier.size(22.dp), tint = if (warn) Bad else Ink); Spacer(Modifier.width(14.dp)) }
         androidx.compose.foundation.layout.Column(Modifier.weight(1f)) {
-            Text(label, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(label, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = labelLines, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(vertical = if (labelLines > 1) 6.dp else 0.dp))
             if (sub.isNotEmpty()) Text(sub, fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (value.isNotEmpty()) Text(value, fontSize = 14.sp, color = if (warn) Bad else Muted, maxLines = 1, overflow = TextOverflow.Ellipsis,

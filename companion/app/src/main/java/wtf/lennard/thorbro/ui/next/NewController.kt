@@ -53,7 +53,7 @@ import wtf.lennard.thorbro.PadModel
 import wtf.lennard.thorbro.Players
 
 /**
- * System › Controller: the four player places as cards (who is P1–P4, assign with A), a live tester right below,
+ * System › Controller: the four player places as cards (who is P1–P4, assign with A; a connected pad shows its drawing),
  * the rarer things (pairing, LEDs, L+R order, Thor as gamepad) as one row of buttons. They open the old panels.
  */
 @OptIn(ExperimentalLayoutApi::class)
@@ -78,7 +78,7 @@ fun ControllerScreenNew() {
     LaunchedEffect(Unit) { delay(250); runCatching { first.requestFocus() } }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Row(Modifier.fillMaxWidth().weight(1.15f), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             for (slot in 1..4) {
                 val p = players.firstOrNull { it.optInt("slot") == slot }
                 val live = pads.firstOrNull { it.slot == slot }
@@ -87,32 +87,13 @@ fun ControllerScreenNew() {
                 }
             }
         }
-        // live tester: just press
-        Row(Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(20.dp)).background(GlassFill).border(1.dp, GlassLine, RoundedCornerShape(20.dp)).padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-            Column(Modifier.weight(1f)) {
-                Text("Tastentest" + if (Pads.lastFrom.isNotEmpty()) " · ${Pads.lastFrom}" else " · einfach drücken", fontSize = 13.sp, color = Muted,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.height(8.dp))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    padButtons.forEach { (code, label) ->
-                        val on = Pads.pressed[code] == true
-                        Box(Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) Accent else Panel).padding(horizontal = 10.dp, vertical = 5.dp)) {
-                            Text(label, fontSize = 13.sp, color = if (on) OnAccent else Color.White)
-                        }
-                    }
-                }
-            }
-            Stick("Links", Pads.lx, Pads.ly)
-            Stick("Rechts", Pads.rx, Pads.ry)
-            Column { Trigger("L2", Pads.lt); Spacer(Modifier.height(8.dp)); Trigger("R2", Pads.rt) }
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            BigButton("Reihenfolge (L+R)", Icons.Filled.SwapHoriz, modifier = Modifier.weight(1f)) { Players.clearAll(ctx); Pads.lrMode = true }
-            BigButton("Koppeln", Icons.Filled.BluetoothSearching, modifier = Modifier.weight(1f)) { ControllerNav.panel.value = "new" }
-            BigButton("Gekoppelt", Icons.Filled.Bluetooth, modifier = Modifier.weight(1f)) { ControllerNav.panel.value = "paired" }
-            BigButton("LEDs", Icons.Filled.Lightbulb, modifier = Modifier.weight(0.7f)) { ControllerNav.panel.value = "leds" }
-            BigButton("Thor als Gamepad", Icons.Filled.Gamepad, modifier = Modifier.weight(1.1f)) { ctx.startActivity(Intent(ctx, GamepadActivity::class.java)) }
+        // wraps instead of cutting the labels (the System rail takes some width)
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            BigButton("Reihenfolge (L+R)", Icons.Filled.SwapHoriz) { Players.clearAll(ctx); Pads.lrMode = true }
+            BigButton("Koppeln", Icons.Filled.BluetoothSearching) { ControllerNav.panel.value = "new" }
+            BigButton("Gekoppelt", Icons.Filled.Bluetooth) { ControllerNav.panel.value = "paired" }
+            BigButton("LEDs", Icons.Filled.Lightbulb) { ControllerNav.panel.value = "leds" }
+            BigButton("Thor als Gamepad", Icons.Filled.Gamepad) { ctx.startActivity(Intent(ctx, GamepadActivity::class.java)) }
         }
     }
 

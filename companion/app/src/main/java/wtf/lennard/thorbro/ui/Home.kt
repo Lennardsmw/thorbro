@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Gamepad
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
@@ -90,7 +92,7 @@ import java.util.Locale
 
 /** one game on the home row, with what is needed to show and start it */
 class HomeGame(val system: String, val rom: JSONObject, val meta: JSONObject) {
-    val title get() = meta.optString("title").ifEmpty { rom.getString("name").substringBefore(" (").substringBefore(" [") }
+    val title get() = displayTitle(meta.optString("title").ifEmpty { rom.getString("name").substringBefore(" (").substringBefore(" [") })
     val lastPlayed get() = meta.optString("lastplayed")
 }
 
@@ -128,6 +130,7 @@ enum class Screen(val label: String, val icon: ImageVector) {
     STREAM("Streaming", Icons.Filled.Cast),
     NETPLAY("Multiplayer", Icons.Filled.Groups),
     DRIVERS("Treiber", Icons.Filled.Memory),
+    TRANSFERS("Downloads", Icons.Filled.Download),
     SETTINGS("Einstellungen", Icons.Filled.Settings),
 }
 
@@ -177,9 +180,30 @@ object BottomStatus {
     }
 }
 
+/** the running download / upload as one line for the bottom bar (polled by every hint bar) */
+object TransferLine { var text by androidx.compose.runtime.mutableStateOf<Pair<String, Float>?>(null) }
+
 @Composable
 fun ButtonHints(vararg hints: Pair<String, String>) {
+    val ctx = LocalContext.current
+    WhileVisible { while (true) { TransferLine.text = withContext(Dispatchers.IO) { wtf.lennard.thorbro.TransferQueue.line(ctx) }; delay(1000) } }
     Box(Modifier.fillMaxWidth().background(Theme.p.hintBar).padding(horizontal = 32.dp, vertical = 10.dp)) {
+        val transfer = TransferLine.text
+        var transferMenu by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+        if (BottomStatus.text == null && transfer != null) Row(Modifier.align(Alignment.CenterStart).fillMaxWidth(0.55f).tap { transferMenu = true },
+            verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.material3.CircularProgressIndicator(progress = { transfer.second }, modifier = Modifier.size(18.dp), strokeWidth = 2.5.dp, color = Ink, trackColor = Soft)
+            Text("  ${transfer.first}", fontSize = 14.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+            Text("  ✕", fontSize = 15.sp, color = Muted)
+        }
+        // tap on the line (touch) – with the pad: Store › Downloads, X on the row
+        if (transferMenu) ConsoleMenu("Übertragung", transfer?.first ?: "", options = listOf(
+            "Abbrechen" to {
+                wtf.lennard.thorbro.TransferQueue.current?.optString("id")?.let { id -> kotlin.concurrent.thread { wtf.lennard.thorbro.TransferQueue.cancel(ctx, id) } }
+                transferMenu = false
+            },
+            "Alle Übertragungen" to { Nav.go(Screen.TRANSFERS); transferMenu = false },
+        )) { transferMenu = false }
         BottomStatus.text?.let { t -> // e.g. "Verbinde mit Thor-8b8e …" while a job runs, then its result for a moment
             Row(Modifier.align(Alignment.CenterStart).fillMaxWidth(0.62f), verticalAlignment = Alignment.CenterVertically) {
                 val p = BottomStatus.progress
@@ -193,8 +217,14 @@ fun ButtonHints(vararg hints: Pair<String, String>) {
         Row(Modifier.align(Alignment.CenterEnd), horizontalArrangement = Arrangement.spacedBy(22.dp)) {
             hints.forEach { (btn, what) ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(24.dp).clip(CircleShape).background(Accent), contentAlignment = Alignment.Center) {
-                        Text(btn, color = OnAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    // "L1 R1" = two glyphs; each one a pill that is at least round, the label centered in it
+                    btn.split(' ').forEachIndexed { i, b ->
+                        if (i > 0) Spacer(Modifier.width(4.dp))
+                        Box(Modifier.height(24.dp).widthIn(min = 24.dp).clip(RoundedCornerShape(12.dp)).background(Accent).padding(horizontal = if (b.length > 1) 6.dp else 0.dp),
+                            contentAlignment = Alignment.Center) {
+                            Text(b, color = OnAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold, lineHeight = 12.sp, maxLines = 1,
+                                style = androidx.compose.ui.text.TextStyle(platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)))
+                        }
                     }
                     Text("  $what", fontSize = 14.sp)
                 }

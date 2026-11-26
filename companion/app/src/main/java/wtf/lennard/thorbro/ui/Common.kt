@@ -163,11 +163,11 @@ fun Modifier.fx(
     val target = when { !enabled -> 1f; fx.pressed -> lift - (lift - 1f) * 0.6f - 0.02f; fx.active -> lift; else -> 1f }
     val scale by animateFloatAsState(target, spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow), label = "fx")
     val p = Theme.p
-    val line by animateDpAsState(if (fx.active && frame) p.frameW else if (restLine) p.lineW else 0.dp, tween(140), label = "fxLine")
-    val color by animateColorAsState(if (fx.active && frame) p.frame else if (restLine) p.line else Color.Transparent, tween(140), label = "fxColor")
+    // focus = bright ring + a little bigger; at rest no frame at all ([restLine] is kept for old callers, ignored)
+    val line by animateDpAsState(if (fx.active && frame) p.frameW else 0.dp, tween(140), label = "fxLine")
+    val color by animateColorAsState(if (fx.active && frame) p.frame else Color.Transparent, tween(140), label = "fxColor")
     this.zIndex(if (fx.active) 1f else 0f)
         .graphicsLayer { scaleX = scale; scaleY = scale }
-        .then(if (fx.active && frame) Modifier.hardShadow(shape, p.shadow) else Modifier)
         .border(line, color, shape)
         .clip(shape)
         .hoverable(fx.src, enabled)

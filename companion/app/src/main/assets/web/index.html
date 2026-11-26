@@ -99,6 +99,10 @@
       <button id="storeReload">Neu laden</button>
     </div>
     <div id="storeList"></div>
+    <div class="panel" id="transfers"><h3>Downloads &amp; Uploads <span id="trCount" class="muted"></span></h3>
+      <div class="sub">Eins nach dem anderen; geht nach einem Neustart weiter. „Später“ wartet, bis du es startest.</div>
+      <div class="row"><button id="trStartAll" class="small">Alle starten</button></div>
+      <div id="trList"></div></div>
   </section>
 
   <section id="saves" class="tab" hidden>
@@ -171,6 +175,7 @@
     <div class="panel">
       <h3>Zusammen spielen</h3>
       <div class="sub">Mitspielen geht über die Party: oben rechts das Freunde-Menü öffnen (am Thor L2), Freunde einladen. Startet der Leiter ein Spiel, startet es bei allen. 3DS (Azahar) und Switch (Eden) treten immer 127.0.0.1 bei – ThorBro führt das zum Raum des Leiters, im WLAN, über NetBird oder übers Internet (verschlüsselt, ohne Adresse oder Code).</div>
+      <div id="npParty" class="party"></div>
       <div class="row"><span id="npStatus" class="muted grow">Lade …</span><button id="npFriends" class="primary">Freunde &amp; Party</button><button id="npClose" hidden>Spiel für die Party beenden</button></div>
       <div id="npLobby"></div>
       <pre id="npHow"></pre>
@@ -188,7 +193,7 @@
   <section id="drivers" class="tab" hidden>
     <div class="row">
       <span id="drvInfo" class="muted grow">Lade …</span>
-      <button id="drvReload">Neu laden</button>
+      <button id="drvReload" class="small">↻ Listen neu laden</button>
     </div>
     <div class="panel">
       <h3>Geladene Treiber</h3>
@@ -222,6 +227,10 @@
     <div id="deviceInfo" class="cards"></div>
     <h2 style="font-size:18px;margin:20px 0 8px">Speicher</h2>
     <div id="storageView"></div>
+    <div class="panel"><h3>Switch-Keys &amp; Firmware</h3>
+      <div class="sub">Lädt prod.keys, title.keys und die Firmware aus Eden als RomM-Firmware hoch, damit RomBro auf dem Mac sie installiert. Läuft auch bei jedem Abgleich mit (nur wenn sich etwas geändert hat).</div>
+      <div id="fwRight"></div>
+      <div class="row"><button id="fwRun">Switch-Keys &amp; Firmware zu RomM</button><span id="fwState" class="muted"></span></div></div>
     <p><button id="cocoonRestart">Cocoon neu starten</button> <button id="logout">Abmelden</button></p>
   </section>
 </main>
@@ -232,6 +241,7 @@
 <dialog id="sendDlg" class="profilepick"></dialog>
 <dialog id="devDlg" class="profilepick devdlg"></dialog>
 <button id="verTag" class="vertag" title="Dev-Versionen" hidden></button>
+<div id="transferBar" class="transferbar" hidden><span></span><div class="bar"><i></i></div><button class="small" title="Abbrechen">✕ Abbrechen</button></div>
 <script src="app.js"></script>
 </body>
 </html>

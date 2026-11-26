@@ -29,6 +29,10 @@ object Jobs {
         /** game fields for Background.list */
         fun gameJson(o: JSONObject): JSONObject = o.put("game", game).put("system", system).put("romId", romId).put("file", file).put("transfer", transfer())
             .put("batch", batch()).put("gameProgress", gameProgress())
+        /** 0 = go on, 2 = cancel; read by [check] inside the work (pause = 1 is kept free for feature/transfers) */
+        @Volatile var stop = 0
+        /** the work calls this regularly: throws [Stopped] when the user cancelled */
+        fun check() { if (stop != 0) throw Stopped(stop == 2) }
         @Volatile var bytesDone = 0L
         @Volatile var bytesTotal = 0L
         @Volatile private var rateFrom: Pair<Long, Long>? = null
@@ -71,6 +75,9 @@ object Jobs {
     private fun mb(n: Long) = if (n >= 1_000_000_000) "%.2f GB".format(n / 1e9) else "%.0f MB".format(n / 1e6)
     /** "45 s", "3 min", "1 h 05 min" */
     fun dur(s: Long) = when { s >= 3600 -> "${s / 3600} h ${"%02d".format(s % 3600 / 60)} min"; s >= 60 -> "${s / 60} min ${"%02d".format(s % 60)} s"; else -> "$s s" }
+
+    /** thrown inside a transfer when the user cancelled ([cancel] true) or paused it */
+    class Stopped(val cancel: Boolean) : RuntimeException(if (cancel) "Abgebrochen" else "Pausiert")
 
     private val next = AtomicInteger(1)
     private val jobs = ConcurrentHashMap<Int, Job>()

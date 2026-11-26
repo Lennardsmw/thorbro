@@ -1,5 +1,6 @@
 package wtf.lennard.thorbro.ui
 
+import androidx.compose.foundation.layout.Box
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
@@ -31,6 +32,8 @@ import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Share
@@ -107,6 +110,10 @@ fun SystemScreenNew() {
     var rename by remember { mutableStateOf(false) }
     val list = rememberLazyListState()
     val friendsFirst = remember { FocusRequester() }
+    var phoneMenu by remember { mutableStateOf(false) }
+    var themeMenu by remember { mutableStateOf(false) }
+    var fwNote by remember { mutableStateOf("") }
+    val rommConnected = remember(tick / 10) { runCatching { wtf.lennard.thorbro.Romm.status(ctx).optBoolean("connected") }.getOrDefault(false) }
 
     val mode = dataTick.let { DataSaver.mode(ctx) }
     val keep = remember(dataTick) { DataSaver.keep(ctx) }
@@ -124,42 +131,36 @@ fun SystemScreenNew() {
         delay(250)
         if (SystemNav.focus.value == "friends") {
             SystemNav.focus.value = null
-            runCatching { list.animateScrollToItem(if (missing.isNotEmpty()) 2 else 1); delay(120); friendsFirst.requestFocus() }
+            runCatching { list.animateScrollToItem(if (missing.isNotEmpty()) 3 else 2); delay(120); friendsFirst.requestFocus() }
         } else runCatching { first.requestFocus() }
     }
 
-    Row(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-        // connection: shown, not a list of tiles
-        Column(Modifier.width(290.dp).fillMaxHeight().clip(RoundedCornerShape(22.dp)).background(GlassFill).border(1.dp, GlassLine, RoundedCornerShape(22.dp))
-            .padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("ThorBro $version", fontSize = 13.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (url != null) QrImage(url, "Im selben WLAN scannen", 150.dp)
-            Text(url?.removePrefix("http://") ?: "kein WLAN", fontSize = 17.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, maxLines = 1)
-            mesh?.let { Text("$it  (NetBird)", fontSize = 12.sp, color = Muted, fontFamily = FontFamily.Monospace, maxLines = 1) }
-            Text("Code  $code", fontSize = 18.sp, fontFamily = FontFamily.Monospace, color = Accent)
-            Spacer(Modifier.weight(1f))
-            BigButton("Web-Oberfläche", Icons.Filled.Web, modifier = Modifier.fillMaxWidth()) { ctx.startActivity(Intent(ctx, AppActivity::class.java)) }
-            BigButton("Neuer Code", Icons.Filled.Key, modifier = Modifier.fillMaxWidth()) { Prefs.newToken(ctx); tick++ }
-        }
+    HeaderFollows(list)
+    Box(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 10.dp)) {
         CenteredFocus {
-            LazyColumn(Modifier.weight(1f), state = list, contentPadding = PaddingValues(vertical = 4.dp, horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(vertical = 4.dp, horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                 if (missing.isNotEmpty()) item {
                     SettingsGroup("Fehlt noch") {
                         missing.forEach { (t, _, fix) -> SettingRow(t, "antippen zum Erlauben", Icons.Filled.ErrorOutline, warn = true) { fix() } }
                     }
                 }
+                // the connection only when asked for: no QR code filling half the page
+                item {
+                    SettingsGroup("Verbinden") {
+                        SettingRow("Mit Handy verbinden", "QR-Code, Adresse und Code fürs Web-Panel", Icons.Filled.QrCode,
+                            value = url?.removePrefix("http://") ?: "kein WLAN", modifier = Modifier.focusRequester(first)) { phoneMenu = true }
+                        SettingRow("Web-Oberfläche", "alles aus dem Web-Panel, hier auf dem Thor", Icons.Filled.Web) { ctx.startActivity(Intent(ctx, AppActivity::class.java)) }
+                    }
+                }
                 item {
                     SettingsGroup("Allgemein") {
-                        SettingRow("Neues Design", "aus = altes ThorBro zum Vergleichen", Icons.Filled.Palette, on = UiMode.newDesign,
-                            modifier = Modifier.focusRequester(first)) { UiMode.set(ctx, !UiMode.newDesign) }
-                        Theme.all.forEach { t ->
-                            SettingRow("Design: ${t.label}", if (t.mascot) "warm, handgezeichnet – gilt auch fürs Web-Panel" else "schwarz, Milchglas – gilt auch fürs Web-Panel",
-                                Icons.Filled.Palette, on = Theme.p.id == t.id) { Theme.set(ctx, t.id) }
-                        }
+                        // one choice instead of two switches
+                        SettingRow("Design", "gilt auch fürs Web-Panel", Icons.Filled.Palette, value = Theme.p.label) { themeMenu = true }
+                        SettingRow("Neues Design", "aus = altes ThorBro zum Vergleichen", Icons.Filled.Palette, on = UiMode.newDesign) { UiMode.set(ctx, !UiMode.newDesign) }
                         SettingRow("Autostart", "beim Hochfahren", Icons.Filled.PowerSettingsNew, on = autostart) { autostart = !autostart; Prefs.setAutostart(ctx, autostart) }
                         SettingRow("Auto-Update", "alle 6 Stunden", Icons.Filled.Autorenew, on = autoUpdate) { autoUpdate = !autoUpdate; Updater.configure(ctx, null, autoUpdate) }
                         SettingRow("Dev-Versionen", "Test-Builds aus GitHub, Heimnetz oder eigener URL", Icons.Filled.Science) { DevUi.open = true }
-                        SettingRow("Nach Updates suchen", icon = Icons.Filled.SystemUpdate, value = updMsg.ifEmpty { version }) {
+                        SettingRow("Nach Updates suchen", icon = Icons.Filled.SystemUpdate, value = updMsg) {
                             updMsg = "Sucht …"
                             scope.launch {
                                 val r = withContext(Dispatchers.IO) { Updater.update(ctx) }
@@ -193,14 +194,28 @@ fun SystemScreenNew() {
                 item {
                     SettingsGroup("Speicher") {
                         SettingRow("ROM-Ordner", "Downloads und empfangene Spiele", Icons.Filled.Folder, value = romRoot) { romMenu = true }
+                        // moved here from Sync: it is about this Thor's Switch setup, not about save games
+                        if (rommConnected) SettingRow("Switch-Keys & Firmware", "aus Eden zu RomM, für RomBro auf dem Mac", Icons.Filled.Key, value = fwNote) {
+                            fwNote = "Lädt hoch …"
+                            scope.launch {
+                                val r = withContext(Dispatchers.IO) { wtf.lennard.thorbro.SwitchFirmware.sync(ctx, force = true) }
+                                val up = r.optJSONArray("uploaded")?.length() ?: 0
+                                fwNote = when {
+                                    r.optBoolean("needsRepair") -> "RomM neu koppeln"
+                                    r.has("error") -> "Fehler"
+                                    r.has("missing") -> r.optString("missing")
+                                    up > 0 -> "$up hochgeladen"
+                                    else -> "RomM hat sie schon"
+                                }
+                            }
+                        }
                     }
                 }
                 item {
                     val on = direct.st?.optBoolean("active") == true
                     SettingsGroup("Weitergeben") {
-                        SettingRow("Wi-Fi Direct", if (on) direct.st!!.optString("ssid") else "eigenes Netz, kein Router nötig", Icons.Filled.WifiTethering, on = on) {
-                            if (on) direct.menu = "info" else directOn(ctx, direct, scope, "info")
-                        }
+                        SettingRow("Wi-Fi Direct", when { direct.busy -> "schaltet …"; on -> direct.st!!.optString("ssid") + " · Details: ThorBro weitergeben"
+                            else -> "eigenes Netz, kein Router nötig" }, Icons.Filled.WifiTethering, on = on) { directToggle(ctx, direct, scope) }
                         SettingRow("ThorBro weitergeben", "an einen anderen Thor", Icons.Filled.Share) { direct.menu = "share" }
                     }
                 }
@@ -211,11 +226,24 @@ fun SystemScreenNew() {
                         }
                     }
                 }
+                // the build string lives here, once
+                item {
+                    SettingsGroup("Info") {
+                        SettingRow("ThorBro", "installierte Version", Icons.Filled.Info, value = version) { DevUi.open = true }
+                    }
+                }
                 item { Spacer(Modifier.height(8.dp)) }
             }
         }
     }
 
+    if (phoneMenu) ConsoleMenu("Mit Handy verbinden",
+        (url?.let { "$it\n" } ?: "kein WLAN\n") + (mesh?.let { "$it (NetBird)\n" } ?: "") + "Code $code",
+        mono = true, qrs = url?.let { listOf(it to "Im selben WLAN scannen") } ?: emptyList(),
+        options = listOf("Neuer Code" to { Prefs.newToken(ctx); tick++ })) { phoneMenu = false }
+    if (themeMenu) ConsoleMenu("Design", "Gilt für ThorBro und das Web-Panel.",
+        options = Theme.all.map { t -> ((if (Theme.p.id == t.id) "✓ " else "") + t.label + " · " + (if (t.mascot) "warm, handgezeichnet" else "schwarz, Milchglas")) to {
+            Theme.set(ctx, t.id); themeMenu = false } }) { themeMenu = false }
     if (modeMenu) ConsoleMenu("Netz nutzen", "Wann ThorBro Spielstände und Spiele übers Netz bewegt.",
         options = DataSaver.Mode.entries.map { m -> ((if (m == mode) "✓ " else "") + m.label + " · " + m.sub) to { DataSaver.setMode(ctx, m); dataTick++; modeMenu = false } }) { modeMenu = false }
     if (romMenu) {

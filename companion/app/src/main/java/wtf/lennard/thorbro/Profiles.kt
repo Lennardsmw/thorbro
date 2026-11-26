@@ -165,7 +165,7 @@ object Profiles {
             val a = activate(ctx, rom.path, profile)
             if (a.has("error")) return a
         }
-        return Emulators.launch(ctx, system, rom, emuId)
+        return Emulators.launch(ctx, system, rom, emuId).also { if (!it.has("error")) runCatching { Recent.played(ctx, system, rom.path) } }
     }
 
     /** removes the save files; folders stay, since games and emulators expect their layout (3DS: data/00000001/save_data/) */
