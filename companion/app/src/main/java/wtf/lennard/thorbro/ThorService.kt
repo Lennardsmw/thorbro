@@ -45,6 +45,7 @@ class ThorService : Service() {
             Pals.listen(applicationContext) // friend network inbox (requests, party, later chat)
             Party.start(applicationContext) // own status every 3 h and on changes
             Gifts.start(applicationContext) // saves and games from / to friends
+            thread(name = "transfers-restore", isDaemon = true) { runCatching { TransferQueue.restore(applicationContext) } } // download/upload queue survives a restart
             thread(name = "room-ensure", isDaemon = true) { runCatching { Room.ensure(applicationContext) } } // 3DS room always on, 127.0.0.1 → it
             thread(name = "eden-room-ensure", isDaemon = true) { runCatching { EdenRoom.ensure(applicationContext) } } // Switch room always on, 127.0.0.1:24875 → it
             running = true

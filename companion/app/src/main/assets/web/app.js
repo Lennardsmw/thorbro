@@ -923,11 +923,11 @@ $('#romDetail').addEventListener('click', async (e) => {
   const paths = JSON.parse(b.dataset.rommUp);
   b.disabled = true; b.textContent = 'Verbinde …';
   try {
-    const { body: job } = await api('/api/romm/upload?' + paths.map((p) => 'path=' + encodeURIComponent(p)).join('&'), { method: 'POST' });
+    const { body: job } = await api('/api/romm/upload?' + paths.map((p) => 'path=' + encodeURIComponent(p)).join('&') + '&' + q({ name: $('#romDetail h2')?.textContent || '' }), { method: 'POST' });
     if (job.error && !job.id) throw new Error(job.error);
-    if (job.name !== 'Zu RomM hochladen') { b.textContent = 'RomM-Abgleich läuft schon'; toast('Ein RomM-Abgleich läuft schon – Fortschritt oben rechts'); return; }
     pollActivity();
-    const res = await waitJob(job.id, (j) => { b.textContent = `Lädt hoch … ${Math.round(j.progress * 100)} %`; b.title = [j.message, j.transfer].filter(Boolean).join(' · '); });
+    // the button keeps one short label (a changing text re-wrapped the whole page); progress, speed and time left are in the activity box
+    const res = await waitJob(job.id, (j) => { b.textContent = j.state === 'queued' ? 'Wartet auf Upload …' : j.state === 'paused' ? 'Upload pausiert' : 'Lädt hoch …'; });
     const err = res.error || res.result?.errors?.[0];
     if (err) { b.disabled = false; b.textContent = '☁ Zu RomM hochladen'; alert('Upload fehlgeschlagen: ' + err); return; }
     b.textContent = '✓ In RomM hochgeladen'; b.title = 'RomM zeigt es nach dem nächsten Scan';
@@ -967,6 +967,8 @@ function renderStore() {
   pollStore();
 }
 let storePoll = null;
+const dur = (s) => s >= 3600 ? `${Math.floor(s / 3600)} h ${String(Math.floor(s % 3600 / 60)).padStart(2, '0')} min` : s >= 60 ? `${Math.floor(s / 60)} min ${String(Math.round(s % 60)).padStart(2, '0')} s` : `${Math.round(s)} s`;
+const etaText = (j) => j.eta >= 0 ? ` · noch ${dur(j.eta)}` : '';
 async function pollStore() {
   clearTimeout(storePoll);
   let busy = false;
@@ -975,9 +977,12 @@ async function pollStore() {
     for (const [id, j] of Object.entries(body)) {
       const t = $('#st-' + id), bar = $('#sb-' + id);
       if (!t) continue;
+      const p = j.gameProgress ?? j.progress;
       if (j.error) t.textContent = 'Fehler: ' + j.error;
       else if (j.done) { t.textContent = '✓ auf dem Thor'; bar.style.width = '100%'; }
-      else { busy = true; t.textContent = `${Math.round(j.progress * 100)} %`; bar.style.width = (j.progress * 100) + '%'; }
+      else if (j.state === 'queued') { busy = true; t.textContent = 'Wartet …'; }
+      else if (j.state === 'paused') { t.textContent = `Pausiert · ${Math.round(p * 100)} %`; bar.style.width = (p * 100) + '%'; }
+      else { busy = true; t.textContent = `${Math.round(p * 100)} %${etaText(j)}`; bar.style.width = (p * 100) + '%'; }
     }
   } catch {}
   if (busy && !$('#store').hidden) storePoll = setTimeout(pollStore, 1000);
@@ -987,8 +992,9 @@ $('#storeList').addEventListener('click', async (e) => {
   if (!c) return;
   const id = c.dataset.store;
   const t = $('#st-' + id);
-  if (t.textContent.includes('%') || t.textContent.startsWith('✓')) return;
-  try { await api('/api/store/download?' + q({ id }), { method: 'POST' }); t.textContent = '0 %'; pollStore(); }
+  if (t.textContent.includes('%') || t.textContent.startsWith('✓') || t.textContent.startsWith('Wartet')) return;
+  const g = storeData?.systems?.flatMap((x) => x.games).find((x) => String(x.id) === id);
+  try { await api('/api/store/download?' + q({ id, name: g ? displayTitle(g.name) : '', size: g?.size || 0 }), { method: 'POST' }); t.textContent = 'Wartet …'; pollStore(); pollActivity(); }
   catch (err) { alert(err.message); }
 });
 $('#storeFilter').oninput = renderStore;
@@ -1607,9 +1613,11 @@ async function pollActivity() {
   box.innerHTML = list.map((a) => {
     const n = a.total > 1 || (a.total === 1 && !a.done) ? `<b>${a.index}/${a.total}</b>` : '';
     const err = a.error && a.error !== 'null' ? a.error : '';
-    return `<div class="act ${a.done ? (err ? 'bad' : 'ok') : ''}"><div class="acthead"><span>${a.done ? (err ? '⚠' : '✓') : a.kind === 'download' ? '⬇' : '⬆'} ${esc(a.title)}</span>${n}</div>
-      <div class="actname">${esc(a.name || '')}</div>
-      ${a.done ? (err ? `<div class="err">${esc(err)}</div>` : '') : `${a.step && a.step !== a.name ? `<div class="muted">${esc(a.step)}</div>` : ''}<div class="bar"><i style="width:${Math.round(a.progress * 100)}%"></i></div><div class="muted">${Math.round(a.progress * 100)} %</div>`}</div>`;
+    const pr = a.gameProgress ?? a.progress;
+    const line = a.transfer || (a.step && a.step !== a.name ? a.step : '');
+    return `<div class="act ${a.done ? (err ? 'bad' : 'ok') : ''}" data-xfers title="Downloads &amp; Uploads öffnen"><div class="acthead"><span>${a.done ? (err ? '⚠' : '✓') : a.state === 'paused' ? '⏸' : a.kind === 'download' ? '⬇' : '⬆'} ${esc(a.title)}</span>${n}</div>
+      <div class="actname">${esc(a.game || a.name || '')}</div>
+      ${a.done ? (err ? `<div class="err">${esc(err)}</div>` : '') : `${line ? `<div class="muted">${esc(line)}</div>` : ''}<div class="bar"><i style="width:${Math.round(pr * 100)}%"></i></div><div class="muted">${Math.round(pr * 100)} %${a.waiting ? ` · +${a.waiting} wartend` : ''}</div>`}</div>`;
   }).join('');
   const busy = list.some((a) => !a.done);
   moodState.busy = busy; moodState.err = list.some((a) => a.done && a.error && a.error !== 'null'); moodState.done = !busy && list.length > 0 && !moodState.err;
@@ -1621,6 +1629,44 @@ async function pollActivity() {
   if (!document.hidden) actTimer = setTimeout(pollActivity, list.length ? 1000 : 5000);
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden && token) pollActivity(); });
+
+// ---------- Downloads & Uploads: the queue page (pause, resume, cancel, how many at once) ----------
+let xfersTimer = null;
+async function renderTransfers() {
+  clearTimeout(xfersTimer);
+  const dlg = $('#xfers');
+  if (!dlg.open) return;
+  let d;
+  try { d = (await api('/api/transfers')).body; } catch { xfersTimer = setTimeout(renderTransfers, 3000); return; }
+  const order = { running: 0, queued: 1, paused: 2, error: 3, done: 4 };
+  const items = d.items.slice().sort((a, b) => order[a.state] - order[b.state] || a.added - b.added);
+  const label = { running: '', queued: 'Wartet', paused: 'Pausiert', error: 'Fehler', done: 'Fertig' };
+  $('#xfersList').innerHTML = items.length ? items.map((i) => {
+    const p = Math.round((i.progress || 0) * 100);
+    const sub = [i.kind === 'download' ? 'Aus RomM laden' : 'Zu RomM hochladen', label[i.state], i.state === 'running' ? (i.transfer || i.step) : '', i.state === 'paused' ? p + ' %' : '', i.error].filter(Boolean).join(' · ');
+    const btns = (i.state === 'running' || i.state === 'queued' ? `<button data-xf="pause" data-id="${i.id}">⏸ Pause</button>` : '') +
+      (i.state === 'paused' ? `<button data-xf="resume" data-id="${i.id}">▶ Weiter</button>` : '') +
+      (i.state === 'error' ? `<button data-xf="resume" data-id="${i.id}">↻ Nochmal</button>` : '') +
+      (i.state !== 'done' ? `<button data-xf="cancel" data-id="${i.id}">✕ Abbrechen</button>` : '');
+    return `<div class="xfrow ${i.state}"><div class="xfmain"><b>${i.kind === 'download' ? '⬇' : '⬆'} ${esc(i.title)}</b><div class="muted">${esc(sub)}</div>
+      ${i.state === 'running' || i.state === 'paused' ? `<div class="bar"><i style="width:${p}%"></i></div>` : ''}</div><div class="xfbtns">${btns}</div></div>`;
+  }).join('') : '<p class="muted">Gerade nichts in der Warteschlange.</p>';
+  $('#xfersPar').value = String(d.parallel);
+  xfersTimer = setTimeout(renderTransfers, 1000);
+}
+function openTransfers() { const dlg = $('#xfers'); if (!dlg.open) dlg.showModal(); renderTransfers(); }
+$('#xfersBtn').onclick = openTransfers;
+document.addEventListener('click', (e) => { if (e.target.closest('#activity .act')) openTransfers(); });
+$('#xfersClose').onclick = () => $('#xfers').close();
+$('#xfers').addEventListener('close', () => clearTimeout(xfersTimer));
+$('#xfersClear').onclick = async () => { await api('/api/transfers/clear', { method: 'POST' }); renderTransfers(); };
+$('#xfersPar').onchange = async (e) => { await api('/api/transfers/parallel?n=' + e.target.value, { method: 'POST' }); renderTransfers(); };
+$('#xfersList').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-xf]'); if (!b) return;
+  if (b.dataset.xf === 'cancel' && !confirm('Auftrag abbrechen? Schon Geladenes wird verworfen.')) return;
+  await api(`/api/transfers/${b.dataset.xf}?id=${encodeURIComponent(b.dataset.id)}`, { method: 'POST' });
+  renderTransfers(); pollActivity();
+});
 
 // ---------- look (Glas / Doodle): the Thor keeps the setting, the browser remembers it to avoid a flash ----------
 function applyTheme(id) {

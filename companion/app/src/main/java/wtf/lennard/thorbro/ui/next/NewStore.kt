@@ -25,7 +25,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
@@ -64,6 +67,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import wtf.lennard.thorbro.Library
 import wtf.lennard.thorbro.Storage
+import wtf.lennard.thorbro.TransferQueue
 import java.io.File
 
 /** the search of the new Store; B clears it */
@@ -124,15 +128,18 @@ fun StoreScreenNew() {
     /** one game: cover (or the console icon + title), size or progress; [badge] = the console badge on the cover (search) */
     @Composable
     fun tile(s: StoreGame, mod: Modifier, badge: Boolean) {
+        TransferUi.tick // read here, so this tile (not just the screen) redraws while it loads
         val job = Library.downloads[s.id]
         val sub = when {
             job == null -> fmtBytes(s.size)
             job.error != null -> "Fehler"
             job.done -> "auf dem Thor ✓"
-            else -> "${(job.progress * 100).toInt()} %"
+            job.state == "queued" -> "Wartet …"
+            job.state == "paused" -> "Pausiert · ${(job.gameProgress() * 100).toInt()} %"
+            else -> "${(job.gameProgress() * 100).toInt()} %" + (TransferUi.eta(job.eta())?.let { " · $it" } ?: "")
         }
         val img = storeCover(s)
-        ArtTile(s.name, sub, img, mod, progress = job?.takeIf { !it.done }?.progress?.toFloat(),
+        ArtTile(s.name, sub, img, mod, progress = job?.takeIf { !it.done && it.state != "queued" }?.gameProgress()?.toFloat(),
             badge = if (badge || img == null) s.sys else null, hint = if (job?.done == true) "Details" else "Laden") { pick = s }
     }
 
@@ -217,6 +224,7 @@ private fun Banner(s: StoreGame, free: Long, onOpen: () -> Unit) {
 @Composable
 private fun StoreDetail(s: StoreGame, free: Long, @Suppress("UNUSED_PARAMETER") frame: Int, onClose: () -> Unit) {
     val ctx = LocalContext.current
+    TransferUi.tick
     val img = storeCover(s)
     val job = Library.downloads[s.id]
     val fits = !(free in 0 until s.size)
@@ -246,14 +254,28 @@ private fun StoreDetail(s: StoreGame, free: Long, @Suppress("UNUSED_PARAMETER") 
                     Spacer(Modifier.height(28.dp))
                     val running = job != null && !job.done
                     val done = job?.done == true && job.error == null
+                    val pct = ((job?.gameProgress() ?: 0.0) * 100).toInt()
                     BigButton(when {
-                        running -> "Lädt … ${(job!!.progress * 100).toInt()} %"
+                        running && job!!.state == "queued" -> "Wartet in der Schlange"
+                        running && job!!.state == "paused" -> "Pausiert · $pct %"
+                        running -> "Lädt … $pct %"
                         done -> "Auf dem Thor"
                         else -> "Laden · ${fmtBytes(s.size)}"
                     }, if (done) Icons.Filled.CheckCircle else Icons.Filled.CloudDownload, primary = true, enabled = fits && !running && !done,
-                        modifier = Modifier.width(320.dp).focusRequester(first)) { Library.download(ctx, s.id) }
-                    if (running) LinearProgressIndicator(progress = { job!!.progress.toFloat() }, modifier = Modifier.width(320.dp).padding(top = 10.dp).height(6.dp).clip(RoundedCornerShape(3.dp)),
-                        color = Accent, trackColor = Soft)
+                        modifier = Modifier.width(320.dp).focusRequester(first)) { Library.download(ctx, s.id, s.name, s.size) }
+                    if (running) {
+                        LinearProgressIndicator(progress = { job!!.gameProgress().toFloat() }, modifier = Modifier.width(320.dp).padding(top = 10.dp).height(6.dp).clip(RoundedCornerShape(3.dp)),
+                            color = Accent, trackColor = Soft)
+                        // speed, size and time left under the bar
+                        val info = if (job!!.state == "running") job.transfer() ?: "Startet …" else if (job.state == "queued") "Kommt nach den laufenden Aufträgen" else "Weiter mit Downloads & Uploads (Select)"
+                        Text(info, fontSize = 14.sp, color = Muted, maxLines = 2, modifier = Modifier.width(320.dp).padding(top = 6.dp))
+                        val tid = TransferQueue.all().firstOrNull { it.job === job }?.id
+                        if (tid != null) Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            if (job.state == "paused") SmallButton("Weiter", Icons.Filled.PlayArrow) { TransferQueue.resume(tid) }
+                            else SmallButton("Pause", Icons.Filled.Pause) { TransferQueue.pause(tid) }
+                            SmallButton("Abbrechen", Icons.Filled.Close) { TransferQueue.cancel(tid) }
+                        }
+                    }
                     job?.error?.let { Text("Letzter Versuch: $it", color = Bad, fontSize = 14.sp, maxLines = 2, modifier = Modifier.padding(top = 10.dp)) }
                     if (done) Text("Zu finden unter Spiele › ${s.sysName}", color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 10.dp))
                     Spacer(Modifier.height(12.dp))

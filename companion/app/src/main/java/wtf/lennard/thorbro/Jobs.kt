@@ -31,20 +31,40 @@ object Jobs {
             .put("batch", batch()).put("gameProgress", gameProgress())
         @Volatile var bytesDone = 0L
         @Volatile var bytesTotal = 0L
-        @Volatile private var rateFrom: Pair<Long, Long>? = null
+        /** queue state for transfers: queued, running, paused (done/error are [done]/[error]) */
+        @Volatile var state = "running"
+        /** 0 = go on, 1 = pause (keep what is there), 2 = cancel (throw it away); read by [check] inside the work */
+        @Volatile var stop = 0
+        /** the work calls this regularly: throws [Stopped] when the user paused or cancelled */
+        fun check() { if (stop != 0) throw Stopped(stop == 2) }
+        // speed: smoothed over the last seconds, so the time left follows the real rate instead of the average since the start
+        @Volatile private var lastT = 0L
+        @Volatile private var lastB = 0L
+        @Volatile private var ema = 0.0
         fun bytes(done: Long, total: Long) {
-            if (rateFrom == null) rateFrom = System.currentTimeMillis() to done
+            val now = System.currentTimeMillis()
+            if (lastT == 0L) { lastT = now; lastB = done }
+            else if (now - lastT >= 1000) {
+                val inst = ((done - lastB) * 1000.0 / (now - lastT)).coerceAtLeast(0.0)
+                ema = if (ema == 0.0) inst else ema * 0.6 + inst * 0.4
+                lastT = now; lastB = done
+            }
             bytesDone = done; bytesTotal = total
         }
+        /** forget the speed (after a pause): the next samples start fresh */
+        fun resetRate() { lastT = 0L; ema = 0.0 }
         /** the current game's own bytes; total -1 = all sent, the server is still busy with it (a batch's [bytesDone]/[bytesTotal] cover all its games) */
         @Volatile var gameDone = 0L
         @Volatile var gameTotal = 0L
         fun gameBytes(done: Long, total: Long) { gameDone = done; gameTotal = total }
-        private fun bps(): Double {
-            val (at, from) = rateFrom ?: return 0.0
-            val ms = System.currentTimeMillis() - at
-            return if (ms > 1500) (bytesDone - from) * 1000.0 / ms else 0.0
+        private fun bps(): Double = ema
+        /** seconds left for the current game (or the batch when it has no own size), -1 = unknown yet */
+        fun eta(): Long {
+            val bps = bps(); if (bps <= 0) return -1
+            val (done, total) = if (gameTotal > 0) gameDone.coerceAtMost(gameTotal) to gameTotal else bytesDone.coerceAtMost(bytesTotal) to bytesTotal
+            return if (total > 0) ((total - done) / bps).toLong() else -1
         }
+        fun speed(): Double = bps()
         /** this game: "12.0 MB/s · 545 MB / 1.14 GB · noch 50 s" */
         fun transfer(): String? {
             if (gameTotal < 0) return null // waiting for the server, nothing on the wire
@@ -66,19 +86,29 @@ object Jobs {
         fun json(): JSONObject = JSONObject().put("id", id).put("name", name).put("progress", progress)
             .put("message", message).put("done", done).put("error", error).put("result", result).put("index", index).put("total", total)
             .put("bytesDone", bytesDone).put("bytesTotal", bytesTotal).put("transfer", transfer())
+            .put("state", if (error != null) "error" else if (done) "done" else state).put("eta", eta()).put("speed", speed()).put("game", game).put("gameProgress", gameProgress())
     }
 
     private fun mb(n: Long) = if (n >= 1_000_000_000) "%.2f GB".format(n / 1e9) else "%.0f MB".format(n / 1e6)
     /** "45 s", "3 min", "1 h 05 min" */
     fun dur(s: Long) = when { s >= 3600 -> "${s / 3600} h ${"%02d".format(s % 3600 / 60)} min"; s >= 60 -> "${s / 60} min ${"%02d".format(s % 60)} s"; else -> "$s s" }
 
+    /** thrown inside a transfer when the user paused ([cancel] false) or cancelled it */
+    class Stopped(val cancel: Boolean) : RuntimeException(if (cancel) "Abgebrochen" else "Pausiert")
+
     private val next = AtomicInteger(1)
     private val jobs = ConcurrentHashMap<Int, Job>()
 
-    fun start(name: String, work: (Job) -> JSONObject): Job {
+    /** a job that does not run yet (a queued transfer); the queue gives it its work later */
+    fun create(name: String): Job {
         val j = Job(next.getAndIncrement(), name)
         jobs[j.id] = j
-        if (jobs.size > 50) jobs.keys.sorted().take(jobs.size - 50).forEach { jobs.remove(it) }
+        if (jobs.size > 50) jobs.keys.sorted().take(jobs.size - 50).forEach { k -> jobs[k]?.takeIf { it.done }?.let { jobs.remove(k) } }
+        return j
+    }
+
+    fun start(name: String, work: (Job) -> JSONObject): Job {
+        val j = create(name)
         thread(name = "job-${j.id}") {
             try { j.result = work(j); j.progress = 1.0 } catch (e: Throwable) { j.error = e.message ?: e.toString() }
             j.finishedAt = System.currentTimeMillis(); j.done = true

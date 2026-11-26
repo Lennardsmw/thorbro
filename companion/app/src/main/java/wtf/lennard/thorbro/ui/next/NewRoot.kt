@@ -40,6 +40,7 @@ fun NewRoot(screen: Screen?) {
     if (wtf.lennard.thorbro.FrameStats.page != page) { wtf.lennard.thorbro.Logs.i("ui", "Seite (neu): $page"); wtf.lennard.thorbro.FrameStats.page = page }
     var detail by remember { mutableStateOf<HomeGame?>(null) }
     val ctx = LocalContext.current
+    TransferTicker() // progress of the download/upload queue in the bottom bar and on the tiles
     if (screen == null) {
         HomeScreenNew(showDetail = { detail = it })
     } else {

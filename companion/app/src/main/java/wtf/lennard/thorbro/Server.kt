@@ -465,8 +465,8 @@ object Server {
                     if (denied(ctx)) return@post
                     val id = q("id")?.toIntOrNull() ?: return@post fail("id missing")
                     val root = q("root")?.let { Storage.resolve(it) }
-                        ?: Library.romsRoot(ctx)
-                    val j = Jobs.start("RomM-Download") { job -> Romm.download(ctx, id, root, job) }
+                    // the default target goes through the queue; an own folder runs on its own
+                    val j = if (root == null) Library.download(ctx, id) else Jobs.start("RomM-Download") { job -> Romm.download(ctx, id, root, job) }
                     json(j.json())
                 }
 
@@ -486,7 +486,7 @@ object Server {
                     if (denied(ctx)) return@post
                     val paths = call.request.queryParameters.getAll("path").orEmpty().mapNotNull { Storage.resolve(it)?.path }.toSet()
                     if (paths.isEmpty()) return@post fail("path missing")
-                    val j = withContext(Dispatchers.IO) { runCatching { RommSync.uploadGame(ctx, paths) } }
+                    val j = withContext(Dispatchers.IO) { runCatching { RommSync.uploadGame(ctx, paths, q("name") ?: "") } }
                     j.fold({ json(it.json()) }, { fail(it.message ?: "Fehler") })
                 }
                 post("/api/romm/firmware") {
@@ -608,7 +608,25 @@ object Server {
                 post("/api/store/download") {
                     if (denied(ctx)) return@post
                     val id = q("id")?.toIntOrNull() ?: return@post fail("id missing")
-                    json(Library.download(ctx, id).json())
+                    json(Library.download(ctx, id, q("name") ?: "", q("size")?.toLongOrNull() ?: 0).json())
+                }
+                // download/upload queue: list, pause, resume, cancel, how many at once
+                get("/api/transfers") {
+                    if (denied(ctx)) return@get
+                    json(TransferQueue.json(ctx))
+                }
+                post("/api/transfers/{action}") {
+                    if (denied(ctx)) return@post
+                    val id = q("id") ?: ""
+                    when (call.parameters["action"]) {
+                        "pause" -> TransferQueue.pause(id)
+                        "resume", "retry" -> TransferQueue.resume(id)
+                        "cancel" -> TransferQueue.cancel(id)
+                        "clear" -> TransferQueue.clearFinished()
+                        "parallel" -> TransferQueue.setParallel(ctx, q("n")?.toIntOrNull() ?: 1)
+                        else -> return@post fail("unknown action", HttpStatusCode.NotFound)
+                    }
+                    json(TransferQueue.json(ctx))
                 }
                 get("/api/store/downloads") {
                     if (denied(ctx)) return@get

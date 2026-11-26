@@ -199,19 +199,6 @@ object Library {
     /** running store downloads by RomM id, so every screen shows the same progress */
     val downloads = java.util.concurrent.ConcurrentHashMap<Int, Jobs.Job>()
 
-    fun download(ctx: Context, romId: Int): Jobs.Job {
-        downloads[romId]?.takeIf { !it.done }?.let { return it }
-        val app = ctx.applicationContext
-        val j = Jobs.start("RomM-Download") { job ->
-            val t0 = System.currentTimeMillis()
-            job.romId = romId
-            try { Romm.download(app, romId, romsRoot(app), job).also { invalidate()
-                History.add(app, "download", it.optString("name").ifEmpty { job.message }, it.optString("system"),
-                    ms = System.currentTimeMillis() - t0, romId = romId, size = job.bytesTotal) } }
-            finally { Progress.done(app, "Download fertig", job.message) }
-        }
-        downloads[romId] = j
-        Background.downloadStarted(romId)
-        return j
-    }
+    /** puts the game on the download queue (one after another, 1–2 at once); the job is there at once, so the store shows it right away */
+    fun download(ctx: Context, romId: Int, title: String = "", size: Long = 0): Jobs.Job = TransferQueue.enqueueDownload(ctx, romId, title, size)
 }

@@ -27,6 +27,7 @@
   </nav>
   <span id="conn" class="muted"></span>
   <select id="themeSel" title="Design"><option value="glass">Glas</option><option value="doodle">Doodle</option></select>
+  <button id="xfersBtn" class="friendsbtn" title="Downloads &amp; Uploads">⇅ Übertragungen</button>
   <button id="friendsBtn" class="friendsbtn" title="Freunde">👥 Freunde<span id="friendsBadge" hidden></span></button>
 </header>
 
@@ -231,6 +232,13 @@
   </section>
 </main>
 <dialog id="romDetail"></dialog>
+<dialog id="xfers" class="profilepick">
+  <div class="xfhead"><h3>Downloads &amp; Uploads</h3>
+    <label class="muted">Gleichzeitig <select id="xfersPar"><option value="1">1</option><option value="2">2</option></select></label>
+    <button id="xfersClear">Fertige entfernen</button><button id="xfersClose">Schließen</button></div>
+  <p class="muted">Downloads laufen einzeln oder zu zweit, Uploads immer nacheinander. Pausierte Aufträge machen später dort weiter, wo sie waren – auch nach einem Neustart.</p>
+  <div id="xfersList"></div>
+</dialog>
 <dialog id="profilePick" class="profilepick"></dialog>
 <dialog id="friendsDlg" class="friends"></dialog>
 <dialog id="friendAdd" class="profilepick"></dialog>
