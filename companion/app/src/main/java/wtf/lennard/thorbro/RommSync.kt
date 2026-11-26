@@ -360,9 +360,14 @@ object RommSync {
         val owner = Profiles.owner(ctx, rom.optString("path"))
         val slot = Profiles.slot(ctx, owner)
         val saves = Romm.listSaves(ctx, romId)
-        // the first profile also sees saves without a slot (RomBro on the Mac, RomM's web upload) – they are this game's saves too
+        // the first profile also sees saves in slots no other ThorBro profile uses: none, "autosave" (RomBro on the Mac,
+        // RomM's web upload / autosave) – they are this game's saves too
         val all = saves.filter { Romm.slotOf(it) == slot }.ifEmpty {
-            if (owner == Profiles.MAIN) saves.filter { Romm.slotOf(it) == null } else emptyList()
+            if (owner != Profiles.MAIN) emptyList()
+            else {
+                val others = Profiles.list(ctx).filter { it.id != Profiles.MAIN }.mapNotNull { it.slot }.toSet()
+                saves.filter { Romm.slotOf(it) !in others }
+            }
         }
         if (s != null && s.isFolder) return all.maxByOrNull { remoteTime(it) }
         val romBase = rom.optString("file").substringBeforeLast('.').lowercase()

@@ -87,12 +87,13 @@ fun ControllerScreenNew() {
                 }
             }
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            BigButton("Reihenfolge (L+R)", Icons.Filled.SwapHoriz, modifier = Modifier.weight(1f)) { Players.clearAll(ctx); Pads.lrMode = true }
-            BigButton("Koppeln", Icons.Filled.BluetoothSearching, modifier = Modifier.weight(1f)) { ControllerNav.panel.value = "new" }
-            BigButton("Gekoppelt", Icons.Filled.Bluetooth, modifier = Modifier.weight(1f)) { ControllerNav.panel.value = "paired" }
-            BigButton("LEDs", Icons.Filled.Lightbulb, modifier = Modifier.weight(0.7f)) { ControllerNav.panel.value = "leds" }
-            BigButton("Thor als Gamepad", Icons.Filled.Gamepad, modifier = Modifier.weight(1.1f)) { ctx.startActivity(Intent(ctx, GamepadActivity::class.java)) }
+        // wraps instead of cutting the labels (the System rail takes some width)
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            BigButton("Reihenfolge (L+R)", Icons.Filled.SwapHoriz) { Players.clearAll(ctx); Pads.lrMode = true }
+            BigButton("Koppeln", Icons.Filled.BluetoothSearching) { ControllerNav.panel.value = "new" }
+            BigButton("Gekoppelt", Icons.Filled.Bluetooth) { ControllerNav.panel.value = "paired" }
+            BigButton("LEDs", Icons.Filled.Lightbulb) { ControllerNav.panel.value = "leds" }
+            BigButton("Thor als Gamepad", Icons.Filled.Gamepad) { ctx.startActivity(Intent(ctx, GamepadActivity::class.java)) }
         }
     }
 
