@@ -949,16 +949,18 @@ function renderStore() {
   if (d.error) { $('#storeInfo').textContent = 'RomM nicht erreichbar: ' + d.error; return; }
   if (!d.connected) { $('#storeInfo').textContent = 'RomM ist nicht verbunden (Tab Bibliothek).'; $('#storeList').innerHTML = ''; return; }
   const f = $('#storeFilter').value.trim().toLowerCase();
-  const n = d.systems.reduce((a, s) => a + s.games.length, 0);
-  $('#storeInfo').textContent = `${n} Spiele nur in RomM`;
+  // what counts for loading: the free space on the Thor's ROM volume, not how many games RomM has
+  const free = info?.storage?.[0]?.free;
+  $('#storeInfo').textContent = free != null ? `${fmt(free)} frei` : '';
+  // one row per console with its name; no cover → the console icon + the title
   $('#storeList').innerHTML = d.systems.map((s) => {
     const games = s.games.filter((g) => !f || g.name.toLowerCase().includes(f));
     if (!games.length) return '';
     return `<div class="romhead">${sysIcon(s.system, 'headicon')}<h2>${esc(s.name)}</h2><span class="muted">${games.length}</span></div>
-      <div class="covergrid">${games.map((g) => `<div class="romcard" data-store="${g.id}">
-        ${g.hasCover ? `<img class="cover" loading="lazy" alt="" src="/api/romm/cover/${g.id}?token=${encodeURIComponent(token)}">` : `<div class="cover nocover">${sysIcon(s.system, 'bigicon')}<span>${esc(g.name)}</span></div>`}
-        <div class="rtitle">${esc(g.name)}</div>
-        <div class="rmeta" id="st-${g.id}">${fmt(g.size)}</div>
+      <div class="shelf">${games.map((g) => `<div class="romcard" tabindex="0" data-store="${g.id}" title="Laden · ${fmt(g.size)}">
+        ${g.hasCover ? `<img class="cover" loading="lazy" alt="" src="/api/romm/cover/${g.id}?token=${encodeURIComponent(token)}">` : `<div class="cover nocover">${sysIcon(s.system, 'bigicon')}<span>${esc(displayTitle(g.name))}</span></div>`}
+        <div class="rtitle">${esc(displayTitle(g.name))}</div>
+        <div class="rmeta" id="st-${g.id}">Laden · ${fmt(g.size)}</div>
         <div class="bar"><i id="sb-${g.id}" style="width:0"></i></div>
       </div>`).join('')}</div>`;
   }).join('');

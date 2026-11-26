@@ -307,3 +307,7 @@ html[data-theme="doodle"] nav button.active { background: var(--text); color: #1
 .romhead .back { margin-right: 6px; }
 .cover { aspect-ratio: 1; object-fit: cover; border-radius: 12px; }
 .quiet { color: var(--muted); font-size: 14px; margin: 2px 0 10px; }
+
+/* Store: rows per console that scroll sideways, square covers */
+.shelf { display: grid; grid-auto-flow: column; grid-auto-columns: 150px; gap: 12px; overflow-x: auto; padding: 6px 4px 12px; scroll-snap-type: x proximity; }
+.shelf .romcard { scroll-snap-align: start; }

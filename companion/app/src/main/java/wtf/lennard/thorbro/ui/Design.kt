@@ -24,7 +24,7 @@ import androidx.compose.material.icons.filled.BatteryFull
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.ViewModule
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiOff
@@ -65,10 +65,11 @@ import java.util.Locale
 /** The five areas of ThorBro. L1/R1 step through them; every page belongs to exactly one. */
 enum class Area(val label: String, val icon: ImageVector, val pages: List<Screen?>) {
     START("Start", Icons.Filled.Home, listOf(null)),
-    GAMES("Spiele", Icons.Filled.ViewModule, listOf(Screen.GAMES, Screen.STORE)),
-    SYNC("Sync", Icons.Filled.Sync, listOf(Screen.SYNC)),
+    GAMES("Spiele", Icons.Filled.ViewModule, listOf(Screen.GAMES)),
+    STORE("Store", Icons.Filled.Storefront, listOf(Screen.STORE)),
     TOGETHER("Zusammen", Icons.Filled.Groups, listOf(Screen.NETPLAY)),
-    SYSTEM("System", Icons.Filled.Settings, listOf(Screen.SETTINGS, Screen.CONTROLLER, Screen.DRIVERS));
+    // Sync (RomM, Spielstände, Profile) is part of System: five tabs, the store gets its own
+    SYSTEM("System", Icons.Filled.Settings, listOf(Screen.SETTINGS, Screen.SYNC, Screen.CONTROLLER, Screen.DRIVERS));
 
     // streaming lives on the Zusammen page in the new design
     companion object { fun of(s: Screen?): Area = entries.firstOrNull { s in it.pages } ?: TOGETHER }

@@ -71,7 +71,7 @@ object StoreNav { val query = mutableStateOf("") }
 
 private class StoreGame(val g: JSONObject, val sys: String, val sysName: String) {
     val id get() = g.optInt("id")
-    val name: String get() = g.optString("name")
+    val name: String get() = displayTitle(g.optString("name"))
     val size get() = g.optLong("size")
 }
 
@@ -121,8 +121,9 @@ fun StoreScreenNew() {
     LaunchedEffect(q) { delay(250); runCatching { first.requestFocus() } }
     frame.let { } // read so progress redraws
 
+    /** one game: cover (or the console icon + title), size or progress; [badge] = the console badge on the cover (search) */
     @Composable
-    fun tile(s: StoreGame, mod: Modifier) {
+    fun tile(s: StoreGame, mod: Modifier, badge: Boolean) {
         val job = Library.downloads[s.id]
         val sub = when {
             job == null -> fmtBytes(s.size)
@@ -130,35 +131,52 @@ fun StoreScreenNew() {
             job.done -> "auf dem Thor ✓"
             else -> "${(job.progress * 100).toInt()} %"
         }
-        ArtTile(s.name, sub, storeCover(s), mod, progress = job?.takeIf { !it.done }?.progress?.toFloat()) { pick = s }
+        val img = storeCover(s)
+        ArtTile(s.name, sub, img, mod, progress = job?.takeIf { !it.done }?.progress?.toFloat(),
+            badge = if (badge || img == null) s.sys else null, hint = if (job?.done == true) "Details" else "Laden") { pick = s }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            BigButton(if (q.isEmpty()) "Suchen" else "„$q“", Icons.Filled.Search, modifier = Modifier.width(260.dp).focusRequester(first).then(Modifier)) { searching = true }
-            BigButton("Neu laden", Icons.Filled.Refresh) { refresh = true; tick++ }
-            Spacer(Modifier.weight(1f))
-            Text("${all.size} Spiele in RomM" + (if (free >= 0) " · ${fmtBytes(free)} frei" else ""), fontSize = 14.sp, color = Muted)
+    // search, reload and the free space: part of the list, so they scroll away with it
+    @Composable
+    fun head() = Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        BigButton(if (q.isEmpty()) "Suchen" else "„$q“", Icons.Filled.Search, modifier = Modifier.width(240.dp).focusRequester(first).hintA("Suchen")) { searching = true }
+        BigButton("Neu laden", Icons.Filled.Refresh) { refresh = true; tick++ }
+        Spacer(Modifier.weight(1f))
+        if (free >= 0) Text("${fmtBytes(free)} frei", fontSize = 15.sp, color = Muted)
+    }
+
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    if (q.isNotEmpty()) {
+        val hits = all.filter { it.name.contains(q, ignoreCase = true) }
+        ArtGrid(rows = 2) {
+            item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }, key = "head") {
+                Column {
+                    head()
+                    if (hits.isEmpty()) Text("Nichts gefunden für „$q“", color = Muted, modifier = Modifier.padding(16.dp))
+                }
+            }
+            items(hits, key = { it.id }) { tile(it, Modifier, badge = true) }
         }
-        if (q.isNotEmpty()) {
-            val hits = all.filter { it.name.contains(q, ignoreCase = true) }
-            if (hits.isEmpty()) Text("Nichts gefunden für „$q“", color = Muted, modifier = Modifier.padding(16.dp))
-            ArtGrid { items(hits, key = { it.id }) { tile(it, Modifier) } }
-        } else if (all.isEmpty()) {
-            Text("Alles aus RomM ist schon auf dem Thor.", color = Muted, modifier = Modifier.padding(16.dp))
-        } else CenteredFocus {
-            LazyColumn(contentPadding = PaddingValues(vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    } else {
+        HeaderFollows(list)
+        CenteredFocus {
+            LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                item(key = "head") { head() }
+                if (all.isEmpty()) item(key = "empty") { Text("Alles aus RomM ist schon auf dem Thor.", color = Muted, modifier = Modifier.padding(16.dp)) }
                 featured?.let { f -> item(key = "banner") { Banner(f, free) { pick = f } } }
-                shelves.forEach { (name, games) ->
+                // one row per console, with its name; tiles a bit smaller so a whole row fits under the head
+                shelves.filter { it.second.isNotEmpty() }.forEach { (name, games) ->
                     item(key = "shelf-$name") {
                         Column {
-                            Row(Modifier.padding(start = 14.dp, bottom = 4.dp), verticalAlignment = Alignment.Bottom) {
-                                Text(name, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                            Row(Modifier.padding(start = 14.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                ConsoleIcon(games.first().sys, 24.dp)
+                                Spacer(Modifier.width(8.dp))
+                                Text(name, fontSize = 19.sp, fontWeight = FontWeight.Bold, fontFamily = HeadFont)
                                 Text("  ${games.size}", fontSize = 14.sp, color = Muted)
                             }
-                            LazyRow(contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                                items(games, key = { it.id }) { tile(it, Modifier.width(ART)) }
+                            LazyRow(contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                items(games, key = { it.id }) { tile(it, Modifier.width(128.dp), badge = false) }
                             }
                         }
                     }
@@ -176,7 +194,7 @@ fun StoreScreenNew() {
 private fun Banner(s: StoreGame, free: Long, onOpen: () -> Unit) {
     val fx = rememberFx()
     val img = storeCover(s)
-    Box(Modifier.padding(horizontal = 12.dp).fillMaxWidth().height(200.dp).fx(fx, RoundedCornerShape(22.dp), lift = 1.02f, onClick = onOpen).background(Panel)) {
+    Box(Modifier.padding(horizontal = 12.dp).fillMaxWidth().height(160.dp).hintA("Ansehen").fx(fx, RoundedCornerShape(22.dp), lift = 1.02f, onClick = onOpen).background(Panel)) {
         if (img != null) Img(img, 900, Modifier.fillMaxSize().blur(30.dp), ContentScale.Crop)
         Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Color(0xE6050608), 0.7f to Color(0x99050608), 1f to Color(0x4D050608))))
         Row(Modifier.fillMaxSize().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -186,7 +204,7 @@ private fun Banner(s: StoreGame, free: Long, onOpen: () -> Unit) {
             Spacer(Modifier.width(24.dp))
             Column(Modifier.weight(1f)) {
                 Text("Heute im Store · ${s.sysName}", fontSize = 14.sp, color = Muted, maxLines = 1)
-                Text(s.name, fontSize = 30.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(s.name, fontSize = 26.sp, lineHeight = 30.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(6.dp))
                 Text(fmtBytes(s.size) + " · " + if (free in 0 until s.size) "passt nicht" else "passt auf den Thor", fontSize = 15.sp,
                     color = if (free in 0 until s.size) Bad else Ok)
@@ -210,11 +228,12 @@ private fun StoreDetail(s: StoreGame, free: Long, @Suppress("UNUSED_PARAMETER") 
         Box(Modifier.fillMaxSize().background(Bg)) {
             if (img != null) Img(img, 1280, Modifier.fillMaxSize().blur(40.dp), ContentScale.Crop)
             Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Color(0xF2050608), 0.6f to Color(0xCC050608), 1f to Color(0x80050608))))
-            Row(Modifier.fillMaxSize().padding(horizontal = 56.dp, vertical = 44.dp), verticalAlignment = Alignment.CenterVertically,
+            Box(Modifier.align(Alignment.BottomCenter)) { ButtonHints("A" to (Hints.a ?: "Auswählen"), "B" to "Zurück") }
+            Row(Modifier.fillMaxSize().padding(start = 56.dp, end = 56.dp, top = 36.dp, bottom = 60.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(40.dp)) {
                 Box(Modifier.fillMaxHeight(0.8f).aspectRatio(1f).clip(RoundedCornerShape(20.dp)).background(Panel), contentAlignment = Alignment.Center) {
                     if (img != null) Img(img, 900, Modifier.fillMaxSize(), ContentScale.Crop)
-                    else Icon(Icons.Filled.CloudDownload, null, Modifier.size(80.dp), tint = Muted)
+                    else ConsoleIcon(s.sys, 140.dp)
                 }
                 Column(Modifier.weight(1f)) {
                     Text(s.sysName, fontSize = 16.sp, color = Muted, maxLines = 1)
@@ -230,7 +249,7 @@ private fun StoreDetail(s: StoreGame, free: Long, @Suppress("UNUSED_PARAMETER") 
                     BigButton(when {
                         running -> "Lädt … ${(job!!.progress * 100).toInt()} %"
                         done -> "Auf dem Thor"
-                        else -> "Herunterladen"
+                        else -> "Laden · ${fmtBytes(s.size)}"
                     }, if (done) Icons.Filled.CheckCircle else Icons.Filled.CloudDownload, primary = true, enabled = fits && !running && !done,
                         modifier = Modifier.width(320.dp).focusRequester(first)) { Library.download(ctx, s.id) }
                     if (running) LinearProgressIndicator(progress = { job!!.progress.toFloat() }, modifier = Modifier.width(320.dp).padding(top = 10.dp).height(6.dp).clip(RoundedCornerShape(3.dp)),
