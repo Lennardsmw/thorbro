@@ -152,6 +152,8 @@ class ThorActivity : ComponentActivity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         Pads.refresh(this)
+        val next = wtf.lennard.thorbro.Direct.afterPermission; wtf.lennard.thorbro.Direct.afterPermission = null
+        if (next != null && wtf.lennard.thorbro.Direct.permitted(this)) next()
     }
 
     companion object {

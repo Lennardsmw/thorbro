@@ -182,6 +182,7 @@ fun GameSaves(sys: String, path: String, title: String, onClose: () -> Unit) {
                 if (gs == null) item { Text("Lade …", color = Muted) }
                 if (gs != null) {
                     val cmp = gs.optString("compare")
+                    gs.optString("diag").takeIf { it.isNotEmpty() }?.let { item { Text(it, fontSize = 12.sp, color = Muted) } }
                     val cloudOk = gs.optBoolean("rommAllowed") && gs.optBoolean("connected") && gs.optBoolean("inRomm")
                     item {
                         Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {

@@ -168,8 +168,10 @@ fun rememberDirect(): DirectUi {
     return d
 }
 
-internal fun directOn(ctx: android.content.Context, d: DirectUi, scope: kotlinx.coroutines.CoroutineScope, then: String) {
+internal fun directOn(ctx: android.content.Context, d: DirectUi, scope: kotlinx.coroutines.CoroutineScope, then: String?) {
     if (!wtf.lennard.thorbro.Direct.permitted(ctx)) {
+        // after the user allowed it, carry on (ThorActivity.onRequestPermissionsResult calls this)
+        wtf.lennard.thorbro.Direct.afterPermission = { directOn(ctx, d, scope, then) }
         (ctx as? android.app.Activity)?.requestPermissions(arrayOf(wtf.lennard.thorbro.Direct.permissionName()), 7)
         return
     }
@@ -180,6 +182,18 @@ internal fun directOn(ctx: android.content.Context, d: DirectUi, scope: kotlinx.
         d.st = r; d.busy = false
         d.menu = if (r.has("error")) "error:" + r.optString("error") else then
     }
+}
+
+/** the switch: on -> off, off -> on (the info with name/password is its own row) */
+internal fun directToggle(ctx: android.content.Context, d: DirectUi, scope: kotlinx.coroutines.CoroutineScope) {
+    if (d.busy) return
+    if (d.st?.optBoolean("active") == true) {
+        d.busy = true
+        scope.launch {
+            d.st = withContext(Dispatchers.IO) { runCatching { wtf.lennard.thorbro.Direct.stop(ctx) }.getOrNull() ?: d.st }
+            d.busy = false
+        }
+    } else directOn(ctx, d, scope, null)
 }
 
 fun androidx.compose.foundation.lazy.grid.LazyGridScope.directTiles(

@@ -818,6 +818,7 @@ function gameSaveHtml(g) {
   return `<h3>Spielstände${g.multiProfile ? ` <span class="muted">· Profil ${esc(g.profile)}</span>` : ''}${cmp ? `<span class="cmpchip" style="color:${cmp[1]}">${cmp[0]}</span>` : ''}</h3>
     <div class="gsave">${card('Auf dem Thor', g.device, 'Noch kein Spielstand auf dem Thor', g.compare === 'device-newer' || g.compare === 'device-only')}
       ${card('Neuester in RomM', g.cloud, cloudEmpty, pullFirst)}</div>
+    ${g.diag ? `<div class="muted" style="font-size:12px">${esc(g.diag)}</div>` : ''}
     <div class="row">${cloudOk ? (pullFirst ? pull + push : push + pull) : ''}<button data-send-save ${g.device ? '' : 'disabled'}>🎁 An Freund schicken …</button></div>
     <details class="snaps"><summary>Backups · ${b.length ? `${b.length} ältere Stände · ${fmt(b.reduce((a, x) => a + x.size, 0))}` : 'noch keins – entsteht beim nächsten Speichern'}</summary>
       <table class="savetable">${b.map((x) => `<tr><td>${when(x.time)}<div class="muted">${esc(x.reasonLabel)}${g.multiProfile && x.profile ? ' · ' + esc(x.profile) : ''} · ${fmt(x.size)}</div></td>
