@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.material.icons.Icons
-import wtf.lennard.thorbro.SwitchFirmware
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.AddLink
@@ -25,7 +24,6 @@ import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Inventory2
-import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Sync
@@ -159,28 +157,6 @@ fun SyncScreen() {
             if (connected) ConsoleTile("RomM-Server", st.optString("url").removePrefix("https://").removePrefix("http://"), Icons.Filled.Dns) { serverOpen = true }
             else ConsoleTile("RomM-Server hinzufügen", "Adresse eingeben, Code in RomM bestätigen", Icons.Filled.AddLink, accent = true) { serverOpen = true }
         }
-        if (connected) item {
-            var fwBusy by remember { mutableStateOf(false) }
-            var fwNote by remember { mutableStateOf("für RomBro auf dem Mac") }
-            ConsoleTile(if (fwBusy) "Lädt hoch …" else "Switch-Keys & Firmware zu RomM", fwNote, Icons.Filled.Key) {
-                if (fwBusy) return@ConsoleTile
-                fwBusy = true
-                scope.launch {
-                    val r = withContext(Dispatchers.IO) { SwitchFirmware.sync(ctx, force = true) }
-                    fwBusy = false
-                    val up = r.optJSONArray("uploaded")?.length() ?: 0
-                    fwNote = when {
-                        r.optBoolean("needsRepair") -> "RomM neu koppeln für Firmware (im Browser unter Bibliothek)"
-                        r.has("error") -> "Fehler: ${r.optString("error")}"
-                        r.has("missing") -> r.optString("missing")
-                        up > 0 -> "$up Datei(en) hochgeladen"
-                        else -> "RomM hat sie schon"
-                    }
-                    tick++
-                }
-            }
-        }
-
         profileTiles(profiles) { p -> if (p == null) profileAdd = true else profileOpen = p }
 
         val locs = saves?.optJSONArray("locations").objs().filter { (it.optJSONArray("snapshots")?.length() ?: 0) > 0 }

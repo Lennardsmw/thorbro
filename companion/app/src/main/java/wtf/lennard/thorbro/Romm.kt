@@ -17,7 +17,7 @@ import kotlin.concurrent.thread
  * Sign-in uses RomM's device flow: ThorBro shows a code, the user approves it in RomM's web UI.
  */
 object Romm {
-    private val scopes = listOf("me.read", "platforms.read", "platforms.write", "roms.read", "roms.write", "assets.read", "assets.write", "firmware.read", "firmware.write")
+    private val scopes = listOf("me.read", "platforms.read", "platforms.write", "roms.read", "roms.write", "assets.read", "assets.write")
 
     fun hasScope(ctx: Context, scope: String) = (Prefs.of(ctx).getString("rommScopes", "") ?: "").split(' ').contains(scope)
 
@@ -300,34 +300,6 @@ object Romm {
 
     fun listSaves(ctx: Context, romId: Int): List<JSONObject> =
         JSONArray(request(ctx, "GET", "/api/saves?rom_id=$romId")).let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
-
-    /** RomM answered 403: the pairing lacks a scope (older pairings have no firmware.write) */
-    class MissingScope(msg: String) : IllegalStateException(msg)
-
-    fun listFirmware(ctx: Context, platformId: Int): List<JSONObject> =
-        JSONArray(request(ctx, "GET", "/api/firmware?platform_id=$platformId")).let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
-
-    /** uploads [files] as firmware of one platform (multipart field "files"); same names are overwritten */
-    fun uploadFirmware(ctx: Context, platformId: Int, files: List<Pair<String, File>>): JSONObject {
-        val boundary = "thorbro" + System.currentTimeMillis()
-        val parts = files.map { (name, f) ->
-            "--$boundary\r\nContent-Disposition: form-data; name=\"files\"; filename=\"${name.replace("\"", "")}\"\r\nContent-Type: application/octet-stream\r\n\r\n".toByteArray() to f
-        }
-        val crlf = "\r\n".toByteArray(); val tail = "--$boundary--\r\n".toByteArray()
-        val c = open(ctx, "POST", "/api/firmware?platform_id=$platformId", headers = mapOf("Content-Type" to "multipart/form-data; boundary=$boundary"))
-        c.doOutput = true
-        c.setFixedLengthStreamingMode(parts.sumOf { it.first.size + it.second.length() + crlf.size } + tail.size)
-        c.outputStream.use { o -> parts.forEach { (h, f) -> o.write(h); f.inputStream().use { it.copyTo(o) }; o.write(crlf) }; o.write(tail) }
-        if (c.responseCode == 403) throw MissingScope("RomM neu koppeln für Firmware (Recht firmware.write fehlt)")
-        return JSONObject(read(c))
-    }
-
-    /** removes firmware entries and their files */
-    fun deleteFirmware(ctx: Context, ids: List<Int>) {
-        val c = open(ctx, "POST", "/api/firmware/delete", JSONObject().put("firmware", JSONArray(ids)).put("delete_from_fs", JSONArray(ids)).toString())
-        if (c.responseCode == 403) throw MissingScope("RomM neu koppeln für Firmware (Recht firmware.write fehlt)")
-        read(c)
-    }
 
     /** all of the user's saves on one platform (each carries its "rom_id") */
     fun listPlatformSaves(ctx: Context, platformId: Int): List<JSONObject> =
