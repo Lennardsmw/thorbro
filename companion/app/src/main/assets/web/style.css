@@ -321,3 +321,7 @@ html[data-theme="doodle"] nav button.active { background: var(--text); color: #1
 .party .face span { max-width: 66px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .party .invite { cursor: pointer; }
 .party .invite .avatar { font-size: 26px; color: var(--text); }
+
+/* small secondary buttons; driver names wrap instead of being cut */
+button.small { padding: 4px 12px; font-size: 13px; border-radius: 999px; }
+#drivers table.files td:first-child { word-break: break-word; overflow-wrap: anywhere; }

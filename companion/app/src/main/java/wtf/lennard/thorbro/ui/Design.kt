@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -273,16 +274,17 @@ fun SettingsGroup(title: String, modifier: Modifier = Modifier, content: @Compos
  */
 @Composable
 fun SettingRow(label: String, sub: String = "", icon: ImageVector? = null, value: String = "", on: Boolean? = null,
-               warn: Boolean = false, modifier: Modifier = Modifier, onClick: () -> Unit) {
+               warn: Boolean = false, modifier: Modifier = Modifier, labelLines: Int = 1, onClick: () -> Unit) {
     val fx = rememberFx()
     val shape = RoundedCornerShape(14.dp)
-    Row(modifier.fillMaxWidth().height(if (sub.isEmpty()) 54.dp else 62.dp)
+    Row(modifier.fillMaxWidth().heightIn(min = if (sub.isEmpty()) 54.dp else 62.dp)
         .fx(fx, shape, lift = 1.015f, frame = true, restLine = false, onClick = onClick)
         .background(if (fx.active) Soft else Color.Transparent).padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically) {
         if (icon != null) { Icon(icon, null, Modifier.size(22.dp), tint = if (warn) Bad else Ink); Spacer(Modifier.width(14.dp)) }
         androidx.compose.foundation.layout.Column(Modifier.weight(1f)) {
-            Text(label, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(label, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = labelLines, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(vertical = if (labelLines > 1) 6.dp else 0.dp))
             if (sub.isNotEmpty()) Text(sub, fontSize = 12.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (value.isNotEmpty()) Text(value, fontSize = 14.sp, color = if (warn) Bad else Muted, maxLines = 1, overflow = TextOverflow.Ellipsis,

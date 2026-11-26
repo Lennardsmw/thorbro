@@ -189,7 +189,7 @@
   <section id="drivers" class="tab" hidden>
     <div class="row">
       <span id="drvInfo" class="muted grow">Lade …</span>
-      <button id="drvReload">Neu laden</button>
+      <button id="drvReload" class="small">↻ Listen neu laden</button>
     </div>
     <div class="panel">
       <h3>Geladene Treiber</h3>
@@ -223,6 +223,10 @@
     <div id="deviceInfo" class="cards"></div>
     <h2 style="font-size:18px;margin:20px 0 8px">Speicher</h2>
     <div id="storageView"></div>
+    <div class="panel"><h3>Switch-Keys &amp; Firmware</h3>
+      <div class="sub">Lädt prod.keys, title.keys und die Firmware aus Eden als RomM-Firmware hoch, damit RomBro auf dem Mac sie installiert. Läuft auch bei jedem Abgleich mit (nur wenn sich etwas geändert hat).</div>
+      <div id="fwRight"></div>
+      <div class="row"><button id="fwRun">Switch-Keys &amp; Firmware zu RomM</button><span id="fwState" class="muted"></span></div></div>
     <p><button id="cocoonRestart">Cocoon neu starten</button> <button id="logout">Abmelden</button></p>
   </section>
 </main>

@@ -1,5 +1,10 @@
 package wtf.lennard.thorbro.ui
 
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.material3.Text
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Computer
@@ -175,36 +180,58 @@ fun DriversScreen() {
     val have = local.map { it.optString("name") }.toSet()
     val emus = o.optJSONArray("emulators").objs().filter { it.optBoolean("installed") }
 
-    TileGrid(first) {
-        header("Geladen", listOfNotNull(o.optString("soc"), o.optString("gpu").ifEmpty { null }).joinToString(" · "))
-        item { ConsoleTile("Listen neu laden", "von GitHub", Icons.Filled.Refresh, modifier = Modifier.firstFocus(first, true)) { refresh = true; tick++ } }
-        local.forEach { f ->
-            val m = f.optJSONObject("driver")
-            item { ConsoleTile(m?.optString("name")?.ifEmpty { null } ?: f.optString("name"), m?.optString("version") ?: "kein Treiberpaket",
-                Icons.Filled.CheckCircle, accent = true) { menu = f } }
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    HeaderFollows(list)
+    FocusOnStart(first)
+    CenteredFocus {
+    androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize(), state = list,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp)) {
+        item(key = "head") {
+            androidx.compose.foundation.layout.Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text(listOfNotNull(o.optString("soc"), o.optString("gpu").ifEmpty { null }).joinToString(" · "), fontSize = 15.sp, color = Muted,
+                    modifier = Modifier.weight(1f))
+                SmallButton("Listen neu laden", Icons.Filled.Refresh, Modifier.focusRequester(first)) { refresh = true; tick++ }
+            }
         }
-        header("Im Emulator einbauen", "Emulator öffnen → GPU-Treiber → Installieren → Ordner ThorBro/GPU-Treiber")
-        emus.forEach { e -> item { ConsoleTile(e.optString("name"), "öffnen", Icons.Filled.VideogameAsset) { Apps.launch(ctx, e.optString("pkg")) } } }
-        o.optJSONArray("sources").objs().forEach { s ->
-            header(s.optString("name"), s.optString("error").ifEmpty { s.optString("note") })
-            s.optJSONArray("releases").objs().take(3).flatMap { r -> r.optJSONArray("assets").objs().map { r to it } }.take(6).forEach { (r, a) ->
-                val name = a.optString("name")
-                item {
-                    val p = progress[name]
-                    ConsoleTile(name.removeSuffix(".zip").removeSuffix(".adpkg").replace('_', ' '),
-                        when { name in have -> "geladen"; failed[name] != null -> failed[name]!!; p != null -> "${(p * 100).toInt()} %"
-                            else -> "${r.optString("date")} · ${fmtBytes(a.optLong("size"))}" },
-                        if (name in have) Icons.Filled.CheckCircle else Icons.Filled.Memory, progress = p) {
-                        if (name in have || p != null) return@ConsoleTile
-                        val job = Jobs.start("Treiber laden") { Drivers.download(a.optString("url"), it) }
-                        scope.launch {
-                            while (!job.done) { progress[name] = job.progress.toFloat(); delay(300) }
-                            progress.remove(name); job.error?.let { failed[name] = it }; tick++
+        item(key = "local") {
+            SettingsGroup("Geladen") {
+                if (local.isEmpty()) SettingRow("Noch kein Treiber geladen", "unten einen aus der Liste wählen") {}
+                local.forEach { f ->
+                    val m = f.optJSONObject("driver")
+                    SettingRow(m?.optString("name")?.ifEmpty { null } ?: f.optString("name"), m?.optString("version") ?: "kein Treiberpaket",
+                        Icons.Filled.CheckCircle, labelLines = 2) { menu = f }
+                }
+            }
+        }
+        if (emus.isNotEmpty()) item(key = "emus") {
+            SettingsGroup("Im Emulator einbauen · Emulator öffnen → GPU-Treiber → Installieren → Ordner ThorBro/GPU-Treiber") {
+                emus.forEach { e -> SettingRow(e.optString("name"), icon = Icons.Filled.VideogameAsset, value = "Öffnen") { Apps.launch(ctx, e.optString("pkg")) } }
+            }
+        }
+        o.optJSONArray("sources").objs().forEach { src ->
+            item(key = "src-" + src.optString("name")) {
+                SettingsGroup(src.optString("name") + (src.optString("error").ifEmpty { src.optString("note") }.takeIf { it.isNotEmpty() }?.let { " · $it" } ?: "")) {
+                    src.optJSONArray("releases").objs().take(3).flatMap { r -> r.optJSONArray("assets").objs().map { r to it } }.take(6).forEach { (r, a) ->
+                        val name = a.optString("name")
+                        val p = progress[name]
+                        // the full name, wrapped if needed – never cut off
+                        SettingRow(name.removeSuffix(".zip").removeSuffix(".adpkg").replace('_', ' '),
+                            when { name in have -> "geladen"; failed[name] != null -> failed[name]!!; p != null -> "lädt … ${(p * 100).toInt()} %"
+                                else -> "${r.optString("date")} · ${fmtBytes(a.optLong("size"))}" },
+                            if (name in have) Icons.Filled.CheckCircle else Icons.Filled.Memory, labelLines = 2, warn = failed[name] != null) {
+                            if (name in have || p != null) return@SettingRow
+                            val job = Jobs.start("Treiber laden") { Drivers.download(a.optString("url"), it) }
+                            scope.launch {
+                                while (!job.done) { progress[name] = job.progress.toFloat(); delay(300) }
+                                progress.remove(name); job.error?.let { failed[name] = it }; tick++
+                            }
                         }
                     }
                 }
             }
         }
+    }
     }
 
     menu?.let { f ->

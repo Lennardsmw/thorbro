@@ -11,6 +11,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /*
  * Page chrome of the new design that reacts to the content:
@@ -43,4 +50,18 @@ fun HeaderFollows(state: LazyListState) {
 fun HeaderFollows(state: LazyGridState) {
     LaunchedEffect(state) { snapshotFlow { state.firstVisibleItemIndex > 0 }.collect { Header.hidden = it } }
     DisposableEffect(state) { onDispose { Header.hidden = false } }
+}
+
+/** a small secondary button (e.g. "Listen neu laden"): pill, icon + text, same focus look as everything else */
+@Composable
+fun SmallButton(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector? = null, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val fx = rememberFx()
+    androidx.compose.foundation.layout.Row(modifier.height(40.dp).fx(fx, androidx.compose.foundation.shape.RoundedCornerShape(50), lift = 1.05f, onClick = onClick)
+        .background(if (fx.active) Accent else Panel).padding(horizontal = 14.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        if (icon != null) {
+            androidx.compose.material3.Icon(icon, null, Modifier.size(18.dp), tint = if (fx.active) OnAccent else Ink)
+            androidx.compose.foundation.layout.Spacer(Modifier.width(8.dp))
+        }
+        androidx.compose.material3.Text(label, fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, color = if (fx.active) OnAccent else Ink, maxLines = 1)
+    }
 }

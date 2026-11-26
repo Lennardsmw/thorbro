@@ -1136,11 +1136,9 @@ async function loadSyncPlan() {
     <h4 style="margin:12px 0 4px">Spiele, die RomM noch nicht hat</h4>
     ${missing.length ? missing.map((s) => `<label style="display:block"><input type="checkbox" data-sync-sys="${s.system}"> ${esc((romData?.systems.find((x) => x.id === s.system) || {}).name || s.system)}: ${s.missing} Spiele, ${fmt(s.missingSize)}</label>`).join('') : '<span class="ok">✓ RomM hat alle Spiele vom Thor</span>'}
     <div class="row"><label class="muted">Heimnetz-Adresse (direkt statt übers Internet):</label><input id="rommLan" value="${esc(st.lanUrl || '')}" placeholder="aus" style="flex:1"><button id="rommLanSave">Speichern</button><span class="muted">${st.viaLan ? '✓ gerade im Heimnetz' : 'zuletzt nicht erreichbar'}</span></div>
-    <div class="row"><button id="syncRun" class="primary">Jetzt abgleichen</button><span id="syncState" class="muted"></span></div>
-    <h4 style="margin:12px 0 4px">Switch-Keys &amp; Firmware</h4>
-    <div class="muted">Lädt prod.keys, title.keys und die Firmware aus Eden als RomM-Firmware hoch, damit RomBro auf dem Mac sie installiert. Läuft auch bei jedem Abgleich mit (nur wenn sich etwas geändert hat).</div>
-    ${p.canFirmware ? '' : '<p class="err">Dafür braucht ThorBro das Recht firmware.write: RomM neu koppeln für Firmware. <button id="rommRepair2">Neu koppeln</button></p>'}
-    <div class="row"><button id="fwRun">Switch-Keys &amp; Firmware zu RomM</button><span id="fwState" class="muted"></span></div>`;
+    <div class="row"><button id="syncRun" class="primary">Jetzt abgleichen</button><span id="syncState" class="muted"></span></div>`;
+  // Switch-Keys & Firmware live under Gerät (System); only the missing right is pointed out there
+  $('#fwRight').innerHTML = p.canFirmware ? '' : '<p class="err">Dafür braucht ThorBro das Recht firmware.write: RomM neu koppeln für Firmware. <button id="rommRepair2">Neu koppeln</button></p>';
 }
 document.addEventListener('change', (e) => { if (e.target.id === 'syncAuto') api('/api/romm/sync/config?' + q({ auto: e.target.checked ? 1 : 0 }), { method: 'POST' }); });
 document.addEventListener('click', async (e) => {
