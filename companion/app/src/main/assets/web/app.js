@@ -615,7 +615,7 @@ async function loadRoms(refresh) {
   // Upload target: the Thor's ROM folder (Settings)
   if (romData.romRoot && document.activeElement !== $('#romRoot')) { $('#romRoot').value = romData.romRoot; renderQueue(); }
   // '' = all consoles as folders (the start of the Spiele page)
-  if (romSys && !romData.systems.some((s) => s.id === romSys)) romSys = '';
+  if (romSys && romSys !== '_stream' && !romData.systems.some((s) => s.id === romSys)) romSys = '';
   renderRoms();
 }
 
@@ -698,7 +698,8 @@ function renderRoms() {
   if (!romData) return;
   renderStats();
   $('#sysList').innerHTML = `<button data-sys-pick="" class="${romSys ? '' : 'active'}"><span class="grow">▦ Alle Konsolen</span></button>` + romData.systems.map((s) =>
-    `<button data-sys-pick="${s.id}" class="${s.id === romSys ? 'active' : ''}">${sysIcon(s.id)}<span class="grow ${s.id === '_unassigned' ? 'warn' : ''}">${esc(s.name)}</span><span class="n">${s.count}</span></button>`).join('');
+    `<button data-sys-pick="${s.id}" class="${s.id === romSys ? 'active' : ''}">${sysIcon(s.id)}<span class="grow ${s.id === '_unassigned' ? 'warn' : ''}">${esc(s.name)}</span><span class="n">${s.count}</span></button>`).join('')
+    + `<button data-sys-pick="_stream" class="${romSys === '_stream' ? 'active' : ''}"><span class="grow">📡 Streaming</span></button>`;
   const f = $('#romFilter').value.trim().toLowerCase();
   const region = $('#romRegion').value;
   const match = (r, sysId) => {
@@ -719,7 +720,8 @@ function renderRoms() {
   } else {
     const s = romData.systems.find((x) => x.id === romSys);
     const consoles = romData.systems.filter((x) => x.id !== '_unassigned' && x.count > 0);
-    if (!romSys && consoles.length) html = `<div class="covergrid folders">${consoles.map(folderTile).join('')}</div>`;
+    if (romSys === '_stream') { html = streamHtml(); if (!streamApps) loadStreamApps(); }
+    else if (!romSys) html = `<div class="covergrid folders">${consoles.map(folderTile).join('')}${streamFolderTile()}</div>`;
     else if (!s) html = '<p class="muted">Keine ROMs gefunden. Lege sie z. B. unter ROMs/&lt;konsole&gt; ab.</p>';
     else {
       loadMeta(s.id);
@@ -1017,6 +1019,49 @@ $('#romList').addEventListener('click', (e) => {
   romSys = b.dataset.sysPick; store.set('romSys', romSys);
   renderRoms();
   $('#romList').querySelector('.romcard, .folder')?.focus();
+});
+
+// ---------- Spiele › Streaming: the games Sunshine offers on the Mac, started through Moonlight ----------
+let streamApps = null, streamOnlyFav = false;
+const streamFolderTile = () => `<button class="folder" data-sys-pick="_stream" title="Streaming">
+  <div class="fart"><div class="cover nocover"><span style="font-size:48px">📡</span></div></div>
+  <div class="rtitle">Streaming</div><div class="rmeta">vom Mac</div></button>`;
+function streamHtml() {
+  const a = streamApps, apps = a ? a.apps.filter((x) => !streamOnlyFav || x.shortcut) : [];
+  const head = `<div class="romhead"><button data-sys-pick="" class="back">← Alle Konsolen</button><h2>Streaming</h2>
+    <span class="muted">${a ? a.apps.length + ' Spiele' + (a.host ? ' · ' + esc(a.host.name) : '') : 'lade …'}</span>
+    <button id="stFav">${streamOnlyFav ? 'Alle Spiele' : '★ Shortcuts'}</button> <button id="stRefresh">Neu laden</button></div>`;
+  const cards = apps.map((x) => `<div class="romcard" tabindex="0" data-stream="${esc(x.name)}" title="Spielen">
+    <button class="playbtn primary" data-stream-play="${esc(x.name)}">▶ Spielen</button>
+    <img class="cover" loading="lazy" alt="${esc(x.name)}" src="/api/stream/apps/icon?${q({ name: x.name })}&${authQ()}" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'cover nocover',textContent:this.alt}))">
+    <div class="rtitle">${x.shortcut ? '<span class="fav">★</span> ' : ''}${esc(x.name)}</div>
+    <div class="rbadges"><button data-stream-fav="${esc(x.name)}" data-on="${x.shortcut ? 0 : 1}">${x.shortcut ? 'Aus Shortcuts' : '★ Zu Shortcuts'}</button></div></div>`).join('');
+  const empty = a && !apps.length ? `<p class="muted">${streamOnlyFav ? 'Noch keine Shortcuts.' : 'Noch keine Spiele. In RomBro „Meine Spiele hinzufügen“ drücken oder hier das Sunshine-Login eintragen.'}</p>` : '';
+  const login = `<details style="margin-top:14px"><summary class="muted">Sunshine-Login ${a && a.login ? '(gespeichert)' : ''}</summary>
+    <p class="muted">Damit ThorBro die Liste direkt von Sunshine holt (Web-Login von Sunshine, Port 47990).</p>
+    <div class="row"><input id="stUser" placeholder="Benutzer"><input id="stPass" type="password" placeholder="Passwort"><button id="stLogin">Speichern</button></div></details>`;
+  return head + `<div class="covergrid">${cards}</div>` + empty + login;
+}
+async function loadStreamApps(refresh = false) {
+  try { streamApps = (await api('/api/stream/apps' + (refresh ? '?refresh=1' : ''))).body; } catch (err) { streamApps = { apps: [], host: null }; toast('Fehler: ' + err.message); }
+  if (romSys === '_stream' && !refresh && !streamApps.fetched) { streamApps.fetched = true; $('#romList').innerHTML = streamHtml(); loadStreamApps(true); return; }
+  if (romSys === '_stream') $('#romList').innerHTML = streamHtml();
+}
+$('#romList').addEventListener('click', async (e) => {
+  const t = e.target;
+  if (t.id === 'stFav') { streamOnlyFav = !streamOnlyFav; $('#romList').innerHTML = streamHtml(); return; }
+  if (t.id === 'stRefresh') { toast('Suche den Mac …'); await loadStreamApps(true); return; }
+  if (t.id === 'stLogin') {
+    await api('/api/stream/sunshine?' + q({ user: $('#stUser').value, pass: $('#stPass').value }), { method: 'POST' });
+    toast('Gespeichert'); await loadStreamApps(true); return;
+  }
+  const f = t.closest('[data-stream-fav]');
+  if (f) { e.stopPropagation(); await api('/api/stream/apps/shortcut?' + q({ name: f.dataset.streamFav, on: f.dataset.on }), { method: 'POST' }); await loadStreamApps(); return; }
+  const p = t.closest('[data-stream-play]') || t.closest('[data-stream]');
+  if (p) {
+    const name = p.dataset.streamPlay || p.dataset.stream;
+    try { await api('/api/stream/apps/play?' + q({ name }), { method: 'POST' }); toast('Moonlight startet …'); } catch (err) { alert(err.message); }
+  }
 });
 // ---------- profiles (like the Switch: who is playing?) ----------
 const profColor = (p) => p.color || '#4F8EF7';

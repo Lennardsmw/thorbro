@@ -19,7 +19,11 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.Icon
+import wtf.lennard.thorbro.StreamApps
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -47,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import wtf.lennard.thorbro.Background
@@ -134,7 +139,7 @@ fun GamesScreenNew() {
     }
     val list = systems
     if (list == null) { Line("Suche Spiele …", Muted); return }
-    if (list.isEmpty()) { Line("Keine Spiele gefunden. Lege sie unter ROMs/<Konsole> ab.", Muted); return }
+    if (NewGamesNav.folder.value == STREAM_FOLDER) { StreamFolder(); return }
     val cur = list.firstOrNull { it.id == NewGamesNav.folder.value }
     if (cur == null) { Folders(list); return }
     FolderContent(cur, reload) { Roms.invalidate(); reload++ }
@@ -150,6 +155,12 @@ private fun Folders(list: List<Sys>) {
         items(list, key = { it.id }) { s ->
             val isFirst = if (last != null && list.any { it.id == last }) s.id == last else s == list.first()
             FolderTile(s, if (isFirst) Modifier.focusRequester(first) else Modifier) { NewGamesNav.lastFolder = s.id; NewGamesNav.folder.value = s.id }
+        }
+        item(key = STREAM_FOLDER) {
+            ArtTile("Streaming", "vom Mac", null, if (list.isEmpty()) Modifier.focusRequester(first) else Modifier, hint = "Öffnen",
+                corner = { Icon(Icons.Filled.Cast, null, Modifier.align(Alignment.Center).size(64.dp), tint = Accent) }) {
+                NewGamesNav.lastFolder = STREAM_FOLDER; NewGamesNav.folder.value = STREAM_FOLDER
+            }
         }
     }
 }
@@ -234,3 +245,65 @@ private fun FolderContent(cur: Sys, reload: Int, changed: () -> Unit) {
     }
 }
 
+
+private const val STREAM_FOLDER = "_stream"
+
+/** Spiele › Streaming: the games Sunshine offers on the Mac (cover from the scraping DB), tap starts them in Moonlight */
+@Composable
+private fun StreamFolder() {
+    val ctx = LocalContext.current
+    var tick by remember { mutableIntStateOf(0) }
+    var data by remember { mutableStateOf<JSONObject?>(null) }
+    var busy by remember { mutableStateOf(true) }
+    var onlyShortcuts by remember { mutableStateOf(false) }
+    var open by remember { mutableStateOf<JSONObject?>(null) }
+    var msg by remember { mutableStateOf("") }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    // the cached list at once, then ask the Mac
+    LaunchedEffect(tick) {
+        data = withContext(Dispatchers.IO) { StreamApps.list(ctx) }
+        busy = true
+        data = withContext(Dispatchers.IO) { runCatching { StreamApps.refresh(ctx) }.getOrNull() } ?: data
+        busy = false
+    }
+    val apps = data?.optJSONArray("apps")?.objs().orEmpty()
+    val shown = if (onlyShortcuts) apps.filter { it.optBoolean("shortcut") } else apps
+    val first = remember { FocusRequester() }
+    LaunchedEffect(Unit) { delay(200); runCatching { first.requestFocus() } }
+    ArtGrid(rows = 2) {
+        item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }, key = "head") {
+            Row(Modifier.padding(start = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Cast, null, Modifier.size(30.dp), tint = Accent); Spacer(Modifier.width(12.dp))
+                Text("Streaming", fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                val host = data?.optJSONObject("host")?.optString("name").orEmpty()
+                Text("   ${apps.size}" + (if (host.isNotEmpty()) " · $host" else "") + (if (busy) " · suche …" else ""), fontSize = 14.sp, color = Muted, maxLines = 1)
+            }
+        }
+        item(key = "shortcuts") {
+            ArtTile(if (onlyShortcuts) "Alle Spiele" else "Shortcuts", "${apps.count { it.optBoolean("shortcut") }} Favoriten", null, Modifier.focusRequester(first), hint = "Wechseln",
+                corner = { Icon(Icons.Filled.Star, null, Modifier.align(Alignment.Center).size(56.dp), tint = Accent) }) { onlyShortcuts = !onlyShortcuts }
+        }
+        items(shown, key = { it.getString("name") }) { a ->
+            val name = a.getString("name")
+            val img by produceState<File?>(null, name, data?.optLong("updated")) { value = withContext(Dispatchers.IO) { runCatching { StreamApps.icon(ctx, name) }.getOrNull() } }
+            ArtTile(name, if (a.optBoolean("shortcut")) "★ Shortcut" else "", img, hint = "Spielen") { open = a }
+        }
+    }
+    if (apps.isEmpty() && !busy) Box(Modifier.fillMaxSize().padding(top = 120.dp), contentAlignment = Alignment.Center) {
+        Text(if (data?.optBoolean("login") == true) "Keine Spiele von Sunshine. Läuft der Mac?" else
+            "Noch keine Spiele. In RomBro „Meine Spiele hinzufügen“ drücken oder im Web-Panel unter Spiele › Streaming das Sunshine-Login eintragen.",
+            color = Muted, fontSize = 15.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 40.dp))
+    }
+    open?.let { a ->
+        val name = a.getString("name")
+        ConsoleMenu(name, msg, options = listOf(
+            "Spielen" to {
+                msg = ""; open = null
+                scope.launch { withContext(Dispatchers.IO) { runCatching { StreamApps.play(ctx, name) } }.exceptionOrNull()?.let { msg = it.message ?: "Fehler" } }
+            },
+            (if (a.optBoolean("shortcut")) "Aus Shortcuts entfernen" else "Zu Shortcuts") to {
+                StreamApps.setShortcut(ctx, name, !a.optBoolean("shortcut")); open = null; tick++
+            },
+        )) { open = null }
+    }
+}

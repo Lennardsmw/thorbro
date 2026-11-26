@@ -171,6 +171,22 @@ object Media {
         }
     }.getOrNull()
 
+    /**
+     * cover for a bare game name (streamed games have no file): the libretro boxart whose title matches.
+     * Without [systemId] only consoles whose thumbnail index is already cached are searched (no downloads for guessing).
+     */
+    fun coverByName(ctx: Context, name: String, systemId: String? = null): File? {
+        val systems = if (systemId != null) listOf(systemId)
+            else libretro.keys.filter { File(dir(ctx, "meta/$it"), "thumbs.txt").length() > 0 }
+        for (id in systems) {
+            val data = load(ctx, id) ?: continue
+            val c = data.thumbSet.firstOrNull { titleKey(it) == titleKey(name) }?.let { best(data.thumbs, it) { x -> x } }
+                ?: best(data.thumbs, name) { it } ?: continue
+            cover(ctx, id, c)?.let { return it }
+        }
+        return null
+    }
+
     private val bundled = ConcurrentHashMap<String, File>()
     private val notBundled = ConcurrentHashMap.newKeySet<String>()
 

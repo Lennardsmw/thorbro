@@ -646,6 +646,38 @@ object Server {
                     if (denied(ctx)) return@get
                     json(JSONObject().put("hosts", withContext(Dispatchers.IO) { Streaming.hosts(ctx) }))
                 }
+                // Games → Streaming: the apps Sunshine offers, with covers; started through Moonlight
+                get("/api/stream/apps") {
+                    if (denied(ctx)) return@get
+                    json(withContext(Dispatchers.IO) { if (q("refresh") == "1") StreamApps.refresh(ctx) else StreamApps.list(ctx) })
+                }
+                post("/api/stream/apps") {
+                    if (denied(ctx)) return@post
+                    try { json(withContext(Dispatchers.IO) { StreamApps.push(ctx, JSONObject(call.receiveText())) }) }
+                    catch (e: Exception) { fail(e.message ?: "Fehler") }
+                }
+                get("/api/stream/apps/icon") {
+                    if (denied(ctx)) return@get
+                    val f = withContext(Dispatchers.IO) { StreamApps.icon(ctx, q("name") ?: "") } ?: return@get fail("no image", HttpStatusCode.NotFound)
+                    call.response.header(HttpHeaders.CacheControl, "max-age=86400")
+                    call.respondFile(f)
+                }
+                post("/api/stream/apps/shortcut") {
+                    if (denied(ctx)) return@post
+                    StreamApps.setShortcut(ctx, q("name") ?: return@post fail("name fehlt"), q("on") != "0")
+                    json(JSONObject().put("ok", true))
+                }
+                post("/api/stream/apps/play") {
+                    if (denied(ctx)) return@post
+                    try { json(withContext(Dispatchers.IO) { StreamApps.play(ctx, q("name") ?: "", q("hdr") == "1") }) }
+                    catch (e: IllegalArgumentException) { fail(e.message ?: "Fehler") }
+                    catch (e: Exception) { fail(e.message ?: "Fehler", HttpStatusCode.Conflict) }
+                }
+                post("/api/stream/sunshine") {
+                    if (denied(ctx)) return@post
+                    StreamApps.setLogin(ctx, q("user") ?: "", q("pass") ?: "")
+                    json(JSONObject().put("ok", true))
+                }
                 // Play on Thor (RomBro): Moonlight's ShortcutTrampoline, ported from catzeyea/ThorBro pcstream (MIT)
                 post("/api/stream/moonlight/play") {
                     if (denied(ctx)) return@post
