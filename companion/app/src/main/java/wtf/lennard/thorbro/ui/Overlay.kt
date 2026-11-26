@@ -51,12 +51,16 @@ import wtf.lennard.thorbro.Media
 import org.json.JSONObject
 import wtf.lennard.thorbro.Background
 
-/** top right, over every screen: what runs in the background (offload queue, downloads, RomM upload) with n/m */
+/**
+ * The activity drawer, top right over every screen: what runs in the background (offload queue, downloads, RomM upload).
+ * Closed by default; the pill in the top bar sums it up, Select (or a tap on the pill) opens it.
+ */
 @Composable
 fun BackgroundOverlay(modifier: Modifier = Modifier) {
     var items by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
     WhileVisible { while (true) { items = Background.list().objs(); delay(500) } }
-    AnimatedVisibility(items.isNotEmpty(), modifier, enter = fadeIn() + slideInHorizontally { it / 2 }, exit = fadeOut() + slideOutHorizontally { it / 2 }) {
+    if (items.isEmpty() && ActivityUi.open) ActivityUi.open = false
+    AnimatedVisibility(items.isNotEmpty() && (!UiMode.newDesign || ActivityUi.open), modifier, enter = fadeIn() + slideInHorizontally { it / 2 }, exit = fadeOut() + slideOutHorizontally { it / 2 }) {
         Column(Modifier.padding(top = 58.dp, end = 24.dp).width(320.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items.forEach { ActivityCard(it) }
         }
@@ -92,13 +96,13 @@ internal fun ActivityCard(a: JSONObject) {
     val game = a.optString("game").takeIf { !done && it.isNotEmpty() }
     val img = if (game != null) gameImage(a) else null
     val shape = RoundedCornerShape(16.dp)
-    Column(Modifier.fillMaxWidth().clip(shape).background(Color(0xE6101114)).border(1.dp, GlassLine, shape).padding(14.dp)) {
+    Column(Modifier.fillMaxWidth().clip(shape).background(Sheet).border(Theme.p.lineW, GlassLine, shape).padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)).background(Color(0x22FFFFFF)), contentAlignment = Alignment.Center) {
                 if (img != null) Img(img, 160, Modifier.fillMaxSize(), ContentScale.Crop, game)
                 else Icon(when { err != null && done -> Icons.Filled.ErrorOutline; done -> Icons.Filled.CheckCircle
                     a.optString("kind") == "download" -> Icons.Filled.CloudDownload; else -> Icons.Filled.CloudUpload },
-                    null, Modifier.size(24.dp), tint = if (err != null && done) Bad else if (done) Ok else Color.White)
+                    null, Modifier.size(24.dp), tint = if (err != null && done) Bad else if (done) Ok else Ink)
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
@@ -113,9 +117,9 @@ internal fun ActivityCard(a: JSONObject) {
             val transfer = a.optString("transfer").takeIf { it.isNotEmpty() && it != "null" }
             val step = a.optString("step").takeIf { it.isNotEmpty() && it != a.optString("name") }
             Text(transfer ?: step ?: a.optString("name").takeIf { game != null && it != game } ?: "",
-                fontSize = 13.sp, color = Color(0xD9FFFFFF), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
+                fontSize = 13.sp, color = Ink.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
             Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f).height(5.dp).clip(RoundedCornerShape(3.dp)).background(Color(0x33FFFFFF))) {
+                Box(Modifier.weight(1f).height(5.dp).clip(RoundedCornerShape(3.dp)).background(Soft)) {
                     Box(Modifier.fillMaxWidth(p).height(5.dp).background(Accent))
                 }
                 Text("  ${(p * 100).toInt()} %", fontSize = 12.sp, color = Muted)

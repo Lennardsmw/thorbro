@@ -143,11 +143,12 @@ fun StatusBar(title: String) {
         cm.getNetworkCapabilities(cm.activeNetwork)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
     }
     Row(Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(34.dp).clip(CircleShape).background(GlassFill).border(1.dp, GlassLine, CircleShape), contentAlignment = Alignment.Center) {
-            Text("T", fontWeight = FontWeight.Bold, color = Color.White)
+        if (Theme.p.mascot) Mascot(currentMood(), 40.dp)
+        else Box(Modifier.size(34.dp).clip(CircleShape).background(GlassFill).border(1.dp, GlassLine, CircleShape), contentAlignment = Alignment.Center) {
+            Text("T", fontWeight = FontWeight.Bold, color = Ink)
         }
         Spacer(Modifier.width(12.dp))
-        Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+        Text(title, fontSize = if (HeadFont != null) 20.sp else 17.sp, fontWeight = FontWeight.SemiBold, fontFamily = HeadFont)
         Spacer(Modifier.weight(1f))
         Text(time, fontSize = 17.sp)
         Spacer(Modifier.width(16.dp))
@@ -155,6 +156,8 @@ fun StatusBar(title: String) {
         Spacer(Modifier.width(12.dp))
         Icon(Icons.Filled.BatteryFull, null, Modifier.size(20.dp))
         Text(" $battery %", fontSize = 15.sp)
+        Spacer(Modifier.width(18.dp))
+        FriendsButton()
     }
 }
 
@@ -176,22 +179,22 @@ object BottomStatus {
 
 @Composable
 fun ButtonHints(vararg hints: Pair<String, String>) {
-    Box(Modifier.fillMaxWidth().background(Color(0x99000000)).padding(horizontal = 32.dp, vertical = 10.dp)) {
+    Box(Modifier.fillMaxWidth().background(Theme.p.hintBar).padding(horizontal = 32.dp, vertical = 10.dp)) {
         BottomStatus.text?.let { t -> // e.g. "Verbinde mit Thor-8b8e …" while a job runs, then its result for a moment
             Row(Modifier.align(Alignment.CenterStart).fillMaxWidth(0.62f), verticalAlignment = Alignment.CenterVertically) {
                 val p = BottomStatus.progress
                 if (p != null) androidx.compose.material3.CircularProgressIndicator(progress = { p }, modifier = Modifier.size(18.dp), strokeWidth = 2.5.dp,
-                    color = Color.White, trackColor = Color(0x33FFFFFF))
+                    color = Ink, trackColor = Soft)
                 else Box(Modifier.size(10.dp).clip(CircleShape).background(if (BottomStatus.error) Color(0xFFE5484D) else Color(0xFF3FB950)))
                 Text("  $t", fontSize = 14.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                    color = if (BottomStatus.error) Color(0xFFFF8A8D) else Color.White)
+                    color = if (BottomStatus.error) Color(0xFFFF8A8D) else Ink)
             }
         }
         Row(Modifier.align(Alignment.CenterEnd), horizontalArrangement = Arrangement.spacedBy(22.dp)) {
             hints.forEach { (btn, what) ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(24.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
-                        Text(btn, color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Box(Modifier.size(24.dp).clip(CircleShape).background(Accent), contentAlignment = Alignment.Center) {
+                        Text(btn, color = OnAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                     Text("  $what", fontSize = 14.sp)
                 }
@@ -215,8 +218,8 @@ fun HomeScreen(open: (Screen) -> Unit, showDetail: (HomeGame) -> Unit) {
 
     Column(Modifier.fillMaxSize().glassBackground()) {
         StatusBar("ThorBro")
-        Spacer(Modifier.height(18.dp))
-        Text(focusedTitle, Modifier.padding(start = 40.dp).height(30.dp), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (Theme.p.mascot) MoodLine() else Spacer(Modifier.height(18.dp))
+        Text(focusedTitle, Modifier.padding(start = 40.dp).height(30.dp), fontSize = 22.sp, fontWeight = FontWeight.Bold, fontFamily = HeadFont, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
         run {
             LazyRow(contentPadding = PaddingValues(horizontal = 40.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                 item { MoreTile(Modifier.focusRequester(first), onFocus = { focusedTitle = "Alle Spiele" }) { open(Screen.GAMES) } }
@@ -242,6 +245,45 @@ fun HomeScreen(open: (Screen) -> Unit, showDetail: (HomeGame) -> Unit) {
     }
 }
 
+/** how the robot feels: busy while a job runs, tired on low battery, stuffed when storage is nearly full */
+@Composable
+fun currentMood(): Mood {
+    val ctx = LocalContext.current
+    var tick by remember { mutableIntStateOf(0) }
+    WhileVisible { while (true) { delay(30_000); tick++ } }
+    val (battery, charging) = remember(tick) {
+        val bm = ctx.getSystemService(BatteryManager::class.java)
+        bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) to bm.isCharging
+    }
+    val freeShare = remember(tick / 10) {
+        runCatching { android.os.StatFs(android.os.Environment.getExternalStorageDirectory().path).let { it.availableBytes.toDouble() / it.totalBytes } }.getOrDefault(1.0)
+    }
+    return when {
+        BottomStatus.text != null && BottomStatus.progress != null -> Mood.BUSY
+        BottomStatus.text != null && BottomStatus.error -> Mood.ASK
+        BottomStatus.text != null -> Mood.DONE
+        battery in 0..15 && !charging -> Mood.TIRED
+        freeShare < 0.05 -> Mood.STUFFED
+        else -> Mood.BASE
+    }
+}
+
+/** doodle start screen: the robot and one line on how the Thor is doing */
+@Composable
+private fun MoodLine() {
+    val ctx = LocalContext.current
+    val mood = currentMood()
+    val battery = remember(mood) { ctx.getSystemService(BatteryManager::class.java).getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) }
+    Row(Modifier.padding(start = 40.dp, top = 2.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Mascot(mood, 76.dp)
+        Spacer(Modifier.width(14.dp))
+        Column {
+            Text(mood.line, fontSize = 28.sp, fontWeight = FontWeight.Bold, fontFamily = HeadFont)
+            Text(BottomStatus.text ?: "Akku $battery % · bereit zum Spielen", fontSize = 14.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
 @Composable
 private fun GameTile(g: HomeGame, modifier: Modifier, onFocus: () -> Unit, onStart: () -> Unit, onDetail: () -> Unit) {
     val ctx = LocalContext.current
@@ -254,7 +296,7 @@ private fun GameTile(g: HomeGame, modifier: Modifier, onFocus: () -> Unit, onSta
                 ?: g.meta.optString("cover").takeIf { it.isNotEmpty() }?.let { runCatching { Media.cover(ctx, g.system, it) }.getOrNull() }
         }
     }
-    val shape = RoundedCornerShape(18.dp)
+    val shape = tileShape(18)
     Box(
         modifier.size(210.dp)
             .onKeyEvent { e -> if (e.type == KeyEventType.KeyDown && (e.key == Key.ButtonX || e.key == Key.ButtonY)) { onDetail(); true } else false }
@@ -275,7 +317,7 @@ private fun GameTile(g: HomeGame, modifier: Modifier, onFocus: () -> Unit, onSta
 private fun MoreTile(modifier: Modifier, onFocus: () -> Unit, onClick: () -> Unit) {
     val fx = rememberFx()
     if (fx.active) LaunchedEffect(Unit) { onFocus() }
-    val shape = RoundedCornerShape(18.dp)
+    val shape = tileShape(18)
     Box(modifier.size(210.dp).fx(fx, shape, lift = 1.08f, onClick = onClick).background(GlassFill), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Filled.ViewModule, null, Modifier.size(54.dp))
@@ -289,9 +331,9 @@ private fun RoundButton(label: String, icon: ImageVector, onClick: () -> Unit) {
     val fx = rememberFx()
     val focused = fx.active
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(64.dp).fx(fx, CircleShape, lift = 1.12f, frame = false, onClick = onClick)
+        Box(Modifier.size(64.dp).then(if (focused) Modifier.hardShadow(CircleShape, Theme.p.shadow, 3.dp) else Modifier).fx(fx, CircleShape, lift = 1.12f, frame = false, onClick = onClick)
             .then(if (focused) Modifier.background(Accent) else Modifier.background(GlassFill)),
-            contentAlignment = Alignment.Center) { Icon(icon, label, Modifier.size(30.dp), tint = if (focused) OnAccent else Color.White) }
+            contentAlignment = Alignment.Center) { Icon(icon, label, Modifier.size(30.dp), tint = if (focused) OnAccent else Ink) }
         Spacer(Modifier.height(6.dp))
         Text(if (focused) label else "", fontSize = 13.sp, color = Muted)
     }

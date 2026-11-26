@@ -1,8 +1,15 @@
 package wtf.lennard.thorbro.ui
 
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.SignalCellularAlt
+import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Autorenew
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.RestartAlt
@@ -65,6 +72,8 @@ import org.json.JSONObject
 import wtf.lennard.thorbro.AppActivity
 import wtf.lennard.thorbro.Device
 import wtf.lennard.thorbro.MainActivity
+import androidx.compose.material.icons.filled.Folder
+import wtf.lennard.thorbro.Library
 import wtf.lennard.thorbro.Prefs
 import wtf.lennard.thorbro.Romm
 import wtf.lennard.thorbro.RommSync
@@ -77,7 +86,8 @@ import java.net.NetworkInterface
 
 /** Native ThorBro on the device: gamepad first, only what matters. */
 class ThorActivity : ComponentActivity() {
-    private val screen = androidx.compose.runtime.mutableStateOf<Screen?>(null)
+    // shared with the new design's navigation (Nav); the old design just sets it
+    private val screen = Nav.screen
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -89,10 +99,13 @@ class ThorActivity : ComponentActivity() {
         immersive(window)
         // console icons from RomM are SVG
         coil3.SingletonImageLoader.setSafe { c -> coil3.ImageLoader.Builder(c).components { add(coil3.svg.SvgDecoder.Factory()) }.build() }
+        UiMode.load(this)
         setContent { ThorTheme { Box(Modifier.fillMaxSize()) {
-            Root(screen.value) { screen.value = it }
+            if (UiMode.newDesign) NewRoot(screen.value) else Root(screen.value) { screen.value = it }
             BackgroundOverlay(Modifier.align(Alignment.TopEnd))
+            FriendsPanel()
         } } }
+        if (intent?.getBooleanExtra("friends", false) == true) FriendsUi.open = true
     }
 
     // full screen like a console: bars come back only with a swipe from the edge
@@ -104,10 +117,12 @@ class ThorActivity : ComponentActivity() {
     // moving between the two screens no longer recreates the activity (configChanges) – just note where we are
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) { super.onConfigurationChanged(newConfig); rememberDisplay() }
     override fun onResume() { super.onResume(); rememberDisplay() }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); if (intent.getBooleanExtra("friends", false)) FriendsUi.open = true }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         // the live tester and player assignment only matter on the controller page
         if (screen.value == Screen.CONTROLLER) Pads.onKey(event)
+        if (UiMode.newDesign && event.action == KeyEvent.ACTION_DOWN && openDialogs <= 0 && newNavKey(event.keyCode, screen.value)) return true
         if (event.action == KeyEvent.ACTION_DOWN) when (event.keyCode) {
             KeyEvent.KEYCODE_BUTTON_B, KeyEvent.KEYCODE_BACK -> if (openDialogs <= 0) {
                 // on the start screen B does nothing (a console does not quit with B); only the system back gesture leaves
@@ -121,6 +136,8 @@ class ThorActivity : ComponentActivity() {
                 return true
             }
             KeyEvent.KEYCODE_BUTTON_R1 -> if (screen.value == null) { screen.value = Screen.GAMES; return true }
+            // L2 opens the friends menu from every page (inside the menu, L2 closes it again)
+            KeyEvent.KEYCODE_BUTTON_L2 -> if (openDialogs <= 0) { FriendsUi.open = true; return true }
         }
         return super.dispatchKeyEvent(event)
     }
@@ -205,6 +222,10 @@ private fun SettingsScreen() {
     var autostart by remember { mutableStateOf(Prefs.autostart(ctx)) }
     var updMsg by remember { mutableStateOf("") }
     var menu by remember { mutableStateOf(false) }
+    var dataTick by remember { mutableIntStateOf(0) }
+    var romMenu by remember { mutableStateOf(false) }
+    var romRoot by remember { mutableStateOf("") }
+    LaunchedEffect(tick / 10) { romRoot = withContext(Dispatchers.IO) { Library.romsRoot(ctx).path } }
     fun open(action: String) = ctx.startActivity(Intent(action, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     val (lan, mesh) = remember(tick) { ipv4() }
     val version = remember { Updater.current(ctx) }
@@ -229,6 +250,50 @@ private fun SettingsScreen() {
             wtf.lennard.thorbro.Apps.restart(ctx, wtf.lennard.thorbro.Apps.COCOON) } }
         item { ConsoleTile("Neuer Code", "alte Kopplungen ungültig", androidx.compose.material.icons.Icons.Filled.Key) { Prefs.newToken(ctx); tick++ } }
         item { ConsoleTile("Web-Oberfläche", "alles auf dem Thor", androidx.compose.material.icons.Icons.Filled.Web) { ctx.startActivity(Intent(ctx, AppActivity::class.java)) } }
+        header("Design", "wie ThorBro aussieht – gilt auch fürs Web-Panel")
+        Theme.all.forEach { t ->
+            item {
+                ConsoleTile(t.label, if (Theme.p.id == t.id) "an" else if (t.mascot) "warm, handgezeichnet" else "schwarz, Milchglas",
+                    androidx.compose.material.icons.Icons.Filled.Palette, accent = Theme.p.id == t.id) { Theme.set(ctx, t.id) }
+            }
+        }
+        item { ConsoleTile("Neues Design", "aus · antippen zum Einschalten", androidx.compose.material.icons.Icons.Filled.Autorenew) { UiMode.set(ctx, true); Nav.go(Screen.SETTINGS) } }
+        header("Daten sparen", "wann ThorBro Spielstände und Spiele übers Netz bewegt (RomM, Freunde)")
+        val mode = dataTick.let { wtf.lennard.thorbro.DataSaver.mode(ctx) }
+        wtf.lennard.thorbro.DataSaver.Mode.entries.forEach { m ->
+            item {
+                ConsoleTile(m.label, if (m == mode) "an · ${m.sub}" else m.sub, when (m) {
+                    wtf.lennard.thorbro.DataSaver.Mode.ALL -> androidx.compose.material.icons.Icons.Filled.SignalCellularAlt
+                    wtf.lennard.thorbro.DataSaver.Mode.MOBILE -> androidx.compose.material.icons.Icons.Filled.Wifi
+                    wtf.lennard.thorbro.DataSaver.Mode.LOCAL -> androidx.compose.material.icons.Icons.Filled.CloudOff
+                    wtf.lennard.thorbro.DataSaver.Mode.MANUAL -> androidx.compose.material.icons.Icons.Filled.TouchApp
+                }, accent = m == mode) { wtf.lennard.thorbro.DataSaver.setMode(ctx, m); dataTick++ }
+            }
+        }
+        item {
+            val keep = remember(dataTick) { wtf.lennard.thorbro.DataSaver.keep(ctx) }
+            ConsoleTile("$keep Backups", "pro Spiel behalten", androidx.compose.material.icons.Icons.Filled.History) {
+                val c = wtf.lennard.thorbro.DataSaver.KEEP_CHOICES
+                wtf.lennard.thorbro.DataSaver.setKeep(ctx, c[(c.indexOf(keep) + 1) % c.size]); dataTick++
+            }
+        }
+        item {
+            val auto = remember(dataTick) { wtf.lennard.thorbro.DataSaver.giftAuto(ctx) }
+            ConsoleTile(if (auto) "Spielstände von Freunden: automatisch" else "Spielstände von Freunden: fragen",
+                if (auto) "als Backup ablegen, der eigene Stand bleibt aktiv" else "erst annehmen", androidx.compose.material.icons.Icons.Filled.Group, accent = auto) {
+                wtf.lennard.thorbro.DataSaver.setGiftAuto(ctx, !auto); dataTick++
+            }
+        }
+        item {
+            val mb = remember(dataTick) { (wtf.lennard.thorbro.DataSaver.giftMaxMobile(ctx) shr 20).toInt() }
+            ConsoleTile("Mobil bis ${if (mb >= 1000) "${mb / 1000} GB" else "$mb MB"}", "größere Spiele von Freunden warten aufs WLAN",
+                androidx.compose.material.icons.Icons.Filled.SignalCellularAlt) {
+                val c = wtf.lennard.thorbro.DataSaver.GIFT_MB_CHOICES
+                wtf.lennard.thorbro.DataSaver.setGiftMaxMobile(ctx, c[(c.indexOf(mb) + 1) % c.size]); dataTick++
+            }
+        }
+        header("Speicher", "wohin Downloads und empfangene Spiele kommen")
+        item { ConsoleTile("ROM-Ordner", romRoot, androidx.compose.material.icons.Icons.Filled.Folder) { romMenu = true } }
         header("Weitergeben", "ThorBro an einen anderen Thor schicken – auch ohne gemeinsames WLAN")
         directTiles(ctx, direct, scope, share = true)
 
@@ -247,5 +312,20 @@ private fun SettingsScreen() {
     if (menu) ConsoleMenu("Im Browser öffnen",
         listOfNotNull(lan?.let { "http://$it:${ThorService.PORT}" }, mesh?.let { "http://$it:${ThorService.PORT}  (NetBird)" }).joinToString("\n") + "\nCode: ${Prefs.token(ctx)}",
         mono = true, options = emptyList()) { menu = false }
+    if (romMenu) {
+        val choices = remember { mutableStateOf<List<Pair<String, java.io.File>>>(emptyList()) }
+        LaunchedEffect(Unit) { choices.value = withContext(Dispatchers.IO) { Library.romsRootChoices(ctx) } }
+        ConsoleMenu("ROM-Ordner", "Jetzt: $romRoot\nNeue Downloads und empfangene Spiele landen dort (je Konsole ein Unterordner). Spiele in anderen Ordnern bleiben, wo sie sind.",
+            options = choices.value.map { (label, f) ->
+                (if (f.path == romRoot) "✓ " else "") + "$label · ${f.path}" to {
+                    scope.launch {
+                        val err = withContext(Dispatchers.IO) { Library.setRomsRoot(ctx, f.path) }
+                        romRoot = withContext(Dispatchers.IO) { Library.romsRoot(ctx).path }
+                        if (err != null) android.widget.Toast.makeText(ctx, err, android.widget.Toast.LENGTH_LONG).show()
+                    }
+                    romMenu = false
+                }
+            }) { romMenu = false }
+    }
     DirectDialog(direct)
 }

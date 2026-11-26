@@ -28,7 +28,48 @@ object Streaming {
             out.put("latest", v)
             if (info?.versionName != null) out.put("updateAvailable", Updater.newer(v, info.versionName!!))
         }
+        out.put("package", moonlightPackage(ctx)).put("usb", usbAdb(ctx)).put("tunnel", MoonTunnel.status())
         return out
+    }
+
+    // ---- Play on Thor: based on catzeyea/ThorBro src/pcstream/thor.rs (MIT, (c) 2026 ThorBro contributors) ----
+    // Moonlight's exported ShortcutTrampoline with the Sunshine host UUID and an app, the same intent its own pinned
+    // shortcuts use. Every extra must be a *string* (Moonlight reads them with getStringExtra). No app → the host's app grid.
+
+    const val MOONLIGHT_ROOT = "com.limelight.root"
+    private const val TRAMPOLINE = "com.limelight.ShortcutTrampoline"
+    private val UUID_RE = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+    /** installed Moonlight package, normal build preferred (both flavors share the com.limelight namespace) */
+    fun moonlightPackage(ctx: Context): String? = listOf(MOONLIGHT, MOONLIGHT_ROOT).firstOrNull { p ->
+        runCatching { ctx.packageManager.getPackageInfo(p, 0) }.isSuccess
+    }
+
+    /** starts [app] (name as in Sunshine's list) or [appId] on host [uuid]; throws with a German message on bad input */
+    fun moonlightPlay(ctx: Context, uuid: String, app: String?, appId: String?, hdr: Boolean): JSONObject {
+        val pkg = moonlightPackage(ctx) ?: throw IllegalStateException("Moonlight ist nicht installiert")
+        if (!UUID_RE.matches(uuid)) throw IllegalArgumentException("uuid ist keine Sunshine-Host-ID (uniqueid aus /serverinfo)")
+        val name = app?.trim()?.takeIf { it.isNotEmpty() }
+        if (name != null && (name.length > 512 || name.any { it.isISOControl() })) throw IllegalArgumentException("ungültiger App-Name")
+        val id = appId?.trim()?.takeIf { it.isNotEmpty() }
+        if (id != null && !id.all { it.isDigit() }) throw IllegalArgumentException("appId muss eine Zahl sein")
+        val i = android.content.Intent(android.content.Intent.ACTION_VIEW)
+            .setClassName(pkg, TRAMPOLINE)
+            .putExtra("UUID", uuid)
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (name != null) i.putExtra("AppName", name)
+        if (id != null) i.putExtra("AppId", id)
+        if (hdr) i.putExtra("HDR", "1")
+        Emulators.startOnDisplay(ctx, i)
+        Logs.i("stream", "Moonlight: ${name ?: id ?: "App-Liste"} auf $uuid" + if (usbAdb(ctx)) " (über USB)" else "")
+        return JSONObject().put("ok", true).put("package", pkg).put("usb", usbAdb(ctx))
+    }
+
+    /** opens Moonlight's host list (PcView) */
+    fun moonlightOpen(ctx: Context): JSONObject {
+        val pkg = moonlightPackage(ctx) ?: throw IllegalStateException("Moonlight ist nicht installiert")
+        if (!Apps.launch(ctx, pkg)) throw IllegalStateException("Moonlight lässt sich nicht starten")
+        return JSONObject().put("ok", true).put("package", pkg)
     }
 
     @Volatile private var latestCache: Triple<Long, String, String>? = null
@@ -104,6 +145,89 @@ object Streaming {
                 .put("web", "https://$ip:47990/pin")
         })
     }
+
+    // ---- scrcpy: Thor screen on the Mac, through wireless debugging ----
+    // adbd is never restarted (no `adb tcpip`): Shizuku runs on the same adbd and would die with it.
+    // The Mac pairs once (adb pair, code from the Thor's pairing dialog), then connects to the TLS port.
+
+    /** wireless debugging state and the command for the Mac */
+    fun scrcpy(ctx: Context): JSONObject {
+        val wifi = runCatching { android.provider.Settings.Global.getInt(ctx.contentResolver, "adb_wifi_enabled") == 1 }.getOrDefault(false)
+        val port = prop("service.adb.tls.port")?.toIntOrNull()?.takeIf { it > 0 }
+        val ip = wtf.lennard.thorbro.ui.ipv4().first
+        val out = JSONObject().put("shell", Shell.state()).put("wifi", wifi).put("ip", ip).put("port", port)
+            .put("usb", usbAdb(ctx)).put("usbCommand", "scrcpy -d")
+        if (wifi && port != null && ip != null) {
+            out.put("address", "$ip:$port")
+            out.put("command", "scrcpy --tcpip=$ip:$port")
+        }
+        return out
+    }
+
+    /**
+     * a computer is on the cable with USB debugging (sticky USB_STATE broadcast). Rule for every
+     * Thor ↔ Mac path: a cable beats the air – RomBro uses USB then and falls back to Wi-Fi when it goes.
+     */
+    fun usbAdb(ctx: Context): Boolean {
+        val i = ctx.registerReceiver(null, android.content.IntentFilter("android.hardware.usb.action.USB_STATE")) ?: return false
+        return i.getBooleanExtra("connected", false) && i.getBooleanExtra("adb", false)
+    }
+
+    /** switches wireless debugging on (via Shizuku); the port appears a moment later */
+    fun scrcpyWifi(ctx: Context): JSONObject {
+        if (!Shell.run("settings", "put", "global", "adb_wifi_enabled", "1"))
+            throw IllegalStateException("Shizuku nicht bereit – Kabelloses Debugging in den Entwickleroptionen einschalten")
+        repeat(20) { if (prop("service.adb.tls.port")?.toIntOrNull()?.let { it > 0 } == true) return scrcpy(ctx); Thread.sleep(250) }
+        return scrcpy(ctx)
+    }
+
+    /** opens the developer options at "Wireless debugging", where "Pair device with pairing code" lives */
+    fun scrcpyPairing(ctx: Context) {
+        ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+            .putExtra(":settings:fragment_args_key", "toggle_adb_wireless")
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    // Wi-Fi power saving makes the stream come in bursts (ping 7–160 ms): hold HIGH_PERF (works with the
+    // game in front) plus LOW_LATENCY while someone mirrors. Released when the keep-alive stops for 90 s.
+    private val locks = mutableListOf<android.net.wifi.WifiManager.WifiLock>()
+    @Volatile private var lastPing = 0L
+
+    @Synchronized fun lowLatency(ctx: Context, on: Boolean): Boolean {
+        if (!on) { releaseLocks(); return false }
+        lastPing = System.currentTimeMillis()
+        if (locks.isEmpty()) {
+            val wm = ctx.applicationContext.getSystemService(android.net.wifi.WifiManager::class.java)
+            @Suppress("DEPRECATION")
+            listOf(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, android.net.wifi.WifiManager.WIFI_MODE_FULL_LOW_LATENCY).forEach { mode ->
+                runCatching { wm.createWifiLock(mode, "thorbro:mirror").apply { setReferenceCounted(false); acquire() } }.getOrNull()?.let { locks += it }
+            }
+            Logs.i("stream", "WLAN ohne Stromsparen (Spiegeln)")
+            Thread {
+                while (true) {
+                    Thread.sleep(15_000)
+                    synchronized(this) {
+                        if (locks.isEmpty()) return@Thread
+                        if (System.currentTimeMillis() - lastPing > 90_000) { releaseLocks(); return@Thread }
+                    }
+                }
+            }.apply { isDaemon = true }.start()
+        }
+        return locks.isNotEmpty()
+    }
+
+    @Synchronized private fun releaseLocks() {
+        if (locks.isEmpty()) return
+        locks.forEach { runCatching { if (it.isHeld) it.release() } }
+        locks.clear()
+        Logs.i("stream", "WLAN-Stromsparen wieder an")
+    }
+
+    /** a system property: through Shizuku if it runs, else plain getprop (may be hidden by SELinux) */
+    private fun prop(name: String): String? =
+        (Shell.out("getprop", name) ?: runCatching {
+            Runtime.getRuntime().exec(arrayOf("getprop", name)).inputStream.bufferedReader().use { it.readText() }
+        }.getOrNull())?.trim()?.takeIf { it.isNotEmpty() }
 
     private fun open(url: String) = (URL(url).openConnection() as HttpURLConnection).apply {
         connectTimeout = 10_000; readTimeout = 60_000; instanceFollowRedirects = true

@@ -68,10 +68,10 @@ import wtf.lennard.thorbro.Media
 import wtf.lennard.thorbro.Roms
 import java.io.File
 
-private class Sys(val id: String, val name: String, val roms: List<JSONObject>)
+internal class Sys(val id: String, val name: String, val roms: List<JSONObject>)
 
 /** Switch: one entry per game (base + updates + DLC); everything else as is */
-private fun entries(s: Sys): List<JSONObject> {
+internal fun entries(s: Sys): List<JSONObject> {
     if (s.id != "switch") return s.roms
     return s.roms.groupBy { it.optString("baseId").ifEmpty { it.getString("path") } }.values.map { items ->
         val base = items.firstOrNull { it.optString("switchKind") == "base" } ?: items.first()
@@ -129,7 +129,7 @@ fun GamesScreen() {
 }
 
 @Composable
-private fun cover(sys: String, r: JSONObject, m: JSONObject): File? {
+internal fun cover(sys: String, r: JSONObject, m: JSONObject): File? {
     val ctx = LocalContext.current
     val f by produceState<File?>(null, r.getString("path"), m.optString("cover")) {
         value = withContext(Dispatchers.IO) {
@@ -141,6 +141,7 @@ private fun cover(sys: String, r: JSONObject, m: JSONObject): File? {
     return f
 }
 
+internal fun gameTitle(r: JSONObject, m: JSONObject) = title(r, m)
 private fun title(r: JSONObject, m: JSONObject) = m.optString("title").ifEmpty { r.getString("name").substringBefore(" (").substringBefore(" [") }
 
 @Composable
@@ -174,6 +175,8 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
     val canPlay = remember(sys) { Emulators.forSystem(ctx, sys) }
     var confirm by remember { mutableStateOf(false) }
     var savesOpen by remember { mutableStateOf(false) }
+    var sendOpen by remember { mutableStateOf(false) }
+    val giftFrom = remember(r) { wtf.lennard.thorbro.Gifts.newFrom(ctx, r.getString("path")) }
     var job by remember { mutableStateOf<Jobs.Job?>(null) }
     val start = rememberPlay(onError = { msg = it }, onStarted = onClose)
     val size = group.sumOf { it.optLong("size") }
@@ -217,6 +220,7 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
     @Composable
     fun Chips() = Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Chip(fmtBytes(size))
+        giftFrom?.let { Chip("neu · von $it", true) }
         if (lib != null) Chip(if (lib.optBoolean("inRomm")) "☁ in RomM" else "☁ nicht in RomM", lib.optBoolean("inRomm"))
         when (lib?.optString("save")) {
             "synced" -> Chip("💾 Spielstand in RomM", true); "pending" -> Chip("💾 Spielstand geändert"); "local" -> Chip("💾 nur auf dem Thor")
@@ -229,19 +233,8 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
         val list = buildList<Triple<String, androidx.compose.ui.graphics.vector.ImageVector, () -> Unit>> {
             play?.let { add(Triple("Spielen", Icons.Filled.PlayArrow, it)) }
             if (sys != "ports" || lib != null) add(Triple("Spielstände", Icons.Filled.Save, { savesOpen = true }))
-            if (sys != "ports" && !r.optBoolean("dir")) add(Triple("Weitergeben", Icons.Filled.SportsEsports, {
-                // hand this game to a Thor nearby: it gets an invite (Wi-Fi Direct) and keeps the file
-                scope.launch {
-                    val res = withContext(Dispatchers.IO) {
-                        runCatching { wtf.lennard.thorbro.Netplay.share(ctx, sys, File(r.getString("path"))) }.getOrElse { JSONObject().put("error", it.message) }
-                    }
-                    msg = when {
-                        res.has("error") -> res.optString("error")
-                        res.optBoolean("direct") -> "Wird angeboten – der Thor in der Nähe bekommt eine Einladung. Beenden unter Multiplayer."
-                        else -> "Wird angeboten · PIN ${res.optString("pin")} – Wi-Fi Direct ist aus, der andere Thor braucht dasselbe WLAN."
-                    }
-                }
-            }))
+            // to friends (anywhere) or, inside the menu, to a Thor nearby without friendship
+            if (sys != "ports") add(Triple("Weitergeben", Icons.Filled.SportsEsports, { sendOpen = true }))
             add(Triple(if (fav) "Favorit ✓" else "Favorit", if (fav) Icons.Filled.Star else Icons.Filled.StarBorder, { Favorites.toggle(ctx, r.getString("path")) }))
             val queued = Background.isQueued(r.getString("path"))
             if (sys != "ports" && lib != null && !queued) add(Triple(if (lib.optBoolean("inRomm")) "Auslagern" else "Hochladen + auslagern", Icons.Filled.CloudUpload, { confirm = true }))
@@ -281,7 +274,7 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
             val back = hero ?: cover
             if (back != null) Img(back, 1280, Modifier.fillMaxSize().then(if (hero == null) Modifier.blur(40.dp) else Modifier), ContentScale.Crop)
             Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.horizontalGradient(
-                0f to Color(0xF2050608), 0.55f to Color(0xCC050608), 1f to Color(0x66050608))))
+                0f to Bg.copy(alpha = 0.95f), 0.55f to Color(0xCC050608), 1f to Color(0x66050608))))
             Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(0.5f to Color.Transparent, 1f to Color(0xE6050608))))
             val boxW = maxWidth
             val wide = maxWidth / maxHeight > 1.3f   // top screen 16:9; the bottom screen is almost square
@@ -300,7 +293,7 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
                             maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(vertical = 10.dp))
                         Chips()
                         m.optString("desc").takeIf { it.isNotEmpty() }?.let {
-                            Text(it, fontSize = 16.sp, color = Color(0xD9FFFFFF), lineHeight = 22.sp, maxLines = 4, overflow = TextOverflow.Ellipsis,
+                            Text(it, fontSize = 16.sp, color = Ink.copy(alpha = 0.85f), lineHeight = 22.sp, maxLines = 4, overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.padding(top = 16.dp))
                         }
                         Spacer(Modifier.height(28.dp))
@@ -325,7 +318,7 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
                         }
                     }
                     m.optString("desc").takeIf { it.isNotEmpty() }?.let {
-                        Text(it, fontSize = 14.sp, color = Color(0xD9FFFFFF), maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 14.dp))
+                        Text(it, fontSize = 14.sp, color = Ink.copy(alpha = 0.85f), maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 14.dp))
                     }
                     Spacer(Modifier.weight(1f))
                     if (msg.isNotEmpty()) Text(msg, color = if (job != null || upJob != null || uploaded) Muted else Bad, modifier = Modifier.padding(bottom = 10.dp))
@@ -335,6 +328,7 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
         }
     }
     if (savesOpen) GameSaves(sys, r.getString("path"), title(r, m)) { savesOpen = false }
+    if (sendOpen) SendSheet(sys, r.getString("path"), title(r, m), "game") { sendOpen = false }
     if (confirm) OffloadConfirm(title(r, m), size, lib?.optBoolean("inRomm") == true, onYes = {
         confirm = false
         Background.offload(ctx, group.map { it.getString("path") }, title(r, m), size)
@@ -344,8 +338,8 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
 
 @Composable
 private fun Chip(text: String, on: Boolean = false) =
-    Text(text, fontSize = 13.sp, color = if (on) Color.Black else Color.White, maxLines = 1,
-        modifier = Modifier.clip(RoundedCornerShape(50)).background(if (on) Color(0xE6FFFFFF) else Color(0x33FFFFFF)).padding(horizontal = 12.dp, vertical = 5.dp))
+    Text(text, fontSize = 13.sp, color = if (on) OnAccent else Ink, maxLines = 1,
+        modifier = Modifier.clip(RoundedCornerShape(50)).background(if (on) Accent else Soft).padding(horizontal = 12.dp, vertical = 5.dp))
 
 @Composable
 private fun OffloadConfirm(name: String, size: Long, inRomm: Boolean, onYes: () -> Unit, onClose: () -> Unit) =

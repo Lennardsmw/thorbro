@@ -49,13 +49,13 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.delay
 import org.json.JSONObject
-import wtf.lennard.thorbro.Online
+import wtf.lennard.thorbro.ButtonCode
 
 // The Thor's screen is 960 × 540 dp: both dialogs fit in its height without scrolling.
 
 /** one button of a code as it looks on the controller: D-pad arrows, A red, B yellow, X blue, Y green; null = still empty */
 @Composable
-private fun KeyCap(sym: String?, size: Int = 64, onClick: (() -> Unit)? = null) {
+internal fun KeyCap(sym: String?, size: Int = 64, onClick: (() -> Unit)? = null) {
     val face = when (sym) { "A" -> Color(0xFFE5484D); "B" -> Color(0xFFF2C230); "X" -> Color(0xFF3E8EF7); "Y" -> Color(0xFF3FB950); else -> null }
     val arrow = when (sym) {
         "↑" -> Icons.Filled.KeyboardArrowUp; "↓" -> Icons.Filled.KeyboardArrowDown
@@ -63,7 +63,7 @@ private fun KeyCap(sym: String?, size: Int = 64, onClick: (() -> Unit)? = null) 
     }
     val shape = if (face != null) CircleShape else RoundedCornerShape(14.dp)
     Box(Modifier.size(size.dp).clip(shape)
-        .background(face ?: if (sym != null) Color(0xFF3A3D45) else Color(0xFF1C1E23))
+        .background(face ?: if (sym != null) Color(0xFF3A3D45) else Card)
         .border(2.dp, if (sym == null) Color(0xFF33363E) else Color.White.copy(alpha = 0.18f), shape)
         .let { if (onClick != null) it.clickable { onClick() } else it },
         contentAlignment = Alignment.Center) {
@@ -75,7 +75,7 @@ private fun KeyCap(sym: String?, size: Int = 64, onClick: (() -> Unit)? = null) 
 }
 
 @Composable
-private fun CodeRow(code: List<String?>, size: Int = 64) {
+internal fun CodeRow(code: List<String?>, size: Int = 64) {
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
         code.forEachIndexed { i, s ->
             if (i == 4) Spacer(Modifier.width(10.dp)) // two groups of four read easier
@@ -89,7 +89,7 @@ private fun Panel(onClose: () -> Unit, modifier: Modifier = Modifier, content: @
     DialogOpen()
     Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         ImmersiveDialog()
-        Column(modifier.width(780.dp).clip(RoundedCornerShape(22.dp)).background(Color(0xF0141519)).padding(horizontal = 28.dp, vertical = 22.dp),
+        Column(modifier.width(780.dp).clip(RoundedCornerShape(22.dp)).background(Sheet).padding(horizontal = 28.dp, vertical = 22.dp),
             horizontalAlignment = Alignment.CenterHorizontally) { content() }
     }
 }
@@ -122,7 +122,8 @@ fun CodePad(onClose: () -> Unit, onDone: (String) -> Unit) {
     var code by remember { mutableStateOf("") }
     val box = remember { FocusRequester() }
     LaunchedEffect(Unit) { delay(150); runCatching { box.requestFocus() } }
-    fun press(i: Int) { if (code.length < 8) { code += i; if (code.length == 8) onDone(code) } }
+    // handed on as digits 1–8 (what ButtonCode.normalize reads); the internal 0–7 lost every ↑
+    fun press(i: Int) { if (code.length < 8) { code += i; if (code.length == 8) onDone(code.map { (it - '0' + 1).toString() }.joinToString("")) } }
     Panel(onClose, Modifier.focusRequester(box).focusable().onPreviewKeyEvent { e ->
         val i = when (e.key) {
             Key.DirectionUp -> 0; Key.DirectionDown -> 1; Key.DirectionLeft -> 2; Key.DirectionRight -> 3
@@ -136,10 +137,10 @@ fun CodePad(onClose: () -> Unit, onDone: (String) -> Unit) {
         true
     }) {
         Text("Freundes-Code eingeben", fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 18.dp))
-        CodeRow(List(8) { i -> code.getOrNull(i)?.let { Online.SYMBOLS[it - '0'] } })
+        CodeRow(List(8) { i -> code.getOrNull(i)?.let { ButtonCode.SYMBOLS[it - '0'] } })
         Spacer(Modifier.height(24.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Online.SYMBOLS.forEachIndexed { i, sym -> KeyCap(sym, 52) { press(i) } }
+            ButtonCode.SYMBOLS.forEachIndexed { i, sym -> KeyCap(sym, 52) { press(i) } }
             Spacer(Modifier.width(10.dp))
             BigButton("⌫") { code = code.dropLast(1) }
             BigButton("✕") { onClose() }
@@ -184,7 +185,7 @@ fun FriendsDialog(
 
 @Composable
 private fun FriendRow(name: String, sub: String, buttons: @Composable () -> Unit) {
-    Row(Modifier.width(720.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xFF1C1E23)).padding(horizontal = 16.dp, vertical = 10.dp),
+    Row(Modifier.width(720.dp).clip(RoundedCornerShape(14.dp)).background(Card).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(40.dp).clip(CircleShape).background(Color(0xFF3A3D45)), contentAlignment = Alignment.Center) {
             Text(name.take(1).uppercase(), fontSize = 18.sp, fontWeight = FontWeight.Bold)

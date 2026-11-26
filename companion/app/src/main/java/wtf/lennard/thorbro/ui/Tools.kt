@@ -50,10 +50,13 @@ fun StreamScreen() {
     var searching by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(tick) { st = withContext(Dispatchers.IO) { runCatching { Streaming.status(ctx) }.getOrNull() } }
+    var sc by remember { mutableStateOf<JSONObject?>(null) }
+    LaunchedEffect(tick) { sc = withContext(Dispatchers.IO) { runCatching { Streaming.scrcpy(ctx) }.getOrNull() } }
     // the stream state lives in the service; follow it so only one button shows
     var live by remember { mutableStateOf(wtf.lennard.thorbro.Screen.running) }
     var starting by remember { mutableStateOf(wtf.lennard.thorbro.Screen.starting) }
     WhileVisible { while (true) { live = wtf.lennard.thorbro.Screen.running; starting = wtf.lennard.thorbro.Screen.starting; delay(500) } }
+    WhileVisible { while (true) { delay(2000); st = st?.let { o -> JSONObject(o.toString()).put("usb", Streaming.usbAdb(ctx)).put("tunnel", wtf.lennard.thorbro.MoonTunnel.status()) } } }
     val s = st
     val installed = s?.optBoolean("installed") == true
     val update = s?.optBoolean("updateAvailable") == true
@@ -71,8 +74,8 @@ fun StreamScreen() {
             when {
                 j != null -> ConsoleTile(if (j.done) (j.error ?: "Am Thor bestätigen") else "Lädt …", "${(prog * 100).toInt()} %",
                     Icons.Filled.Download, progress = prog, modifier = Modifier.firstFocus(first, true)) {}
-                installed -> ConsoleTile("Moonlight", "Version ${s?.optString("version")}", Icons.Filled.PlayArrow, accent = true,
-                    modifier = Modifier.firstFocus(first, true)) { Apps.launch(ctx, Streaming.MOONLIGHT) }
+                installed -> ConsoleTile("Moonlight", moonlightVia(s), Icons.Filled.PlayArrow, accent = true,
+                    modifier = Modifier.firstFocus(first, true)) { runCatching { Streaming.moonlightOpen(ctx) } }
                 else -> ConsoleTile("Moonlight installieren", s?.optString("latest")?.let { "Version $it" } ?: "", Icons.Filled.Download,
                     accent = true, modifier = Modifier.firstFocus(first, true)) { install() }
             }
@@ -99,6 +102,16 @@ fun StreamScreen() {
                 menu = "screen"
             }
         }
+        item {
+            val c = sc
+            ConsoleTile("scrcpy am Mac", when {
+                c == null -> "…"
+                c.optBoolean("usb") -> "USB-Kabel"
+                c.has("address") -> c.optString("address")
+                c.optBoolean("wifi") -> "Port in Kabellosem Debugging"
+                else -> "WLAN-Debugging aus"
+            }, Icons.Filled.Computer) { menu = "scrcpy"; tick++ }
+        }
     }
 
     when (val m = menu) {
@@ -108,12 +121,39 @@ fun StreamScreen() {
             ConsoleMenu("Am PC im Browser öffnen", "http://$ip:${wtf.lennard.thorbro.ThorService.PORT}\nCode: ${wtf.lennard.thorbro.Prefs.token(ctx)}\n→ Bildschirm",
                 mono = true, options = emptyList()) { menu = null; tick++ }
         }
+        "scrcpy" -> {
+            val c = sc
+            val ip = c?.optString("ip")?.takeIf { it.isNotEmpty() } ?: "<Thor-IP>"
+            val wifi = c?.optBoolean("wifi") == true
+            val cmd = c?.optString("command")?.takeIf { it.isNotEmpty() } ?: "scrcpy --tcpip=$ip:<Port>"
+            ConsoleMenu("Thor am Mac (scrcpy)",
+                if (c?.optBoolean("usb") == true) "USB-Kabel steckt – geht ohne WLAN:\nscrcpy -d\n(RomBro nimmt USB von selbst; Kabel ab → weiter über WLAN)"
+                else "Mac: brew install scrcpy\nEinmal koppeln: adb pair $ip:<Kopplungsport> <Code>\nDann: $cmd\nMit USB-Kabel: scrcpy -d (RomBro wechselt von selbst)",
+                mono = true,
+                options = buildList {
+                    if (!wifi) add("WLAN-Debugging einschalten" to {
+                        scope.launch {
+                            sc = withContext(Dispatchers.IO) { runCatching { Streaming.scrcpyWifi(ctx) }.getOrElse { e -> JSONObject().put("error", e.message) } }
+                            sc?.optString("error")?.takeIf { it.isNotEmpty() }?.let { android.widget.Toast.makeText(ctx, it, android.widget.Toast.LENGTH_LONG).show() }
+                        }
+                    })
+                    add("Koppeln (Kopplungscode)" to { Streaming.scrcpyPairing(ctx); menu = null })
+                }) { menu = null; tick++ }
+        }
         else -> {
             val h = JSONObject(m.removePrefix("host:"))
             ConsoleMenu(h.optString("name"), "In Moonlight antippen, dann die PIN am PC unter ${h.optString("web")} eingeben.",
-                options = if (installed) listOf("Moonlight öffnen" to { Apps.launch(ctx, Streaming.MOONLIGHT); menu = null }) else emptyList()) { menu = null }
+                options = if (installed) listOf("Moonlight öffnen" to { runCatching { Streaming.moonlightOpen(ctx) }; menu = null }) else emptyList()) { menu = null }
         }
     }
+}
+
+/** "über USB" / "über WLAN" for the Moonlight tile: a cable beats the air (RomBro runs the tunnel then) */
+private fun moonlightVia(s: JSONObject?): String {
+    val v = "Version ${s?.optString("version")}"
+    if (s?.optBoolean("usb") != true) return "$v · über WLAN"
+    val t = s.optJSONObject("tunnel")
+    return "$v · über USB" + when { t?.optBoolean("connected") == true -> " ✓"; t?.optBoolean("running") == true -> " (wartet auf Mac)"; else -> "" }
 }
 
 /** GPU drivers (Turnip / Qualcomm) for Eden, Azahar, Dolphin, as tiles */
