@@ -215,7 +215,7 @@ function openDev() {
   const d = $('#devDlg');
   d.innerHTML = `<h3>Dev-Versionen</h3>
     <div class="row devsrc">${DEV_SOURCES.map(([id, label]) => `<button data-devsrc="${id}">${label}</button>`).join('')}</div>
-    <div class="row" id="devCustomRow" hidden><input id="devCustom" class="grow" placeholder="https://…/index.json"><button id="devCustomGo">Laden</button></div>
+    <div class="row" id="devCustomRow" style="display:none"><input id="devCustom" class="grow" placeholder="https://…/index.json"><button id="devCustomGo">Laden</button></div>
     <div id="devStatus" class="muted">Lade …</div>
     <div id="devList"></div>
     <div class="row" style="margin-top:14px"><button id="devClose">Schließen</button></div>`;
@@ -234,7 +234,7 @@ async function devLoad(params) {
   let c;
   try { c = (await api('/api/update/dev?' + q(params))).body; } catch (err) { return say('Fehler: ' + err.message); }
   mark(c.source);
-  $('#devCustomRow').hidden = c.source !== 'custom';
+  $('#devCustomRow').style.display = c.source === 'custom' ? '' : 'none';
   if (c.source === 'custom' && !$('#devCustom').value) $('#devCustom').value = c.custom || '';
   const vs = c.versions || [];
   say(c.error ? c.error : vs.length ? `Installiert: ${c.current}` : 'Keine Test-Builds in dieser Quelle.');
