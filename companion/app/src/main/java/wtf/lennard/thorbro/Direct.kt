@@ -46,6 +46,9 @@ object Direct {
 
     fun active() = group != null
 
+    /** set while the permission dialog is open: what to do once it was allowed */
+    @Volatile var afterPermission: (() -> Unit)? = null
+
     fun permissionName() = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.NEARBY_WIFI_DEVICES else Manifest.permission.ACCESS_FINE_LOCATION
 
     fun permitted(ctx: Context) = ctx.checkSelfPermission(permissionName()) == PackageManager.PERMISSION_GRANTED

@@ -257,7 +257,7 @@ object Netplay {
                 }
             }
         })
-        if ("ppsspp" in inst) out.put("ppsspp", if (running(PPSSPP)) "läuft gerade – später" else if (ppssppConfig(null)) "eingerichtet" else "ppsspp.ini nicht gefunden")
+        if ("ppsspp" in inst) out.put("ppsspp", if (running(PPSSPP)) "läuft gerade – später" else if (ppssppConfig(null)) "eingerichtet" else "PPSSPP-Einstellungen nicht gefunden – von Hand: Netzwerk → WLAN an, Server-Adresse 127.0.0.1")
         Logs.i("netplay", "Vorbereitet: $out")
         return out
     }
@@ -553,7 +553,7 @@ object Netplay {
             "ppsspp" -> {
                 val ok = ppssppConfig(hostIp)
                 Emulators.launch(ctx, l.system, l.rom, "ppsspp").apply {
-                    put("hint", "Im Spiel den Ad-hoc-/Multiplayer-Modus wählen" + if (ok) "" else " (ppsspp.ini nicht gefunden: in PPSSPP Einstellungen → Netzwerk → WLAN an, Adhoc-Server ${hostIp ?: "an"})")
+                    put("hint", "Im Spiel den Ad-hoc-/Multiplayer-Modus wählen" + if (ok) "" else " (PPSSPP-Einstellungen nicht gefunden – von Hand: Einstellungen → Netzwerk → WLAN an, Ad-hoc-Server-Adresse immer 127.0.0.1)")
                 }
             }
             "azahar" -> {

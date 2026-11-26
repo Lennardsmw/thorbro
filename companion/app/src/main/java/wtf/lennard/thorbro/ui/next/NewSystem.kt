@@ -214,9 +214,10 @@ fun SystemScreenNew() {
                 item {
                     val on = direct.st?.optBoolean("active") == true
                     SettingsGroup("Weitergeben") {
-                        SettingRow("Wi-Fi Direct", if (on) direct.st!!.optString("ssid") else "eigenes Netz, kein Router nötig", Icons.Filled.WifiTethering, on = on) {
-                            if (on) direct.menu = "info" else directOn(ctx, direct, scope, "info")
+                        SettingRow(if (direct.busy) "Wi-Fi Direct …" else "Wi-Fi Direct", if (on) direct.st!!.optString("ssid") else "eigenes Netz, kein Router nötig", Icons.Filled.WifiTethering, on = on) {
+                            directToggle(ctx, direct, scope)
                         }
+                        if (on) SettingRow("Netzname & Passwort", "zum Verbinden anderer Geräte", Icons.Filled.Badge) { direct.menu = "info" }
                         SettingRow("ThorBro weitergeben", "an einen anderen Thor", Icons.Filled.Share) { direct.menu = "share" }
                     }
                 }
