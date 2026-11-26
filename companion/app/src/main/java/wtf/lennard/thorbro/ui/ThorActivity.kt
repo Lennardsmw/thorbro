@@ -1,5 +1,6 @@
 package wtf.lennard.thorbro.ui
 
+import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.SignalCellularAlt
@@ -103,7 +104,9 @@ class ThorActivity : ComponentActivity() {
         setContent { ThorTheme { Box(Modifier.fillMaxSize()) {
             if (UiMode.newDesign) NewRoot(screen.value) else Root(screen.value) { screen.value = it }
             BackgroundOverlay(Modifier.align(Alignment.TopEnd))
+            VersionTag(Modifier.align(Alignment.BottomStart))
             FriendsPanel()
+            if (DevUi.open) DevDialog()
         } } }
         if (intent?.getBooleanExtra("friends", false) == true) FriendsUi.open = true
     }
@@ -242,6 +245,7 @@ private fun SettingsScreen() {
                 updMsg = when { r.has("error") -> "Quelle nicht erreichbar"; r.has("session") -> "Installiert ${r.getString("latest")} …"; else -> "Aktuell" }
             }
         } }
+        item { ConsoleTile("Dev-Versionen", "Test-Builds: GitHub, Heimnetz, URL", androidx.compose.material.icons.Icons.Filled.Science) { DevUi.open = true } }
         item { ConsoleTile(if (autoUpdate) "Auto-Update an" else "Auto-Update aus", "alle 6 Stunden", androidx.compose.material.icons.Icons.Filled.Autorenew, accent = autoUpdate) {
             autoUpdate = !autoUpdate; Updater.configure(ctx, null, autoUpdate) } }
         item { ConsoleTile(if (autostart) "Autostart an" else "Autostart aus", "beim Hochfahren", androidx.compose.material.icons.Icons.Filled.PowerSettingsNew, accent = autostart) {

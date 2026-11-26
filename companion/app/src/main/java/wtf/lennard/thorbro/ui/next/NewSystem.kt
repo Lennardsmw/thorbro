@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SignalCellularAlt
 import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Web
 import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material3.Text
@@ -157,6 +158,7 @@ fun SystemScreenNew() {
                         }
                         SettingRow("Autostart", "beim Hochfahren", Icons.Filled.PowerSettingsNew, on = autostart) { autostart = !autostart; Prefs.setAutostart(ctx, autostart) }
                         SettingRow("Auto-Update", "alle 6 Stunden", Icons.Filled.Autorenew, on = autoUpdate) { autoUpdate = !autoUpdate; Updater.configure(ctx, null, autoUpdate) }
+                        SettingRow("Dev-Versionen", "Test-Builds aus GitHub, Heimnetz oder eigener URL", Icons.Filled.Science) { DevUi.open = true }
                         SettingRow("Nach Updates suchen", icon = Icons.Filled.SystemUpdate, value = updMsg.ifEmpty { version }) {
                             updMsg = "Sucht …"
                             scope.launch {

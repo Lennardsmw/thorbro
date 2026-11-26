@@ -1085,6 +1085,17 @@ object Server {
                     Updater.configure(ctx, q("feed"), q("auto")?.let { it == "1" })
                     json(JSONObject().put("feed", Updater.feed(ctx)).put("auto", Updater.auto(ctx)))
                 }
+                // Dev dialog: test builds from the chosen source (github | home | custom), install one of them
+                get("/api/update/dev") {
+                    if (denied(ctx)) return@get
+                    if (q("source") != null || q("custom") != null) Updater.setDevSource(ctx, q("source"), q("custom"))
+                    json(withContext(Dispatchers.IO) { Updater.devVersions(ctx) })
+                }
+                post("/api/update/dev/install") {
+                    if (denied(ctx)) return@post
+                    val url = q("url") ?: return@post fail("url fehlt")
+                    json(withContext(Dispatchers.IO) { Updater.installDev(ctx, url) })
+                }
                 get("/api/install/{id}") {
                     if (denied(ctx)) return@get
                     val id = call.parameters["id"]?.toIntOrNull() ?: return@get fail("bad id")
