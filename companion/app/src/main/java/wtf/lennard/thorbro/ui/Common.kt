@@ -56,19 +56,28 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.CoroutineScope
 
-/** glass look: black background, milky translucent panels, white as the highlight */
-val Accent = Color(0xFFF4F6FA)          // highlight (white)
-val OnAccent = Color(0xFF0B0C0F)        // text/icons on the highlight
-val Panel = Color(0x1AFFFFFF)           // milky glass
-val Bg = Color(0xFF07080A)              // deep black (placeholders)
-val Muted = Color(0xFFA7ADB8)
-val Ok = Color(0xFF7FE0A8)
-val Bad = Color(0xFFFF8A80)
-val GlassLine = Color(0x26FFFFFF)
+/** colors of the current theme (Theme.kt): glass = black + milky glass, doodle = forest + cream outlines */
+val Accent: Color get() = Theme.p.accent          // selection fill
+val OnAccent: Color get() = Theme.p.onAccent      // text/icons on the selection
+val Primary: Color get() = Theme.p.primary        // the one main action
+val OnPrimary: Color get() = Theme.p.onPrimary
+val Panel: Color get() = Theme.p.panel
+val Bg: Color get() = Theme.p.bgBottom
+val Ink: Color get() = Theme.p.ink                // text and icons
+val Muted: Color get() = Theme.p.muted
+val Ok: Color get() = Theme.p.ok
+val Bad: Color get() = Theme.p.bad
+val GlassLine: Color get() = Theme.p.line
+val Soft: Color get() = Theme.p.soft              // highlighted row / chip
+val Sheet: Color get() = Theme.p.sheet            // dialogs, side panels
+val Card: Color get() = Theme.p.card              // rows inside a sheet
+val HeadFont: androidx.compose.ui.text.font.FontFamily? get() = Theme.p.headFont
 
-/** black background with soft milky light, for every page */
+/** page background: glass = black with soft milky light, doodle = flat forest */
 fun Modifier.glassBackground() = this.drawBehind {
-    drawRect(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFF101114), Color(0xFF050506))))
+    val p = Theme.p
+    drawRect(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(p.bgTop, p.bgBottom)))
+    if (!p.glow) return@drawBehind
     drawCircle(androidx.compose.ui.graphics.Brush.radialGradient(listOf(Color(0x22FFFFFF), Color.Transparent),
         center = androidx.compose.ui.geometry.Offset(size.width * 0.15f, size.height * 0.05f), radius = size.width * 0.55f),
         radius = size.width * 0.55f, center = androidx.compose.ui.geometry.Offset(size.width * 0.15f, size.height * 0.05f))
@@ -77,8 +86,12 @@ fun Modifier.glassBackground() = this.drawBehind {
         radius = size.width * 0.5f, center = androidx.compose.ui.geometry.Offset(size.width * 0.9f, size.height * 0.95f))
 }
 
-/** milky glass fill: a little brighter at the top, like light on frosted glass */
-val GlassFill = androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0x24FFFFFF), Color(0x0DFFFFFF)))
+/** tile fill: milky glass (a little brighter at the top) or the flat doodle panel */
+val GlassFill: androidx.compose.ui.graphics.Brush get() = androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Theme.p.fillTop, Theme.p.fillBottom))
+
+/** panel corners: round for glass, slightly uneven (hand-drawn) for doodle */
+fun tileShape(r: Int): Shape = if (Theme.p.id == "doodle")
+    RoundedCornerShape((r + 4).dp, (r - 2).dp, (r + 6).dp, (r - 1).coerceAtLeast(2).dp) else RoundedCornerShape(r.dp)
 
 @OptIn(androidx.compose.ui.text.ExperimentalTextApi::class)
 private fun nunito(w: Int) = androidx.compose.ui.text.font.Font(
@@ -91,24 +104,27 @@ val Nunito = androidx.compose.ui.text.font.FontFamily(nunito(400), nunito(600), 
 
 @Composable
 fun ThorTheme(content: @Composable () -> Unit) {
+    Theme.load(androidx.compose.ui.platform.LocalContext.current)
+    val ink = Ink
     val base = androidx.compose.material3.Typography()
     fun androidx.compose.ui.text.TextStyle.n() = copy(fontFamily = Nunito)
+    fun androidx.compose.ui.text.TextStyle.h() = copy(fontFamily = HeadFont ?: Nunito)
     val type = androidx.compose.material3.Typography(
-        displayLarge = base.displayLarge.n(), displayMedium = base.displayMedium.n(), displaySmall = base.displaySmall.n(),
-        headlineLarge = base.headlineLarge.n(), headlineMedium = base.headlineMedium.n(), headlineSmall = base.headlineSmall.n(),
+        displayLarge = base.displayLarge.h(), displayMedium = base.displayMedium.h(), displaySmall = base.displaySmall.h(),
+        headlineLarge = base.headlineLarge.h(), headlineMedium = base.headlineMedium.h(), headlineSmall = base.headlineSmall.h(),
         titleLarge = base.titleLarge.n(), titleMedium = base.titleMedium.n(), titleSmall = base.titleSmall.n(),
         bodyLarge = base.bodyLarge.n(), bodyMedium = base.bodyMedium.n(), bodySmall = base.bodySmall.n(),
         labelLarge = base.labelLarge.n().copy(fontWeight = FontWeight.Bold), labelMedium = base.labelMedium.n(), labelSmall = base.labelSmall.n(),
     )
     MaterialTheme(
-        colorScheme = darkColorScheme(primary = Accent, background = Bg, surface = Color(0xFF15171B), onPrimary = OnAccent,
-            onBackground = Color.White, onSurface = Color.White),
+        colorScheme = darkColorScheme(primary = Accent, background = Bg, surface = Card, onPrimary = OnAccent,
+            onBackground = ink, onSurface = ink, secondary = Primary, onSecondary = OnPrimary),
         typography = type,
     ) {
         // text outside a Surface would otherwise be black on the dark background
         androidx.compose.runtime.CompositionLocalProvider(
-            androidx.compose.material3.LocalContentColor provides Color.White,
-            androidx.compose.material3.LocalTextStyle provides type.bodyLarge.copy(color = Color.White),
+            androidx.compose.material3.LocalContentColor provides ink,
+            androidx.compose.material3.LocalTextStyle provides type.bodyLarge.copy(color = ink),
             content = content,
         )
     }
@@ -146,10 +162,12 @@ fun Modifier.fx(
 ): Modifier = composed {
     val target = when { !enabled -> 1f; fx.pressed -> lift - (lift - 1f) * 0.6f - 0.02f; fx.active -> lift; else -> 1f }
     val scale by animateFloatAsState(target, spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow), label = "fx")
-    val line by animateDpAsState(if (fx.active && frame) 3.dp else if (restLine) 1.dp else 0.dp, tween(140), label = "fxLine")
-    val color by animateColorAsState(if (fx.active && frame) Color(0xF2FFFFFF) else if (restLine) GlassLine else Color.Transparent, tween(140), label = "fxColor")
+    val p = Theme.p
+    val line by animateDpAsState(if (fx.active && frame) p.frameW else if (restLine) p.lineW else 0.dp, tween(140), label = "fxLine")
+    val color by animateColorAsState(if (fx.active && frame) p.frame else if (restLine) p.line else Color.Transparent, tween(140), label = "fxColor")
     this.zIndex(if (fx.active) 1f else 0f)
         .graphicsLayer { scaleX = scale; scaleY = scale }
+        .then(if (fx.active && frame) Modifier.hardShadow(shape, p.shadow) else Modifier)
         .border(line, color, shape)
         .clip(shape)
         .hoverable(fx.src, enabled)
@@ -166,9 +184,10 @@ fun FocusCard(
     val fx = rememberFx()
     var inside by remember { mutableStateOf(false) }
     val on = fx.active || inside
-    val shape = RoundedCornerShape(20.dp)
-    val line by animateDpAsState(if (on) 2.dp else 1.dp, tween(140), label = "cardLine")
-    val color by animateColorAsState(if (on) Color(0xD9FFFFFF) else GlassLine, tween(140), label = "cardColor")
+    val shape = tileShape(20)
+    val p = Theme.p
+    val line by animateDpAsState(if (on) p.frameW - 1.dp else p.lineW, tween(140), label = "cardLine")
+    val color by animateColorAsState(if (on) p.frame.copy(alpha = 0.85f) else p.line, tween(140), label = "cardColor")
     var m = modifier.zIndex(if (on) 1f else 0f).onFocusChanged { inside = it.hasFocus && !it.isFocused }
     m = if (onClick != null) m.fx(fx, shape, lift = 1.015f, frame = false, restLine = false, onClick = onClick)
         else m.clip(shape)
@@ -176,22 +195,22 @@ fun FocusCard(
 }
 
 @Composable
-fun Title(text: String) = Text(text, fontSize = 26.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 12.dp))
+fun Title(text: String) = Text(text, fontSize = 26.sp, fontWeight = FontWeight.Bold, fontFamily = HeadFont, modifier = Modifier.padding(bottom = 12.dp))
 
 @Composable
 fun Label(text: String) = Text(text, color = Muted, fontSize = 13.sp)
 
 @Composable
-fun Big(text: String, color: Color = Color.White) = Text(text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = color)
+fun Big(text: String, color: Color = Ink) = Text(text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = color)
 
 @Composable
-fun Line(text: String, color: Color = Color.White) = Text(text, fontSize = 15.sp, color = color)
+fun Line(text: String, color: Color = Ink) = Text(text, fontSize = 15.sp, color = color)
 
 @Composable
 fun Act(text: String, primary: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
-    if (primary) Button(onClick, enabled = enabled, colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = OnAccent)) { Text(text) }
-    else OutlinedButton(onClick, enabled = enabled, border = BorderStroke(1.dp, Color(0x40FFFFFF)),
-        colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0x14FFFFFF))) { Text(text, color = Color.White) }
+    if (primary) Button(onClick, enabled = enabled, colors = ButtonDefaults.buttonColors(containerColor = Primary, contentColor = OnPrimary)) { Text(text) }
+    else OutlinedButton(onClick, enabled = enabled, border = BorderStroke(Theme.p.lineW, if (Theme.p.mascot) GlassLine else Color(0x40FFFFFF)),
+        colors = ButtonDefaults.outlinedButtonColors(containerColor = if (Theme.p.mascot) Color.Transparent else Color(0x14FFFFFF))) { Text(text, color = Ink) }
 }
 
 @Composable

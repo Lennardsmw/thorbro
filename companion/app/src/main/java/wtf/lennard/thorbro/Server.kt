@@ -29,6 +29,7 @@ import io.ktor.server.routing.routing
 import io.ktor.utils.io.jvm.javaio.toInputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -40,7 +41,6 @@ import java.io.FileOutputStream
  */
 object Server {
     /** last radio scan for invites (holds the nets' passwords; the panel only gets device addresses) */
-    @Volatile private var lastInvites: org.json.JSONArray? = null
     private const val PART = ".thorbro-part"
     private const val CHUNKS = ".thorbro-part.chunks"
 
@@ -114,7 +114,20 @@ object Server {
                 get("/api/roms") {
                     if (denied(ctx)) return@get
                     val res = withContext(Dispatchers.IO) { Roms.scan(ctx, q("refresh") == "1") }
-                    json(res)
+                    json(JSONObject(res.toString()).put("romRoot", Library.romsRoot(ctx).path))
+                }
+
+                get("/api/roms/root") {
+                    if (denied(ctx)) return@get
+                    val ch = withContext(Dispatchers.IO) { Library.romsRootChoices(ctx) }
+                    json(JSONObject().put("root", Library.romsRoot(ctx).path)
+                        .put("choices", JSONArray(ch.map { (l, f) -> JSONObject().put("label", l).put("path", f.path) })))
+                }
+
+                post("/api/roms/root") {
+                    if (denied(ctx)) return@post
+                    val err = withContext(Dispatchers.IO) { Library.setRomsRoot(ctx, q("path") ?: "") }
+                    if (err != null) fail(err) else json(JSONObject().put("root", Library.romsRoot(ctx).path))
                 }
 
                 get("/api/roms/meta") {
@@ -239,6 +252,50 @@ object Server {
                     if (ids.isEmpty()) return@post fail("save missing")
                     val res = withContext(Dispatchers.IO) { SharedSaves.install(ctx, q("system") ?: "", rom.path, ids, q("profile") ?: Profiles.MAIN) }
                     json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
+                }
+                // ---- one game's save: Thor vs. RomM, backups ----
+                get("/api/saves/state") {
+                    if (denied(ctx)) return@get
+                    val rom = (Storage.resolve(q("path")) ?: Ports.resolve(ctx, q("path"))) ?: return@get fail("path not allowed")
+                    json(withContext(Dispatchers.IO) { GameSave.state(ctx, q("system") ?: "", rom.path) })
+                }
+                post("/api/saves/cloud") {
+                    if (denied(ctx)) return@post
+                    val rom = (Storage.resolve(q("path")) ?: Ports.resolve(ctx, q("path"))) ?: return@post fail("path not allowed")
+                    val res = withContext(Dispatchers.IO) {
+                        when (q("do")) {
+                            "pull" -> GameSave.pullCloud(ctx, q("system") ?: "", rom.path)
+                            "push" -> GameSave.pushCloud(ctx, rom.path)
+                            else -> JSONObject().put("error", "do=pull|push")
+                        }
+                    }
+                    json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
+                }
+                post("/api/saves/game/backup") {
+                    if (denied(ctx)) return@post
+                    val rom = (Storage.resolve(q("path")) ?: Ports.resolve(ctx, q("path"))) ?: return@post fail("path not allowed")
+                    val res = withContext(Dispatchers.IO) { GameSave.backupNow(ctx, rom.path) }
+                    json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
+                }
+                post("/api/saves/game/restore") {
+                    if (denied(ctx)) return@post
+                    val rom = (Storage.resolve(q("path")) ?: Ports.resolve(ctx, q("path"))) ?: return@post fail("path not allowed")
+                    val res = withContext(Dispatchers.IO) { GameSave.restore(ctx, rom.path, q("backup") ?: "") }
+                    json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
+                }
+                get("/api/datasaver") {
+                    if (denied(ctx)) return@get
+                    json(DataSaver.json(ctx))
+                }
+                post("/api/datasaver") {
+                    if (denied(ctx)) return@post
+                    q("mode")?.let { id -> DataSaver.Mode.entries.firstOrNull { it.id == id }?.let { DataSaver.setMode(ctx, it) } }
+                    q("keep")?.toIntOrNull()?.let { DataSaver.setKeep(ctx, it) }
+                    q("giftAuto")?.let { DataSaver.setGiftAuto(ctx, it == "1") }
+                    q("giftMaxMobileMb")?.toIntOrNull()?.let { DataSaver.setGiftMaxMobile(ctx, it) }
+                    q("giftAuto")?.let { DataSaver.setGiftAuto(ctx, it == "1") }
+                    q("giftMaxMobileMb")?.toIntOrNull()?.let { DataSaver.setGiftMaxMobile(ctx, it) }
+                    json(DataSaver.json(ctx))
                 }
                 post("/api/saves/share") {
                     if (denied(ctx)) return@post
@@ -374,8 +431,7 @@ object Server {
                     if (denied(ctx)) return@post
                     val id = q("id")?.toIntOrNull() ?: return@post fail("id missing")
                     val root = q("root")?.let { Storage.resolve(it) }
-                        ?: Roms.scan(ctx, false).optJSONArray("romRoots")?.let { a -> (0 until a.length()).map { File(a.getString(it)) }.lastOrNull() }
-                        ?: File(Storage.primary, "ROMs")
+                        ?: Library.romsRoot(ctx)
                     val j = Jobs.start("RomM-Download") { job -> Romm.download(ctx, id, root, job) }
                     json(j.json())
                 }
@@ -556,6 +612,26 @@ object Server {
                     if (denied(ctx)) return@get
                     json(JSONObject().put("hosts", withContext(Dispatchers.IO) { Streaming.hosts(ctx) }))
                 }
+                // scrcpy (Thor screen on the Mac over wireless debugging)
+                get("/api/stream/scrcpy") {
+                    if (denied(ctx)) return@get
+                    json(withContext(Dispatchers.IO) { Streaming.scrcpy(ctx) })
+                }
+                post("/api/stream/scrcpy/wifi") {
+                    if (denied(ctx)) return@post
+                    try { json(withContext(Dispatchers.IO) { Streaming.scrcpyWifi(ctx) }) }
+                    catch (e: Exception) { fail(e.message ?: "Fehler", HttpStatusCode.Conflict) }
+                }
+                post("/api/stream/scrcpy/pair") {
+                    if (denied(ctx)) return@post
+                    Streaming.scrcpyPairing(ctx)
+                    json(JSONObject().put("ok", true))
+                }
+                // Wi-Fi without power saving while a Mac mirrors; RomBro repeats "on" every 30 s, "off" when it stops
+                post("/api/stream/lowlatency") {
+                    if (denied(ctx)) return@post
+                    json(JSONObject().put("held", Streaming.lowLatency(ctx, q("on") != "0")))
+                }
 
                 // ---- netplay (local multiplayer between two ThorBro devices) ----
                 // public for the other Thor: only the open lobby; data needs the lobby PIN
@@ -592,64 +668,132 @@ object Server {
                     }
                     json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
                 }
-                post("/api/netplay/server") {
-                    if (denied(ctx)) return@post
-                    val res = withContext(Dispatchers.IO) { if (q("on") == "1") Netplay.startServer(ctx) else { Netplay.stopServer(ctx); Netplay.server(ctx) } }
-                    json(res)
-                }
-                post("/api/netplay/wlan") {
-                    if (denied(ctx)) return@post
-                    Netplay.setWlanOnly(ctx, q("on") == "1")
-                    json(JSONObject().put("wlanOnly", Netplay.wlanOnly(ctx)))
-                }
-                // online (internet) 3DS room: see Online.kt
-                get("/api/online") {
+                // ---- friends (Pals.kt): card is public, everything else needs the panel login ----
+                get("/api/friends/card") { json(Pals.card(ctx)) }
+                get("/api/friends") {
                     if (denied(ctx)) return@get
-                    val addrs = runCatching { java.net.NetworkInterface.getNetworkInterfaces().toList().flatMap { n -> n.inetAddresses.toList().map { "${n.name} ${it.hostAddress}" } } }.getOrDefault(emptyList())
-                    json(Online.hostStatus(ctx).put("relay", Relay.status()).put("interfaces", org.json.JSONArray(addrs)))
+                    json(withContext(Dispatchers.IO) { Pals.importDownloads(ctx); Pals.status(ctx) })
                 }
-                post("/api/online/host") {
+                post("/api/friends/scan") {
                     if (denied(ctx)) return@post
-                    val res = withContext(Dispatchers.IO) { Online.startHost(ctx) }
-                    json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
+                    json(withContext(Dispatchers.IO) { Pals.scanNearby(ctx); Pals.status(ctx) })
                 }
-                post("/api/online/close") {
+                post("/api/friends/name") {
                     if (denied(ctx)) return@post
-                    withContext(Dispatchers.IO) { Online.stopHost() }
-                    json(JSONObject().put("ok", true))
+                    withContext(Dispatchers.IO) { Pals.setName(ctx, q("name") ?: "") }
+                    json(Pals.status(ctx))
                 }
-                post("/api/online/new") { // a new code
+                post("/api/friends/party") {
                     if (denied(ctx)) return@post
-                    json(withContext(Dispatchers.IO) { if (Online.host == null) Online.startHost(ctx) else { Online.newCode(ctx); Online.hostStatus(ctx) } })
+                    Pals.setPartyOpen(ctx, q("open") == "1")
+                    json(Pals.status(ctx))
                 }
-                post("/api/online/reset") { // new room key: everyone who joined before needs a code again
-                    if (denied(ctx)) return@post
-                    json(withContext(Dispatchers.IO) { Online.resetAccess(ctx) })
+                get("/api/friends/code") {
+                    if (denied(ctx)) return@get
+                    json(withContext(Dispatchers.IO) { Pals.myCode(ctx, q("fresh") == "1") })
                 }
-                post("/api/online/join") { // ?code=… (digits 1-8 or U D L R A B X Y) or ?known=<id>
+                post("/api/friends/redeem") { // ?code=… (digits 1-8 or U D L R A B X Y)
                     if (denied(ctx)) return@post
-                    val code = q("code"); val known = q("known")
-                    if (code == null && known == null) return@post fail("code missing")
-                    val job = Jobs.start("Online beitreten") { if (known != null) Online.joinKnown(ctx, known, it) else Online.joinCode(ctx, code!!, it) }
-                    json(job.json())
+                    val code = q("code") ?: return@post fail("code missing")
+                    json(Jobs.start("Freund hinzufügen") { j -> JSONObject().put("name", Pals.redeem(ctx, code, j)) }.json())
                 }
-                post("/api/online/forget") {
+                post("/api/friends/{action}") { // accept | decline | remove | add (nearby) ?id=…
                     if (denied(ctx)) return@post
-                    Online.forget(ctx, q("id") ?: return@post fail("id missing"))
-                    json(JSONObject().put("ok", true))
-                }
-                post("/api/netplay/relay") {
-                    if (denied(ctx)) return@post
-                    val addr = q("address")?.takeIf { Regex("^[0-9.]{7,15}$").matches(it) }
-                    val res = withContext(Dispatchers.IO) {
-                        if (addr == null) { Netplay.clearJoined(ctx); JSONObject().put("ok", true) } else Netplay.useRoomOf(ctx, addr, q("name") ?: addr)
+                    val id = q("id") ?: return@post fail("id missing")
+                    val err = withContext(Dispatchers.IO) {
+                        when (call.parameters["action"]) {
+                            "accept" -> if (Pals.accept(ctx, id)) null else "keine Anfrage"
+                            "decline" -> { Pals.decline(ctx, id); null }
+                            "remove" -> { Pals.remove(ctx, id); null }
+                            "add" -> Pals.addNearby(ctx, id)
+                            else -> "unbekannt"
+                        }
                     }
-                    json(res, if (res.has("error")) HttpStatusCode.Conflict else HttpStatusCode.OK)
+                    if (err != null) fail(err, HttpStatusCode.Conflict) else json(Pals.status(ctx))
                 }
-                post("/api/netplay/auto") {
+                post("/api/party/{action}") { // invite ?id | join ?leader&party | open ?id | decline ?id | leave
                     if (denied(ctx)) return@post
-                    Friends.setAuto(ctx, q("on") == "1")
-                    json(JSONObject().put("auto", Friends.auto(ctx)))
+                    val err = withContext(Dispatchers.IO) {
+                        when (call.parameters["action"]) {
+                            "invite" -> Party.invite(ctx, q("id") ?: "")
+                            "join" -> Party.join(ctx, q("leader") ?: "", q("party") ?: "")
+                            "open" -> Party.joinOpen(ctx, q("id") ?: "")
+                            "decline" -> { Party.decline(ctx, q("id") ?: ""); null }
+                            "leave" -> { Party.leave(ctx); null }
+                            else -> "unbekannt"
+                        }
+                    }
+                    if (err != null) fail(err, HttpStatusCode.Conflict) else json(Pals.status(ctx))
+                }
+                get("/api/friends/file") { // the .thorfriend file to download in the web panel
+                    if (denied(ctx)) return@get
+                    val f = withContext(Dispatchers.IO) { Pals.shareFile(ctx) }
+                    call.response.header("Content-Disposition", "attachment; filename=\"${f.name}\"")
+                    call.respondFile(f)
+                }
+                post("/api/friends/import") { // body = the .thorfriend file
+                    if (denied(ctx)) return@post
+                    val text = call.receiveText()
+                    val err = withContext(Dispatchers.IO) { Pals.import(ctx, text) }
+                    if (err != null) fail(err, HttpStatusCode.Conflict) else json(Pals.status(ctx))
+                }
+                // ---- gifts (Gifts.kt) ----
+                // a friend's Thor loads a gift's file: no pairing code, the gift's own token (sent encrypted to the friend)
+                get("/api/gift/{gid}/{part}") {
+                    val f = withContext(Dispatchers.IO) { Gifts.file(ctx, call.parameters["gid"] ?: "", call.parameters["part"] ?: "", q("k")) }
+                        ?: return@get fail("not found", HttpStatusCode.NotFound)
+                    val len = f.length()
+                    val range = call.request.headers[HttpHeaders.Range]?.let { Regex("^bytes=(\\d+)-(\\d*)$").find(it.trim()) }
+                    val from = range?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+                    val to = range?.groupValues?.get(2)?.toLongOrNull()?.coerceAtMost(len - 1) ?: (len - 1)
+                    if (range != null && from > to) return@get fail("range", HttpStatusCode.RequestedRangeNotSatisfiable)
+                    call.response.header(HttpHeaders.AcceptRanges, "bytes")
+                    if (range != null) call.response.header(HttpHeaders.ContentRange, "bytes $from-$to/$len")
+                    Transfers.begin(ctx)
+                    try {
+                        call.respondBytesWriter(ContentType.Application.OctetStream, if (range != null) HttpStatusCode.PartialContent else HttpStatusCode.OK, to - from + 1) {
+                            java.io.RandomAccessFile(f, "r").use { raf ->
+                                raf.seek(from)
+                                var left = to - from + 1
+                                val buf = ByteArray(1 shl 18)
+                                while (left > 0) {
+                                    val n = withContext(Dispatchers.IO) { raf.read(buf, 0, minOf(buf.size.toLong(), left).toInt()) }
+                                    if (n < 0) break
+                                    writeFully(buf, 0, n); left -= n
+                                }
+                            }
+                        }
+                    } finally { Transfers.end() }
+                }
+                get("/api/gifts") {
+                    if (denied(ctx)) return@get
+                    json(withContext(Dispatchers.IO) { Gifts.status(ctx) })
+                }
+                get("/api/gifts/routes") { // ?system&path&kind → per friend the likely way
+                    if (denied(ctx)) return@get
+                    val rom = q("path")?.let { Storage.resolve(it) ?: Ports.resolve(ctx, it) }
+                    json(withContext(Dispatchers.IO) { Gifts.routes(ctx, q("system") ?: "", rom, q("kind") ?: "game") })
+                }
+                post("/api/gifts/send") { // ?system&path&kind=save|game|both&to=id,id
+                    if (denied(ctx)) return@post
+                    val rom = (Storage.resolve(q("path")) ?: Ports.resolve(ctx, q("path"))) ?: return@post fail("path not allowed")
+                    val to = (q("to") ?: "").split(',').filter { it.isNotBlank() }
+                    val kind = q("kind") ?: "game"; val system = q("system") ?: ""
+                    json(Jobs.start("Verschicken: ${rom.nameWithoutExtension}") { j ->
+                        Gifts.send(ctx, to, kind, system, rom, j).also { if (it.has("error")) error(it.getString("error")) }
+                    }.json())
+                }
+                post("/api/gifts/{action}") { // accept ?gid&how=take|backup|load | decline ?gid | ask ?gid | sendwanted ?gid&id
+                    if (denied(ctx)) return@post
+                    val gid = q("gid") ?: return@post fail("gid missing")
+                    val id = q("id") ?: ""
+                    when (call.parameters["action"]) {
+                        "accept" -> json(Gifts.accept(ctx, gid, q("how") ?: "load").json())
+                        "decline" -> { withContext(Dispatchers.IO) { Gifts.decline(ctx, gid) }; json(Gifts.status(ctx)) }
+                        "ask" -> withContext(Dispatchers.IO) { Gifts.askGame(ctx, gid) }?.let { fail(it, HttpStatusCode.Conflict) } ?: json(Gifts.status(ctx))
+                        "sendwanted" -> json(Jobs.start("Spiel nachschicken") { j -> Gifts.sendWanted(ctx, gid, id, j).also { if (it.has("error")) error(it.getString("error")) } }.json())
+                        else -> fail("unbekannt")
+                    }
                 }
                 post("/api/netplay/friend/remove") {
                     if (denied(ctx)) return@post
@@ -664,29 +808,6 @@ object Server {
                     if (denied(ctx)) return@post
                     Netplay.close(ctx)
                     json(JSONObject().put("ok", true))
-                }
-                post("/api/netplay/connect") {
-                    if (denied(ctx)) return@post
-                    val addr = q("address")?.takeIf { Regex("^[0-9.]{7,15}$").matches(it) } ?: return@post fail("address missing")
-                    val pin = q("pin") ?: return@post fail("pin missing")
-                    json(Jobs.start("Netplay beitreten") { Netplay.join(ctx, addr, pin, it) }.json())
-                }
-
-                // Thors nearby that invite over Wi-Fi Direct (radio scan; works without a shared network)
-                get("/api/netplay/invites") {
-                    if (denied(ctx)) return@get
-                    val res = withContext(Dispatchers.IO) { org.json.JSONArray(Netplay.invites(ctx)) }
-                    // the password and PIN stay on this device; the panel answers with the device address
-                    lastInvites = res
-                    val pub = org.json.JSONArray()
-                    for (i in 0 until res.length()) res.getJSONObject(i).let { pub.put(JSONObject(it.toString()).apply { remove("pass"); remove("pin") }.put("lobby", it.optString("pin").isNotEmpty())) }
-                    json(JSONObject().put("invites", pub).put("permission", Direct.permitted(ctx) || Netplay.wlanOnly(ctx)))
-                }
-                post("/api/netplay/accept") {
-                    if (denied(ctx)) return@post
-                    val inv = lastInvites?.let { a -> (0 until a.length()).map { a.getJSONObject(it) }.firstOrNull { it.optString("device") == q("device") } }
-                        ?: return@post fail("Einladung nicht mehr da – nochmal suchen", HttpStatusCode.NotFound)
-                    json(Jobs.start("Einladung annehmen") { Netplay.accept(ctx, inv, it) }.json())
                 }
 
                 get("/api/direct") {
@@ -880,6 +1001,19 @@ object Server {
                         .put("from", current.versionName)
                         .put("to", info.versionName)
                         .put("note", "ThorBro restarts after the update; confirm on the Thor if asked"))
+                }
+                // ---- look (Glas / Doodle): one setting for the Thor app and the web panel ----
+                get("/api/theme") {
+                    if (denied(ctx)) return@get
+                    wtf.lennard.thorbro.ui.Theme.load(ctx)
+                    json(JSONObject().put("theme", wtf.lennard.thorbro.ui.Theme.p.id)
+                        .put("themes", JSONArray(wtf.lennard.thorbro.ui.Theme.all.map { JSONObject().put("id", it.id).put("label", it.label) })))
+                }
+                post("/api/theme") {
+                    if (denied(ctx)) return@post
+                    wtf.lennard.thorbro.ui.Theme.load(ctx)
+                    wtf.lennard.thorbro.ui.Theme.set(ctx, q("id") ?: "glass")
+                    json(JSONObject().put("theme", wtf.lennard.thorbro.ui.Theme.p.id))
                 }
                 // ---- update from the update feed ----
                 get("/api/update") {

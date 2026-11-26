@@ -59,7 +59,7 @@ class InviteActivity : ComponentActivity() {
                     delay(150); runCatching { first.requestFocus() }
                 }
                 Box(Modifier.fillMaxSize().background(Color(0xCC000000)), contentAlignment = Alignment.Center) {
-                    Column(Modifier.width(460.dp).clip(RoundedCornerShape(22.dp)).background(Color(0xF0141519)).padding(24.dp),
+                    Column(Modifier.width(460.dp).clip(RoundedCornerShape(22.dp)).background(Sheet).padding(24.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(when { share -> "${inv.optString("name")} schickt dir ein Spiel"; noGame -> "Spielserver von ${inv.optString("name")}"; else -> "${inv.optString("name")} lädt ein" },
                             fontSize = 22.sp, fontWeight = FontWeight.Bold)

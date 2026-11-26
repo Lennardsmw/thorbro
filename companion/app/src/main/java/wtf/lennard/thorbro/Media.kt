@@ -171,7 +171,23 @@ object Media {
         }
     }.getOrNull()
 
+    private val bundled = ConcurrentHashMap<String, File>()
+    private val notBundled = ConcurrentHashMap.newKeySet<String>()
+
+    /** ThorBro's own doodle console icon (assets/consoles, drawn by scripts/console-icons.py), copied to a file for Coil and the web server */
+    private fun bundledIcon(ctx: Context, systemId: String): File? {
+        bundled[systemId]?.let { return it }
+        if (systemId in notBundled || !systemId.matches(Regex("[a-z0-9_-]+"))) return null
+        val bytes = runCatching { ctx.assets.open("consoles/$systemId.svg").use { it.readBytes() } }.getOrNull()
+            ?: run { notBundled += systemId; return null }
+        val f = File(dir(ctx, "icons"), "bro-$systemId.svg")
+        if (!f.exists() || !f.readBytes().contentEquals(bytes)) f.writeBytes(bytes)
+        bundled[systemId] = f
+        return f
+    }
+
     fun icon(ctx: Context, systemId: String): File? {
+        bundledIcon(ctx, systemId)?.let { return it }
         // RomM's console icons first (crisp SVG, same look as the library), libretro's PNG as fallback
         val svg = File(dir(ctx, "icons"), "romm-$systemId.svg")
         if (svg.length() > 0 && System.currentTimeMillis() - svg.lastModified() < MAX_AGE) return svg

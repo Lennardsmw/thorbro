@@ -72,11 +72,11 @@ fun ConsoleTile(
     onClick: () -> Unit,
 ) {
     val fx = rememberFx()
-    val shape = RoundedCornerShape(18.dp)
+    val shape = tileShape(18)
     Box(
         modifier.fillMaxWidth().aspectRatio(1f)
             .fx(fx, shape, onClick = onClick)
-            .then(if (accent) Modifier.background(Color(0x33FFFFFF)) else Modifier.background(GlassFill)),
+            .then(if (accent) Modifier.background(if (Theme.p.mascot) Primary.copy(alpha = 0.22f) else Color(0x33FFFFFF)) else Modifier.background(GlassFill)),
     ) {
         if (image != null) {
             Img(image, 400, Modifier.fillMaxSize(), ContentScale.Crop, title)
@@ -107,8 +107,8 @@ fun ConsoleTile(
 /** small round status icon in a tile corner */
 @Composable
 fun Badge(icon: ImageVector, on: Boolean, modifier: Modifier = Modifier) {
-    Box(modifier.size(26.dp).clip(CircleShape).background(if (on) Color(0xE6FFFFFF) else Color(0x99000000)), contentAlignment = Alignment.Center) {
-        Icon(icon, null, Modifier.size(16.dp), tint = if (on) Color.Black else Color(0x80FFFFFF))
+    Box(modifier.size(26.dp).clip(CircleShape).background(if (on) Accent else Color(0x99000000)), contentAlignment = Alignment.Center) {
+        Icon(icon, null, Modifier.size(16.dp), tint = if (on) OnAccent else Color(0x80FFFFFF))
     }
 }
 
@@ -126,7 +126,7 @@ fun TileGrid(first: FocusRequester? = null, min: Int = 170, content: LazyGridSco
 
 fun LazyGridScope.header(text: String, sub: String = "") = item(span = { GridItemSpan(maxLineSpan) }) {
     Column(Modifier.padding(top = 10.dp)) {
-        Text(text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text(text, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = HeadFont)
         if (sub.isNotEmpty()) Text(sub, fontSize = 13.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
@@ -142,8 +142,8 @@ fun ConsoleMenu(title: String, text: String = "", mono: Boolean = false, options
     DialogOpen()
     Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         ImmersiveDialog()
-        Column(Modifier.width(520.dp).clip(RoundedCornerShape(22.dp)).background(Color(0xF0141519)).padding(24.dp)) {
-            Text(title, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Column(Modifier.width(520.dp).clip(tileShape(22)).background(Sheet).border(Theme.p.lineW, if (Theme.p.mascot) GlassLine else Color.Transparent, tileShape(22)).padding(24.dp)) {
+            Text(title, fontSize = 22.sp, fontWeight = FontWeight.Bold, fontFamily = HeadFont)
             if (text.isNotEmpty()) Text(text, fontSize = if (mono) 15.sp else 15.sp, color = if (mono) Accent else Muted,
                 fontFamily = if (mono) androidx.compose.ui.text.font.FontFamily.Monospace else null, modifier = Modifier.padding(top = 8.dp))
             if (qrs.isNotEmpty()) androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth().padding(top = 14.dp),
@@ -162,12 +162,14 @@ fun ConsoleMenu(title: String, text: String = "", mono: Boolean = false, options
 fun BigButton(label: String, icon: ImageVector? = null, primary: Boolean = false, enabled: Boolean = true, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val fx = rememberFx()
     val focused = fx.active
-    val shape = RoundedCornerShape(14.dp)
-    val bg = when { focused -> Modifier.background(Accent); primary -> Modifier.background(Color(0x40FFFFFF)); else -> Modifier.background(GlassFill) }
-    Box(modifier.height(56.dp).fx(fx, shape, lift = 1.04f, frame = false, enabled = enabled, onClick = onClick).then(bg),
+    val doodle = Theme.p.mascot
+    val shape = if (doodle) RoundedCornerShape(30.dp, 24.dp, 28.dp, 22.dp) else RoundedCornerShape(14.dp)
+    val bg = when { focused -> Modifier.background(Accent); primary -> Modifier.background(if (doodle) Primary else Color(0x40FFFFFF)); else -> Modifier.background(GlassFill) }
+    val shadow = when { focused -> Theme.p.shadow; primary -> Theme.p.primaryShadow; else -> null }
+    Box(modifier.height(56.dp).hardShadow(shape, shadow).fx(fx, shape, lift = 1.04f, frame = false, enabled = enabled, onClick = onClick).then(bg),
         contentAlignment = Alignment.Center) {
         androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 18.dp)) {
-            val fg = if (focused) OnAccent else if (enabled) Color.White else Muted
+            val fg = if (focused) OnAccent else if (primary && doodle) OnPrimary else if (enabled) Ink else Muted
             if (icon != null) { Icon(icon, null, Modifier.size(22.dp), tint = fg); Spacer(Modifier.width(10.dp)) }
             Text(label, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
@@ -224,7 +226,7 @@ fun <T> Shelves(
                     val row = androidx.compose.foundation.lazy.rememberLazyListState()
                     Column(Modifier.height(rowH)) {
                         androidx.compose.foundation.layout.Row(Modifier.padding(start = hPad, bottom = 8.dp), verticalAlignment = Alignment.Bottom) {
-                            Text(shelf.title, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                            Text(shelf.title, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = HeadFont)
                             if (shelf.sub.isNotEmpty()) Text("  " + shelf.sub, fontSize = 14.sp, color = Muted, maxLines = 1)
                         }
                         androidx.compose.foundation.lazy.LazyRow(

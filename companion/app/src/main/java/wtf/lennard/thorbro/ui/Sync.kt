@@ -132,7 +132,11 @@ fun SyncScreen() {
                     val d = withContext(Dispatchers.IO) { runCatching { RommSync.pullSaves(ctx) }.getOrElse { JSONObject().put("error", it.message) } }
                     val r = withContext(Dispatchers.IO) { runCatching { RommSync.syncSaves(ctx, null) }.getOrElse { JSONObject().put("error", it.message) } }
                     busy = ""
-                    note = if (r.has("error")) "Fehler: ${r.optString("error")}" else "${r.optInt("uploaded")} hoch · ${d.optInt("downloaded")} runter"
+                    note = when {
+                        r.has("error") -> "Fehler: ${r.optString("error")}"
+                        r.optBoolean("off") -> "„Nur lokal“ ist an – Einstellungen → Daten sparen"
+                        else -> "${r.optInt("uploaded")} hoch · ${d.optInt("downloaded")} runter"
+                    }
                     tick++
                 }
             }
@@ -180,7 +184,7 @@ fun SyncScreen() {
         profileTiles(profiles) { p -> if (p == null) profileAdd = true else profileOpen = p }
 
         val locs = saves?.optJSONArray("locations").objs().filter { (it.optJSONArray("snapshots")?.length() ?: 0) > 0 }
-        header("Spielstand zurücksetzen", "Spielstand kaputt oder aus Versehen überschrieben? Älteren Stand zurückholen.")
+        header("Spielstand zurücksetzen", "Einzelnes Spiel: Spiel öffnen → Spielstände → Backups. Hier ganze Ordner.")
         if (saves == null) item { ConsoleTile("Lade …", "", Icons.Filled.History) {} }
         locs.forEach { l ->
             item {

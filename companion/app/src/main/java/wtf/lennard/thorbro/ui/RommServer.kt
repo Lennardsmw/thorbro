@@ -64,7 +64,7 @@ fun RommServerDialog(onDone: (String) -> Unit, onClose: () -> Unit) {
     DialogOpen()
     Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         ImmersiveDialog()
-        Column(Modifier.width(620.dp).clip(RoundedCornerShape(22.dp)).background(Color(0xF0141519)).padding(24.dp)) {
+        Column(Modifier.width(620.dp).clip(RoundedCornerShape(22.dp)).background(Sheet).padding(24.dp)) {
             Text(if (st.optBoolean("connected")) "RomM-Server" else "RomM-Server hinzufügen", fontSize = 22.sp, fontWeight = FontWeight.Bold)
             val c = code
             if (c != null) {

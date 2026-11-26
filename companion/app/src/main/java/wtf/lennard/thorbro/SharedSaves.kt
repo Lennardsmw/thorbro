@@ -16,7 +16,7 @@ import java.io.File
 object SharedSaves {
     private val tag = Regex("\\s*\\[(\\d{4}-\\d{2}-\\d{2}_\\d{2}-\\d{2}-\\d{2})]")
 
-    private fun romId(ctx: Context, system: String, romPath: String): Int? =
+    internal fun romId(ctx: Context, system: String, romPath: String): Int? =
         Library.remote(ctx).find(system, File(romPath).name)?.optInt("id")?.takeIf { it > 0 }
 
     private fun time(s: JSONObject) = s.optString("updated_at").ifEmpty { s.optString("created_at") }
@@ -95,6 +95,7 @@ object SharedSaves {
                     Romm.downloadSave(ctx, m.getInt("id"), f); files += f to name
                 }
                 runCatching { Saves.backup(ctx, null, label = "vor-installation") }
+                runCatching { GameSave.backup(ctx, romPath, GameSave.Reason.INSTALL) }
                 val items = Profiles.items(ctx, romPath)
                 val zip = files.size == 1 && files[0].second.endsWith(".zip", true)
                 // a folder save: the existing one, or for 3DS the title's folder in Azahar
@@ -138,7 +139,7 @@ object SharedSaves {
     }
 
     /** where an emulator looks for a game's save when there is none yet */
-    private fun defaultTarget(system: String, rom: File, name: String): File? {
+    internal fun defaultTarget(system: String, rom: File, name: String): File? {
         val ext = name.substringAfterLast('.', "").lowercase()
         val base = rom.nameWithoutExtension
         return when {

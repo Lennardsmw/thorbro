@@ -83,6 +83,7 @@ let info = null;
 async function loadDevice() {
   const { body } = await api('/api/info');
   info = body;
+  updMood();
   $('#conn').textContent = `${body.manufacturer} ${body.model} · ${body.ip}:${body.port}`;
   const p = body.permissions;
   const perm = (ok, t) => `<div class="${ok ? 'ok' : 'err'}">${ok ? '✓' : '✗'} ${t}</div>`;
@@ -260,8 +261,14 @@ const isArchiveName = (n) => ['zip', '7z'].includes(ext(n));
 const KEEP_ZIPPED = new Set(['nes', 'snes', 'gb', 'gbc', 'gba', 'megadrive', 'mastersystem', 'gamegear', 'pcengine', 'atari2600', 'lynx', 'ngp', 'wonderswan', 'arcade', 'n64']);
 const APK_DIR = '/storage/emulated/0/Download/ThorBro';
 
-$('#romRoot').value = store.get('romRoot', '') || '/storage/emulated/0/ROMs';
-$('#romRoot').onchange = () => store.set('romRoot', $('#romRoot').value.replace(/\/+$/, ''));
+// the Thor's ROM folder (Settings → ROM-Ordner); changing it here changes it on the Thor
+$('#romRoot').value = '/storage/emulated/0/ROMs';
+$('#romRoot').onchange = async () => {
+  const path = $('#romRoot').value.replace(/\/+$/, '');
+  try { const r = await api('/api/roms/root?path=' + encodeURIComponent(path), { method: 'POST' }); $('#romRoot').value = r.body.root || path; }
+  catch (err) { alert('ROM-Ordner: ' + err.message); }
+  renderQueue();
+};
 
 const queue = [];
 let running = false;
@@ -525,7 +532,7 @@ const volLabel = (p) => {
   return v ? v.label : '';
 };
 const authQ = () => 'token=' + encodeURIComponent(token);
-const iconUrl = (id) => `/api/consoles/${encodeURIComponent(id)}/icon?${authQ()}`;
+const iconUrl = (id) => `/api/consoles/${encodeURIComponent(id)}/icon?v=bro1&${authQ()}`; // v: bust the 30-day cache when the icon set changes
 const coverUrl = (sys, name) => `/api/roms/cover?${q({ system: sys, name })}&${authQ()}`;
 const mediaUrl = (sys, path, kind) => `/api/roms/media?${q({ system: sys, path, kind })}&${authQ()}`;
 // Cocoon's box art first, libretro cover second
@@ -549,11 +556,8 @@ async function loadRoms(refresh) {
   try { romData = (await api('/api/roms' + (refresh ? '?refresh=1' : ''))).body; }
   catch (err) { $('#romStats').textContent = 'Fehler: ' + err.message; return; }
   if (refresh) Object.keys(metaCache).forEach((k) => delete metaCache[k]);
-  // Upload target: use the ROMs folder the scan found, unless the user picked one.
-  if (!store.get('romRoot', '') && romData.romRoots.length) {
-    $('#romRoot').value = romData.romRoots[romData.romRoots.length - 1];
-    renderQueue();
-  }
+  // Upload target: the Thor's ROM folder (Settings)
+  if (romData.romRoot && document.activeElement !== $('#romRoot')) { $('#romRoot').value = romData.romRoot; renderQueue(); }
   if (!romData.systems.some((s) => s.id === romSys)) romSys = romData.systems[0]?.id || '';
   renderRoms();
 }
@@ -692,7 +696,7 @@ function openRom(path, sysId) {
           `<tr><td class="muted">${x.switchKind === 'base' ? 'Spiel' : x.switchKind === 'update' ? 'Update ' + esc(x.versionLabel) : 'DLC'}${r.group.oldUpdates.includes(x) ? ' <span class="badge warnbadge">veraltet</span>' : ''}</td><td>${esc(x.file)} <span class="muted">${fmt(x.size)}</span></td><td><button data-romdel="${esc(x.path)}">Löschen</button></td></tr>`).join('')}</table>` : ''}
         <div class="row">
           ${emus && emus.systems[sysId] && (!r.group || r.group.base) ? `<button class="primary" data-play="${esc(r.path)}" data-play-sys="${esc(sysId)}">▶ Auf dem Thor spielen</button>` : ''}
-          ${r.dir || sysId === 'ports' ? '' : `<button data-share-rom="${esc(r.path)}" data-share-sys="${esc(sysId)}">Weitergeben</button>`}
+          ${sysId === 'ports' ? '' : `<button data-send="${esc(r.path)}" data-send-sys="${esc(sysId)}" data-send-kind="game" data-send-title="${esc(r.name || r.file || '')}">Weitergeben</button>`}
           <button data-dir-roms="${esc(folder)}">Im Datei-Tab öffnen</button>
           ${r.dir ? '' : `<a class="btn" href="/api/files/raw?${q({ path: r.path, token })}">Herunterladen</a>`}
           <button data-romdel="${esc(r.path)}">Löschen</button>
@@ -716,24 +720,50 @@ let romSavesFor = null;
 /** where a save was uploaded from ("vom Mac …", "von diesem Thor") */
 const devTag = (s, d) => (s.device ? ` · <span class="muted">${s.device === d.thisDevice ? 'von diesem Gerät' : 'von ' + esc(s.device)}</span>` : '');
 const when = (t) => (t ? new Date(t).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) : '');
+const CMP = {
+  same: ['Thor und RomM gleich', '#7fe0a8'], 'cloud-newer': ['RomM ist neuer', '#ffd27a'], 'device-newer': ['Thor ist neuer', '#9cc4ff'],
+  'device-only': ['nur auf dem Thor', '#a7adb8'], 'cloud-only': ['nur in RomM', '#ffd27a'],
+};
+/** Thor vs. RomM, buttons, per-game backups */
+function gameSaveHtml(g) {
+  const cmp = CMP[g.compare];
+  const cloudOk = g.rommAllowed && g.connected && g.inRomm;
+  const card = (label, s, empty, hi) => `<div class="card${hi ? ' hi' : ''}"><div class="lbl">${label}</div>${s
+    ? `<div class="t">${when(s.time)}</div><div class="muted">${fmt(s.size)}${s.device ? ' · von ' + esc(s.device) : ''} · ${esc(s.name)}</div>`
+    : `<div class="muted">${empty}</div>`}</div>`;
+  const cloudEmpty = !g.rommAllowed ? '„Nur lokal“ ist an (Spielstände → Daten sparen)' : !g.connected ? 'RomM nicht verbunden'
+    : g.cloudError ? 'RomM antwortet nicht: ' + esc(g.cloudError) : g.inRomm === false ? 'Das Spiel ist nicht in RomM' : 'Noch kein Spielstand in RomM';
+  const pullFirst = g.compare === 'cloud-newer' || g.compare === 'cloud-only';
+  const pull = `<button data-gs="pull" ${g.cloud ? '' : 'disabled'} class="${pullFirst ? 'primary' : ''}">☁↓ Cloud-Stand aufs Thor holen</button>`;
+  const push = `<button data-gs="push" ${g.device ? '' : 'disabled'} class="${!pullFirst && g.compare !== 'same' ? 'primary' : ''}">☁↑ Thor-Stand hochladen</button>`;
+  const b = g.backups || [];
+  return `<h3>Spielstände${g.multiProfile ? ` <span class="muted">· Profil ${esc(g.profile)}</span>` : ''}${cmp ? `<span class="cmpchip" style="color:${cmp[1]}">${cmp[0]}</span>` : ''}</h3>
+    <div class="gsave">${card('Auf dem Thor', g.device, 'Noch kein Spielstand auf dem Thor', g.compare === 'device-newer' || g.compare === 'device-only')}
+      ${card('Neuester in RomM', g.cloud, cloudEmpty, pullFirst)}</div>
+    <div class="row">${cloudOk ? (pullFirst ? pull + push : push + pull) : ''}<button data-send-save ${g.device ? '' : 'disabled'}>🎁 An Freund schicken …</button></div>
+    <details class="snaps"><summary>Backups · ${b.length ? `${b.length} ältere Stände · ${fmt(b.reduce((a, x) => a + x.size, 0))}` : 'noch keins – entsteht beim nächsten Speichern'}</summary>
+      <table class="savetable">${b.map((x) => `<tr><td>${when(x.time)}<div class="muted">${esc(x.reasonLabel)}${g.multiProfile && x.profile ? ' · ' + esc(x.profile) : ''} · ${fmt(x.size)}</div></td>
+        <td><button data-gs-restore="${esc(x.path)}" data-gs-time="${esc(when(x.time))}">Zurückholen</button></td></tr>`).join('')}</table>
+      <div class="row"><button data-gs="backup">Jetzt sichern</button></div></details>`;
+}
 async function loadRomSaves(path, sys) {
   romSavesFor = { path, sys };
   const box = $('#romSaves');
   if (!box) return;
-  let d;
-  try { d = (await api('/api/saves/game?' + q({ path, system: sys }))).body; } catch (err) { box.innerHTML = `<h3>Spielstände</h3><div class="sub">${esc(err.message)}</div>`; return; }
+  let d, g;
+  try {
+    [d, g] = await Promise.all([api('/api/saves/game?' + q({ path, system: sys })).then((r) => r.body), api('/api/saves/state?' + q({ path, system: sys })).then((r) => r.body)]);
+  } catch (err) { box.innerHTML = `<h3>Spielstände</h3><div class="sub">${esc(err.message)}</div>`; return; }
   if (romSavesFor?.path !== path || !$('#romSaves')) return;
   const profiles = d.profiles || [];
   const opts = profiles.map((p) => `<option value="${esc(p.id)}"${p.active ? ' selected' : ''}>${esc(p.name)}</option>`).join('');
   const installBtn = (id) => d.supported
     ? `<select data-sv-for="${id}">${opts}</select> <button data-sv-install="${id}">Installieren</button>` : '';
-  box.innerHTML = `<h3>Spielstände</h3>
-    ${d.supported ? `<div class="sub">Aktiv ist der Spielstand von <b>${esc(profiles.find((p) => p.active)?.name || '–')}</b>. Wechseln tauscht die Dateien, der alte Stand wird vorher gesichert.</div>
+  box.innerHTML = gameSaveHtml(g) + `
+    ${d.supported && profiles.length > 1 ? `<h4 style="margin:12px 0 4px">Profile</h4><div class="sub">Aktiv ist der Spielstand von <b>${esc(profiles.find((p) => p.active)?.name || '–')}</b>. Wechseln tauscht die Dateien, der alte Stand wird vorher gesichert.</div>
       <div class="proflist">${profiles.map((p) => `<button class="prof${p.active ? ' active' : ''}" data-sv-activate="${esc(p.id)}" ${p.active ? 'disabled' : ''}>${profDot(p)}${esc(p.name)}${p.hasSave ? ' 💾' : ''}</button>`).join('')}</div>`
-      : '<div class="sub">Switch-Spielstände liegen in Eden, das eigene Profile hat. Hier nur ansehen und teilen.</div>'}
-    ${!d.connected ? '<div class="sub">RomM nicht verbunden – geteilte Spielstände gibt es nur mit RomM.</div>'
-      : d.inRomm === false ? '<div class="sub">Das Spiel ist nicht in RomM, darum gibt es keine Spielstände dort.</div>'
-      : d.error ? `<div class="sub">${esc(d.error)}</div>` : `
+      : ''}
+    ${!d.connected || d.inRomm === false || d.error || !g.rommAllowed ? '' : `
     <h4 style="margin:12px 0 4px">Deine Spielstände in RomM</h4>
     ${d.own.length ? `<table class="savetable">${d.own.map((s) => `<tr><td>${esc(s.profile)}${devTag(s, d)}<div class="muted">${when(s.updated)} · ${fmt(s.size)}</div></td>
       <td><button data-sv-share="${s.id}" data-sv-on="${s.public ? 0 : 1}">${s.public ? '🌐 Geteilt – zurücknehmen' : 'Teilen'}</button> ${installBtn(s.id)}</td></tr>`).join('')}</table>`
@@ -744,10 +774,31 @@ async function loadRomSaves(path, sys) {
       : '<div class="sub">Niemand hat für dieses Spiel einen Spielstand geteilt. In RomM beim Spielstand „öffentlich“ setzen, dann taucht er hier auf.</div>'}`}`;
 }
 $('#romDetail').addEventListener('click', async (e) => {
-  const t = e.target.closest('[data-sv-activate],[data-sv-share],[data-sv-install]');
+  const s = e.target.closest('[data-send],[data-send-save]');
+  if (s) {
+    if (s.dataset.send) return openSend(s.dataset.send, s.dataset.sendSys, s.dataset.sendKind, s.dataset.sendTitle);
+    if (romSavesFor) return openSend(romSavesFor.path, romSavesFor.sys, 'save', $('#romDetail h2')?.textContent || '');
+    return;
+  }
+  const t = e.target.closest('[data-sv-activate],[data-sv-share],[data-sv-install],[data-gs],[data-gs-restore]');
   if (!t || !romSavesFor) return;
   const { path, sys } = romSavesFor;
   try {
+    if (t.dataset.gs) {
+      if (t.dataset.gs === 'pull' && !confirm('Cloud-Stand holen?\nEr ersetzt den Spielstand auf dem Thor. Der jetzige wird vorher als Backup gesichert.')) return;
+      t.disabled = true; t.textContent = t.dataset.gs === 'backup' ? 'Sichert …' : 'Läuft …';
+      const ep = t.dataset.gs === 'backup' ? '/api/saves/game/backup?' + q({ path }) : '/api/saves/cloud?' + q({ path, system: sys, do: t.dataset.gs });
+      const { body } = await api(ep, { method: 'POST' });
+      if (body.error) { alert(body.error); return loadRomSaves(path, sys); }
+      toast(body.done || 'Fertig');
+    }
+    if (t.dataset.gsRestore) {
+      if (!confirm(`Backup vom ${t.dataset.gsTime} zurückholen?\nDer jetzige Spielstand wird vorher gesichert.`)) return;
+      t.disabled = true;
+      const { body } = await api('/api/saves/game/restore?' + q({ path, backup: t.dataset.gsRestore }), { method: 'POST' });
+      if (body.error) { alert(body.error); return loadRomSaves(path, sys); }
+      toast(body.done || 'Zurückgeholt');
+    }
     if (t.dataset.svActivate) {
       const { body } = await api('/api/saves/profile?' + q({ path, system: sys, id: t.dataset.svActivate }), { method: 'POST' });
       if (body.error) return alert(body.error);
@@ -955,14 +1006,6 @@ $('#romDetail').onclick = async (e) => {
   const t = e.target, dlg = $('#romDetail');
   if (t === dlg || t.dataset.close !== undefined) return dlg.close();
   if (t.dataset.play) return play(t.dataset.play, t.dataset.playSys);
-  if (t.dataset.shareRom) {
-    try {
-      const { body } = await api('/api/netplay/host?' + q({ system: t.dataset.shareSys, path: t.dataset.shareRom, share: '1' }), { method: 'POST' });
-      if (body.error) throw new Error(body.error);
-      toast(body.direct ? 'Wird angeboten – der Thor in der Nähe bekommt eine Einladung' : `Wird angeboten · PIN ${body.pin}`);
-    } catch (err) { alert(err.message); }
-    return;
-  }
   try {
     if (t.dataset.dirRoms) { dlg.close(); showTab('files'); await loadFiles(t.dataset.dirRoms); }
     if (t.dataset.romdel && confirm(`${t.dataset.romdel} löschen?`)) {
@@ -1118,6 +1161,7 @@ $('#profileList').onclick = async (e) => {
 async function loadSaves() {
   loadHistory();
   loadProfiles().catch(() => {});
+  loadDataSaver().catch(() => {});
   $('#savesInfo').textContent = 'Lade …';
   const { body } = await api('/api/saves');
   $('#savesAuto').checked = body.auto;
@@ -1296,7 +1340,38 @@ async function loadStream() {
     btn.hidden = true;
   }
   $('#mlLaunch').hidden = !s.installed;
+  loadScrcpy();
 }
+async function loadScrcpy() {
+  let s;
+  try { s = (await api('/api/stream/scrcpy')).body; } catch (err) { $('#scStatus').textContent = 'Fehler: ' + err.message; return; }
+  $('#scWifi').hidden = s.wifi;
+  const ip = s.ip || '<Thor-IP>';
+  const pair = `<p>Einmal koppeln: am Thor „Koppeln am Thor öffnen“ → <em>Gerät über einen Kopplungscode koppeln</em>, dann auf dem Mac:</p>
+    <pre class="code">adb pair ${esc(ip)}:&lt;Kopplungsport&gt; &lt;Code&gt;</pre>`;
+  if (s.usb) {
+    $('#scStatus').innerHTML = '<span class="ok">USB-Kabel steckt – läuft über USB</span>';
+    $('#scHow').innerHTML = `<p>Kabel schlägt WLAN: RomBro nimmt USB von selbst und wechselt beim Abziehen auf WLAN. Von Hand auf dem Mac:</p><pre class="code">scrcpy -d</pre>`;
+  } else if (!s.wifi) {
+    $('#scStatus').textContent = s.shell === 'ready' ? 'Kabelloses Debugging ist aus.' : 'Kabelloses Debugging ist aus. Ohne Shizuku in den Entwickleroptionen einschalten.';
+    $('#scHow').innerHTML = pair;
+  } else if (!s.command) {
+    $('#scStatus').textContent = 'Kabelloses Debugging ist an, Port nicht lesbar (Shizuku starten) – steht am Thor unter Kabelloses Debugging.';
+    $('#scHow').innerHTML = pair + `<p>Dann auf dem Mac:</p><pre class="code">scrcpy --tcpip=${esc(ip)}:&lt;Port&gt;</pre>`;
+  } else {
+    $('#scStatus').innerHTML = `<span class="ok">Bereit auf ${esc(s.address)}</span>`;
+    $('#scHow').innerHTML = pair + `<p>Dann auf dem Mac (der Port ändert sich, wenn Debugging neu startet):</p><pre class="code">${esc(s.command)}</pre>`;
+  }
+}
+$('#scWifi').onclick = async () => {
+  $('#scWifi').disabled = true;
+  try { await api('/api/stream/scrcpy/wifi', { method: 'POST' }); toast('Kabelloses Debugging an'); } catch (err) { alert(err.message); }
+  $('#scWifi').disabled = false; loadScrcpy();
+};
+$('#scPair').onclick = async () => {
+  try { await api('/api/stream/scrcpy/pair', { method: 'POST' }); toast('Am Thor: Gerät über einen Kopplungscode koppeln'); } catch (err) { alert(err.message); }
+};
+$('#scReload').onclick = () => loadScrcpy();
 $('#mlInstall').onclick = async () => {
   const btn = $('#mlInstall'); btn.disabled = true;
   try {
@@ -1323,209 +1398,29 @@ $('#mlScan').onclick = async () => {
   } catch (err) { $('#mlScanInfo').textContent = 'Fehler: ' + err.message; }
 };
 
-// ---------- netplay (local multiplayer) ----------
+// ---------- multiplayer (the party plays together) ----------
 let np = null;
-const npModes = { retroarch: 'RetroArch', ppsspp: 'PPSSPP', eden: 'Eden', azahar: 'Azahar', share: 'Weitergeben', server: 'Spielserver' };
-const npAddrs = (a) => (a || []).map((x) => `${x.kind}: ${x.ip}`).join(' · ') || 'kein Netz';
+const npModes = { retroarch: 'RetroArch', ppsspp: 'PPSSPP', eden: 'Eden', azahar: 'Azahar', share: 'Weitergeben' };
 async function loadNetplay() {
   try { np = (await api('/api/netplay')).body; } catch (err) { $('#npStatus').textContent = 'Fehler: ' + err.message; return; }
-  const l = np.lobby;
-  const room = np.azahar && np.azahar.server;
+  const p = np.party, n = np.partyNet || {}, l = np.lobby;
+  const others = p ? p.members.filter((m) => !m.me).map((m) => m.name) : [];
+  $('#npStatus').textContent = !p ? 'Keine Party – Freunde einladen, dann spielt ihr zusammen.'
+    : p.leaderMe ? `Du leitest die Party${others.length ? ' mit ' + others.join(', ') : ' (noch allein)'} · ein Spiel, das du startest, startet bei allen`
+    : n.connected ? `In der Party von ${n.leader} · verbunden ✓`
+    : n.following ? `In der Party von ${n.leader} · verbinde …` : 'In einer Party · warte auf den Leiter';
   $('#npClose').hidden = !l;
-  if (l) {
-    const az = l.mode === 'azahar';
-    const members = room && room.members ? room.members : [];
-    const state = { starting: 'startet …',
-      hosting: `<span class="ok">${az ? 'Raum läuft · ' + (members.length ? members.length + ' im Raum' : 'in Azahar beitreten') : 'wartet auf Mitspieler'}</span>`,
-      sharing: '<span class="ok">wird angeboten</span>',
-      error: '<span class="err">3DS-Raum ist aus – beenden und neu starten</span>',
-      manual: '<span class="err">RetroArch hostet nicht von selbst: im RetroArch-Menü Netplay → Host starten</span>' }[l.hostState] || '';
-    $('#npStatus').innerHTML = `${l.mode === 'share' ? 'Du gibst weiter' : 'Du spielst'}: <strong>${esc(l.game)}</strong> (${esc(npModes[l.mode] || l.mode)}) ${state}`;
-    $('#npLobby').innerHTML = `<p style="font-size:2em;letter-spacing:.2em" class="ok">PIN ${esc(l.pin)}</p>
-      <p class="muted">${np.direct ? 'Wi-Fi Direct an – Thors in der Nähe sehen die Einladung.' : 'Wi-Fi Direct aus – der andere Thor braucht dasselbe WLAN (Erweitert → Thors suchen).'}
-      Beigetreten: ${l.guestNames.length ? l.guestNames.map(esc).join(', ') : 'noch keiner'}</p>`
-      + (az ? `<p>Im 3DS-Raum: ${members.length ? members.map(esc).join(', ') : 'niemand'}</p><pre>${esc('In Azahar (dieser Thor): Zurück-Taste → Mehrspieler → Raum beitreten\nIP: 127.0.0.1   Port: ' + l.roomPort + '   Passwort: leer\n\nErreichbar für andere (Port ' + l.roomPort + '): ' + npAddrs(np.addresses))}</pre>` : '');
-  } else {
-    $('#npStatus').textContent = 'Nichts offen.';
-    $('#npLobby').innerHTML = '';
-  }
-  $('#npAddrs').textContent = 'Dieser Thor: ' + npAddrs(np.addresses) + '. Von unterwegs: beide Thors in NetBird, dann hier die NetBird-Adresse des anderen eintippen.';
-  if (np.shizuku !== 'ready') $('#npLobby').innerHTML += '<p class="muted">Tipp: Mit Shizuku übernimmt ThorBro deine RetroArch-Einstellungen 1:1 und kann PPSSPP einstellen.</p>';
-  $('#npSupported').textContent = (np.supported.length
-    ? 'Ein Knopf, keine Spielauswahl: 3DS-Raum, Wi-Fi Direct und Einladungen. Dann ein Spiel aus einem beliebigen Frontend starten. Geht mit: ' + np.supported.map((s) => s.name + (s.shaky ? ' (wackelig)' : '')).join(', ') + '.'
-    : 'Kein passender Emulator installiert (RetroArch, PPSSPP, Azahar oder Eden).') + ' Ein Spiel weitergeben: im Spiele-Tab beim Spiel „Weitergeben“.';
-  renderServer(np.server);
-  renderOnline(np.online);
-  if (np.joined && np.joined.mode === 'azahar' && !l) {
-    const st = np.azahar && np.azahar.room;
-    $('#npLobby').innerHTML += `<p>3DS-Raum bei ${esc(np.joined.host)} (Azahar → 127.0.0.1): ${st === 'connected' ? '<span class="ok">im Raum ✓</span>' : '<span class="err">noch nicht im Raum</span>'} <button data-relay-off>Trennen</button></p><pre>${esc(np.joined.hint || '')}</pre>`;
-  }
-  $('#frList').innerHTML = (np.friends || []).length ? np.friends.map((f) => `<div class="card"><h3>${esc(f.name)}</h3><div class="muted">${esc(f.id)}</div>
-    <p><button data-unfriend="${esc(f.id)}">Entfernen</button></p></div>`).join('') : '<p class="muted">Noch keine – einmal eine Einladung annehmen.</p>';
-  $('#frAuto').checked = !!np.auto;
-  $('#npWlan').checked = !!np.wlanOnly;
-  if ((np.server && np.server.on) || (l && l.mode === 'azahar') || (np.joined && np.joined.mode === 'azahar')) { clearTimeout(loadNetplay.t); loadNetplay.t = setTimeout(() => { if (!$('#netplay').hidden) loadNetplay(); }, 4000); }
+  const room = np.azahar && np.azahar.server;
+  $('#npLobby').innerHTML = l ? `<p><strong>${esc(l.game)}</strong> · ${esc(npModes[l.mode] || l.mode)}${l.mode === 'azahar' && room ? ' · im 3DS-Raum: ' + esc((room.members || []).join(', ') || 'niemand') : ''}</p>` : '';
+  $('#npHow').textContent = (np.services || []).map((x) => `${x.name}\n  ${x.how}`).join('\n\n');
+  clearTimeout(loadNetplay.t); loadNetplay.t = setTimeout(() => { if (!$('#netplay').hidden) loadNetplay(); }, 4000);
 }
-let invites = [];
-$('#invScan').onclick = async () => {
-  $('#invInfo').textContent = 'Suche per Funk (ca. 6 s) …'; $('#invList').innerHTML = '';
-  try {
-    const { body } = await api('/api/netplay/invites');
-    invites = body.invites;
-    $('#invInfo').textContent = !body.permission ? 'Am Thor in ThorBro einmal „Geräte in der Nähe“ erlauben (Multiplayer → Erweitert → Wi-Fi Direct).'
-      : invites.length ? `${invites.length} gefunden` : 'Keiner gefunden. Der andere Thor muss Wi-Fi Direct an haben.';
-    $('#invList').innerHTML = invites.map((i) => `<div class="card"><h3>${esc(i.name)}</h3><div class="muted">${esc(i.game || 'Wi-Fi Direct offen')}${i.mode ? ' · ' + esc(npModes[i.mode] || i.mode) : ''}${i.via ? ' · ' + esc(i.via) : ''}</div>
-      ${i.friend ? '<div class="ok">Freund</div>' : ''}<p><button class="primary" data-inv="${esc(i.device)}">${i.mode === 'server' ? '3DS-Raum nutzen' : !i.lobby ? 'Verbinden' : i.mode === 'share' ? 'Annehmen' : 'Beitreten'}</button></p></div>`).join('');
-  } catch (err) { $('#invInfo').textContent = 'Fehler: ' + err.message; }
-};
-$('#invList').addEventListener('click', async (e) => {
-  const b = e.target.closest('[data-inv]'); if (!b) return;
-  b.disabled = true;
-  try {
-    const { body } = await api('/api/netplay/accept?' + q({ device: b.dataset.inv }), { method: 'POST' });
-    const j = await waitJob(body.id, (j) => ($('#invInfo').textContent = `${j.message || ''} ${Math.round(j.progress * 100)} %`));
-    if (j.error) throw new Error(j.error);
-    $('#invInfo').textContent = j.result.hint || 'Gestartet';
-    loadNetplay();
-  } catch (err) { alert(err.message); $('#invInfo').textContent = ''; }
-  b.disabled = false;
-});
-function serverText(sv) {
-  const lines = [`Name: ${sv.name}`];
-  if (sv.direct) lines.push(`Wi-Fi Direct: ${sv.ssid} (Thors in der Nähe sehen ihn von selbst)`);
-  lines.push('', 'Adressen:', ...(sv.addresses || []).map((x) => `${x.kind}: ${x.ip}`));
-  if ((sv.services || []).length) {
-    lines.push('', 'Läuft hier:');
-    sv.services.forEach((x) => lines.push(`• ${x.name}${x.port ? ' · Port ' + x.port : ''}`, `   ${x.how}`));
-  }
-  const m = (sv.room && sv.room.members) || [];
-  if (m.length) lines.push('', 'Im 3DS-Raum: ' + m.join(', '));
-  lines.push('', 'Spiel aus einem beliebigen Frontend starten – Freunde in der Nähe bekommen die Einladung. Von unterwegs: über NetBird.');
-  return lines.join('\n');
-}
-function renderServer(sv) {
-  if (!sv) return;
-  $('#svToggle').textContent = sv.on ? 'Server stoppen' : 'Spielserver starten';
-  $('#svToggle').classList.toggle('primary', !sv.on);
-  $('#svState').innerHTML = sv.on ? '<span class="ok">läuft</span>' : 'aus';
-  $('#svInfo').hidden = !sv.on;
-  $('#svInfo').textContent = sv.on ? serverText(sv) : '';
-}
-$('#svToggle').onclick = async () => {
-  const on = !(np && np.server && np.server.on);
-  $('#svToggle').disabled = true; $('#svState').textContent = on ? 'startet …' : 'stoppt …';
-  try {
-    const { body } = await api('/api/netplay/server?' + q({ on: on ? '1' : '0' }), { method: 'POST' });
-    if (body.roomError) toast('3DS-Raum: ' + body.roomError);
-  } catch (err) { alert(err.message); }
-  $('#svToggle').disabled = false; loadNetplay(); loadDirect();
-};
-// ---------- online (internet) ----------
-function renderOnline(o) {
-  if (!o) return;
-  $('#onState').innerHTML = o.open ? `<span class="ok">offen</span> · ${o.guests} von außen drin` + (o.public ? '' : ' · <span class="err">keine öffentliche Adresse</span>') : 'zu';
-  $('#onInvite').textContent = o.open ? 'Code zeigen' : 'Online einladen';
-  if (o.open && o.code) {
-    $('#onCode').textContent = o.code;
-    $('#onCodeSub').textContent = `als Zahlen: ${o.digits} · gilt noch ${o.codeMinutes} Min. · Freund: Mehrspieler → „Code eingeben“`;
-  } else if (!o.open) $('#onBox').hidden = true;
-  $('#onKnown').innerHTML = (o.known || []).map((k) => `<button data-known="${esc(k.id)}">Wieder zu ${esc(k.name)}</button><button data-forget="${esc(k.id)}" title="vergessen">✕</button>`).join('');
-}
-async function onlineAction(path) {
-  try { const { body } = await api(path, { method: 'POST' }); if (body.error) alert(body.error); else { renderOnline(body); $('#onBox').hidden = !body.open; } }
-  catch (err) { alert(err.message); }
-  loadNetplay();
-}
-$('#onInvite').onclick = async () => {
-  $('#onInvite').disabled = true; $('#onState').textContent = 'öffnet …';
-  await onlineAction(np && np.online && np.online.open && np.online.code ? '/api/online/new' : '/api/online/host');
-  $('#onInvite').disabled = false;
-};
-$('#onNew').onclick = () => onlineAction('/api/online/new');
-$('#onReset').onclick = () => { if (confirm('Alle, die schon mal drin waren, brauchen dann wieder einen Code. Weiter?')) onlineAction('/api/online/reset'); };
-$('#onClose').onclick = async () => { await api('/api/online/close', { method: 'POST' }); $('#onBox').hidden = true; loadNetplay(); };
-async function onlineJoin(params) {
-  $('#onJoin').disabled = true; $('#onJoinInfo').textContent = 'verbinde …';
-  try {
-    const { body } = await api('/api/online/join?' + q(params), { method: 'POST' });
-    for (;;) {
-      await new Promise((r) => setTimeout(r, 700));
-      const { body: j } = await api('/api/jobs/' + body.id);
-      $('#onJoinInfo').textContent = j.message || 'verbinde …';
-      if (j.done) { $('#onJoinInfo').textContent = j.error ? 'Ging nicht: ' + j.error : (j.result && j.result.hint) || 'Verbunden'; break; }
-    }
-  } catch (err) { $('#onJoinInfo').textContent = err.message; }
-  $('#onJoin').disabled = false; loadNetplay();
-}
-$('#onJoin').onclick = () => { const code = $('#onJoinCode').value.trim(); if (code) onlineJoin({ code }); };
-$('#onKnown').onclick = async (e) => {
-  const k = e.target.dataset.known, f = e.target.dataset.forget;
-  if (k) onlineJoin({ known: k });
-  if (f) { await api('/api/online/forget?' + q({ id: f }), { method: 'POST' }); loadNetplay(); }
-};
-
-$('#npClose').onclick = async () => { await api('/api/netplay/close', { method: 'POST' }); loadNetplay(); loadDirect(); };
-
-function renderPeers(peers) {
-  $('#npPeers').innerHTML = peers.map((p) => {
-    const l = p.lobby;
-    const body = !p.reachable ? '<div class="err">nicht erreichbar</div>'
-      : l && l.open ? `<div><strong>${esc(l.game)}</strong></div><div class="muted">${esc(npModes[l.mode] || l.mode)} · ${fmt(l.size)}</div>
-        <p><button class="primary" data-join="${esc(p.address)}">Beitreten</button></p>`
-      : l && l.room ? `<div class="muted">Spielserver läuft</div><p><button class="primary" data-relay="${esc(p.address)}" data-relay-name="${esc(l.host || p.address)}">3DS-Raum nutzen</button></p>`
-      : '<div class="muted">keine Lobby offen</div>';
-    return `<div class="card"><h3>${esc(l?.host || p.service || p.address)}</h3><div class="muted">${esc(p.address)}</div>${body}</div>`;
-  }).join('');
-}
-$('#npScan').onclick = async () => {
-  $('#npScanInfo').textContent = 'Suche …'; $('#npPeers').innerHTML = '';
-  try {
-    const { peers } = (await api('/api/netplay/peers')).body;
-    $('#npScanInfo').textContent = peers.length ? `${peers.length} gefunden` : 'Keiner gefunden. Selbes WLAN/Hotspot? Sonst IP eintippen.';
-    renderPeers(peers);
-  } catch (err) { $('#npScanInfo').textContent = 'Fehler: ' + err.message; }
-};
-$('#npAddrGo').onclick = async () => {
-  const a = $('#npAddr').value.trim(); if (!a) return;
-  try { renderPeers((await api('/api/netplay/peers?' + q({ address: a }))).body.peers); } catch (err) { alert(err.message); }
-};
-$('#npPeers').addEventListener('click', async (e) => {
-  const r = e.target.closest('[data-relay]');
-  if (r) {
-    try {
-      const { body } = await api('/api/netplay/relay?' + q({ address: r.dataset.relay, name: r.dataset.relayName }), { method: 'POST' });
-      if (body.error) throw new Error(body.error);
-      $('#npScanInfo').textContent = body.hint; loadNetplay();
-    } catch (err) { alert(err.message); }
-    return;
-  }
-  const b = e.target.closest('[data-join]'); if (!b) return;
-  const pin = prompt('PIN vom anderen Thor:'); if (!pin) return;
-  b.disabled = true;
-  try {
-    const { body } = await api('/api/netplay/connect?' + q({ address: b.dataset.join, pin: pin.trim() }), { method: 'POST' });
-    const j = await waitJob(body.id, (j) => ($('#npScanInfo').textContent = `${j.message || ''} ${Math.round(j.progress * 100)} %`));
-    if (j.error) throw new Error(j.error);
-    $('#npScanInfo').textContent = j.result.hint || 'Gestartet';
-    toast('Spiel startet');
-  } catch (err) { alert(err.message); $('#npScanInfo').textContent = ''; }
-  b.disabled = false;
-});
-
-$('#frList').addEventListener('click', async (e) => {
-  const b = e.target.closest('[data-unfriend]'); if (!b) return;
-  await api('/api/netplay/friend/remove?' + q({ id: b.dataset.unfriend }), { method: 'POST' }); loadNetplay();
-});
-$('#npWlan').onchange = async () => { await api('/api/netplay/wlan?' + q({ on: $('#npWlan').checked ? '1' : '0' }), { method: 'POST' }); loadNetplay(); loadDirect(); };
-$('#npLobby').addEventListener('click', async (e) => {
-  if (e.target.dataset.relayOff === undefined) return;
-  await api('/api/netplay/relay', { method: 'POST' }); loadNetplay();
-});
-$('#frAuto').onchange = async () => { await api('/api/netplay/auto?' + q({ on: $('#frAuto').checked ? '1' : '0' }), { method: 'POST' }); loadNetplay(); };
-$('#frPrepare').onclick = async () => {
-  $('#frInfo').textContent = 'Richte ein …';
-  try { const { body } = await api('/api/netplay/prepare', { method: 'POST' }); $('#frInfo').textContent = Object.entries(body).map(([k, v]) => `${npModes[k] || k}: ${v}`).join(' · ') || 'Nichts zu tun'; }
-  catch (err) { $('#frInfo').textContent = 'Fehler: ' + err.message; }
+$('#npFriends').onclick = () => $('#friendsBtn').click();
+$('#npClose').onclick = async () => { await api('/api/netplay/close', { method: 'POST' }); loadNetplay(); };
+$('#npPrepare').onclick = async () => {
+  $('#npInfo').textContent = 'Richte ein …';
+  try { const { body } = await api('/api/netplay/prepare', { method: 'POST' }); $('#npInfo').textContent = Object.entries(body).map(([k, v]) => `${npModes[k] || k}: ${v}`).join(' · ') || 'Nichts zu tun'; }
+  catch (err) { $('#npInfo').textContent = 'Fehler: ' + err.message; }
 };
 
 // ---------- Wi-Fi Direct ----------
@@ -1614,6 +1509,8 @@ async function pollActivity() {
       ${a.done ? (err ? `<div class="err">${esc(err)}</div>` : '') : `${a.step && a.step !== a.name ? `<div class="muted">${esc(a.step)}</div>` : ''}<div class="bar"><i style="width:${Math.round(a.progress * 100)}%"></i></div><div class="muted">${Math.round(a.progress * 100)} %</div>`}</div>`;
   }).join('');
   const busy = list.some((a) => !a.done);
+  moodState.busy = busy; moodState.err = list.some((a) => a.done && a.error && a.error !== 'null'); moodState.done = !busy && list.length > 0 && !moodState.err;
+  updMood();
   // something finished: refresh what changed
   if (actWasBusy && !busy) { if (romData) loadRoms(true); if (storeData && !$('#store').hidden) loadStore(true); }
   actWasBusy = busy;
@@ -1622,8 +1519,42 @@ async function pollActivity() {
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden && token) pollActivity(); });
 
+// ---------- look (Glas / Doodle): the Thor keeps the setting, the browser remembers it to avoid a flash ----------
+function applyTheme(id) {
+  document.documentElement.dataset.theme = id;
+  store.set('theme', id);
+  $('#themeSel').value = id;
+}
+applyTheme(store.get('theme', 'glass'));
+$('#themeSel').onchange = async (e) => {
+  applyTheme(e.target.value);
+  try { await api('/api/theme?' + q({ id: e.target.value }), { method: 'POST' }); } catch {}
+};
+async function loadTheme() {
+  try { const { body } = await api('/api/theme'); if (body.theme) applyTheme(body.theme); } catch {}
+}
+// the robot next to the wordmark (doodle): busy while something runs, tired on low battery, stuffed when full
+const MOODS = { base: 'Mir geht\'s prima!', busy: 'Bin beschäftigt …', done: 'Erledigt!', ask: 'Da stimmt was nicht.',
+  tired: 'Ich brauche Strom …', stuffed: 'Ich bin ziemlich voll.', wait: 'Ich warte auf den Thor …' };
+const moodState = { busy: false, err: false, done: false };
+function updMood() {
+  let m = 'base';
+  const b = info?.battery, st = info?.storage?.[0];
+  if (!info) m = 'wait';
+  else if (moodState.busy) m = 'busy';
+  else if (moodState.err) m = 'ask';
+  else if (moodState.done) m = 'done';
+  else if (b && b.percent <= 15 && !b.charging) m = 'tired';
+  else if (st && st.total && st.free / st.total < 0.05) m = 'stuffed';
+  const img = $('#mascot');
+  if (!img.src.endsWith('/' + m + '.svg')) img.src = 'mascot/' + m + '.svg';
+  img.alt = img.title = MOODS[m];
+  $('#mood').textContent = MOODS[m];
+}
+
 async function start() {
   if (!token) return showLogin();
+  loadTheme();
   pollActivity();
   try { await loadDevice(); showTab(store.get('tab', 'upload')); if (!romData) loadRoms(false); }
   catch (err) { if (!(err instanceof AuthError)) $('#conn').textContent = 'Thor nicht erreichbar'; }
@@ -1635,3 +1566,220 @@ start();
 document.addEventListener('keydown', (e) => {
   if ((e.key === 'Enter' || e.key === ' ') && e.target.classList?.contains('romcard')) { e.preventDefault(); e.target.click(); }
 });
+
+// ---------- Daten sparen ----------
+async function loadDataSaver(set) {
+  const { body } = await api('/api/datasaver' + (set ? '?' + q(set) : ''), set ? { method: 'POST' } : {});
+  $('#dataModes').innerHTML = body.modes.map((m) => `<button class="prof${m.id === body.mode ? ' active' : ''}" data-dmode="${m.id}" title="${esc(m.sub)}">${esc(m.label)}<div class="muted" style="font-size:12px">${esc(m.sub)}</div></button>`).join('');
+  $('#dataKeep').innerHTML = body.keepChoices.map((n) => `<option value="${n}"${n === body.keep ? ' selected' : ''}>${n}</option>`).join('');
+  $('#giftAuto').checked = !!body.giftAuto;
+  $('#giftMax').innerHTML = (body.giftMbChoices || []).map((n) => `<option value="${n}"${n === body.giftMaxMobileMb ? ' selected' : ''}>${n >= 1000 ? n / 1000 + ' GB' : n + ' MB'}</option>`).join('');
+}
+$('#giftAuto').onchange = (e) => loadDataSaver({ giftAuto: e.target.checked ? '1' : '0' });
+$('#giftMax').onchange = (e) => loadDataSaver({ giftMaxMobileMb: e.target.value });
+$('#dataModes').addEventListener('click', (e) => { const b = e.target.closest('[data-dmode]'); if (b) loadDataSaver({ mode: b.dataset.dmode }); });
+$('#dataKeep').onchange = (e) => loadDataSaver({ keep: e.target.value });
+
+// ---------- friends (Pals.kt): button top right, panel on the right, "Freunde hinzufügen" popup ----------
+let friends = null;
+const ago = (ms) => { if (!ms) return ''; const m = Math.floor((Date.now() - ms) / 60000);
+  return m < 2 ? 'gerade eben' : m < 60 ? `vor ${m} Min.` : m < 2880 ? `vor ${Math.floor(m / 60)} Std.` : `vor ${Math.floor(m / 1440)} Tagen`; };
+let gifts = null;
+async function friendsLoad(path = '/api/friends', method = 'GET') {
+  try { const { body } = await api(path, { method }); if (body.error) alert(body.error); else friends = body; } catch (e) { if (!(e instanceof AuthError)) console.warn(e); }
+  try { gifts = (await api('/api/gifts')).body; } catch (e) { /* older ThorBro */ }
+  renderFriends();
+}
+const giftWhat = (k) => ({ save: 'einen Spielstand', both: 'ein Spiel mit Spielstand' }[k] || 'ein Spiel');
+const WAY = { lan: 'lokal', romm: 'RomM', tunnel: 'Tunnel' };
+function giftHtml(g) {
+  const from = g.from?.name || 'Freund';
+  const live = g.live;
+  const size = g.size || g.save?.size || 0;
+  const ways = g.kind === 'save' ? '' : `<div class="muted">Wege: ${['lan', 'romm', 'tunnel'].map((w) => `${WAY[w]} ${!g.ways?.[w] ? '–' : g.probe?.[w] ? g.probe[w] + ' MB/s' : '✓'}`).join(' · ')}</div>`;
+  let sub, btns = '';
+  if (g.state === 'loading') {
+    const pct = live?.total ? Math.floor(live.done * 100 / live.total) : 0;
+    sub = `von ${esc(from)}${live?.way ? ' · ' + WAY[live.way] : ''}${live?.total ? ` · ${fmt(live.done)} von ${fmt(live.total)}` : ''}<div class="bar"><i style="width:${pct}%"></i></div>`;
+  } else if (g.state === 'done') {
+    sub = `von ${esc(from)} · ${g.result?.save ? 'Spielstand ' + esc(g.result.save) : 'fertig'}`;
+  } else {
+    sub = [esc(g.title), size ? fmt(size) : '', g.kind === 'both' ? 'mit Spielstand' : '', g.missing ? 'Spiel fehlt' : ''].filter(Boolean).join(' · ')
+      + (g.state === 'failed' || g.state === 'wifi' ? `<div class="bad">${esc(g.error || '')}</div>` : '') + ways;
+    if (g.state !== 'expired') {
+      if (g.kind === 'save' && g.missing) btns = g.asked ? '<span class="muted">angefragt</span>' : `<button data-gift="ask" data-gid="${g.gid}">Spiel auch anfragen</button>`;
+      else if (g.kind === 'save') btns = `<button class="primary" data-gift="take" data-gid="${g.gid}">Übernehmen</button><button data-gift="backup" data-gid="${g.gid}">Als Backup</button>`;
+      else btns = `<button class="primary" data-gift="load" data-gid="${g.gid}">${g.state === 'new' ? 'Annehmen & laden' : 'Weiter laden'}</button>`;
+      btns += `<button data-gift="decline" data-gid="${g.gid}" title="ablehnen">✕</button>`;
+    }
+  }
+  const title = g.state === 'loading' ? `Lädt: ${esc(g.title)}` : g.state === 'done' ? `${esc(g.title)} ist da` : `${esc(from)} schickt dir ${giftWhat(g.kind)}`;
+  return `<div class="person gift"><div class="avatar">${esc(from[0].toUpperCase())}</div><div class="grow"><strong>${title}</strong><div class="muted">${sub}</div></div>${btns}</div>`;
+}
+function renderFriends() {
+  const f = friends; if (!f) return;
+  const n = f.requests.length + (f.invites || []).length + (gifts?.waiting || 0); const b = $('#friendsBadge'); b.hidden = !n; b.textContent = n;
+  const d = $('#friendsDlg'); if (!d.open) return;
+  const person = (p, sub, btns) => `<div class="person"><div class="avatar${p.online ? ' on' : ''}">${esc((p.name || '?')[0].toUpperCase())}</div>
+    <div class="grow"><strong>${esc(p.name)}</strong><div class="muted">${esc(sub)}</div></div>${btns}</div>`;
+  d.innerHTML = `<div class="me"><div class="avatar big">👤</div><div class="grow"><strong style="font-size:19px">${esc(f.me.name)}</strong>
+      <div class="muted">ID ${esc(f.me.id.slice(0, 6))}</div></div><button data-fr="name">Name</button></div>
+    <div class="row"><button data-fr="party" class="grow">${f.partyOpen ? 'Party: offen' : 'Party: nur Einladung'}</button></div>
+    ${(() => {
+      const inc = (gifts?.incoming || []).filter((g) => g.state !== 'done' || Date.now() - g.at < 86400000);
+      const wants = (gifts?.outgoing || []).flatMap((o) => (o.to || []).filter((t) => t.want).map((t) => ({ o, t })));
+      if (!inc.length && !wants.length) return '';
+      return '<h4>Für dich</h4>' + inc.map(giftHtml).join('') + wants.map(({ o, t }) => person({ name: t.name }, `möchte auch das Spiel: ${o.title}`,
+        `<button class="primary" data-gift="sendwanted" data-gid="${o.gid}" data-id="${esc(t.id)}">Schicken</button>`)).join('');
+    })()}
+    ${f.party ? `<h4>${f.party.pending ? 'Party – warte auf den Leiter …' : 'Party (' + f.party.members.length + ')'}</h4>` + f.party.members.map((m) => person({ ...m, online: true },
+      [m.me ? 'du' : '', m.id === f.party.leader ? 'Leiter' : ''].filter(Boolean).join(' · '), '')).join('')
+      + `<div class="row"><button data-fr="leave">${f.party.leaderMe ? 'Party auflösen' : 'Party verlassen'}</button></div>` : ''}
+    ${(f.invites || []).length ? '<h4>Party-Einladungen</h4>' + f.invites.map((i) => person(i, `lädt dich ein (${i.members} drin)`,
+      `<button class="primary" data-fr="pjoin" data-id="${esc(i.id)}" data-party="${esc(i.party)}">Beitreten</button><button data-fr="pdecline" data-id="${esc(i.id)}">✕</button>`)).join('') : ''}
+    ${f.requests.length ? '<h4>Anfragen</h4>' + f.requests.map((r) => person(r, 'möchte dein Freund sein',
+      `<button class="primary" data-fr="accept" data-id="${esc(r.id)}">Annehmen</button><button data-fr="decline" data-id="${esc(r.id)}">✕</button>`)).join('') : ''}
+    <h4>Freunde (${f.friends.length})</h4>
+    ${f.friends.length ? f.friends.map((x) => person(x, x.online ? (x.joinable ? 'online · Party offen' : x.inParty ? 'online · in einer Party' : 'online') : [x.app, x.seen ? 'zuletzt ' + ago(x.seen) : ''].filter(Boolean).join(' · '),
+      (x.joinable ? `<button class="primary" data-fr="popen" data-id="${esc(x.id)}">Beitreten</button>` : '')
+      + `<button data-fr="invite" data-id="${esc(x.id)}">Einladen</button><button data-fr="remove" data-id="${esc(x.id)}" data-name="${esc(x.name)}" title="entfernen">✕</button>`)).join('')
+      : '<div class="muted">Noch keine. Unten „Freunde hinzufügen“ – per Code oder LocalSend.</div>'}
+    ${f.nearby.length ? '<h4>In der Nähe</h4>' + f.nearby.map((n) => person(n, (n.app || 'ThorBro') + ' · gleiches Netz',
+      n.asked ? '<span class="muted">angefragt</span>' : `<button data-fr="add" data-id="${esc(n.id)}">Hinzufügen</button>`)).join('') : ''}
+    <div class="row" style="margin-top:18px"><button class="primary grow" data-fr="addDlg">Freunde hinzufügen</button><button data-fr="close">Schließen</button></div>`;
+}
+let nearbyTimer = null;
+$('#friendsBtn').onclick = () => {
+  $('#friendsDlg').showModal(); renderFriends(); friendsLoad();
+  friendsLoad('/api/friends/scan', 'POST');
+  clearInterval(nearbyTimer); nearbyTimer = setInterval(() => $('#friendsDlg').open ? friendsLoad('/api/friends/scan', 'POST') : clearInterval(nearbyTimer), 15000);
+};
+$('#friendsDlg').addEventListener('click', async (e) => {
+  const t = e.target.closest('[data-gift]'); if (!t) return;
+  const a = t.dataset.gift, gid = t.dataset.gid;
+  try {
+    if (a === 'decline' && !confirm('Geschenk ablehnen?')) return;
+    const act = { take: 'accept?' + q({ gid, how: 'take' }), backup: 'accept?' + q({ gid, how: 'backup' }), load: 'accept?' + q({ gid, how: 'load' }),
+      decline: 'decline?' + q({ gid }), ask: 'ask?' + q({ gid }), sendwanted: 'sendwanted?' + q({ gid, id: t.dataset.id }) }[a];
+    t.disabled = true;
+    const { body } = await api('/api/gifts/' + act, { method: 'POST' });
+    if (body.error) return alert(body.error);
+    if (body.id && !body.done) {
+      toast(a === 'sendwanted' ? 'Wird verschickt …' : 'Wird geladen – Fortschritt hier und oben rechts');
+      friendsLoad();
+      const timer = setInterval(() => $('#friendsDlg').open ? friendsLoad() : clearInterval(timer), 1500);
+      const j = await waitJob(body.id);
+      clearInterval(timer);
+      if (j.error) alert(j.error); else toast(j.result?.done || 'Fertig');
+    }
+  } catch (err) { alert(err.message); }
+  friendsLoad();
+});
+$('#friendsDlg').onclick = async (e) => {
+  if (e.target.closest('[data-gift]')) return;
+  const t = e.target.closest('[data-fr]'); if (!t) { if (e.target === $('#friendsDlg')) $('#friendsDlg').close(); return; }
+  const a = t.dataset.fr, id = t.dataset.id;
+  if (a === 'close') return $('#friendsDlg').close();
+  if (a === 'addDlg') return friendAddOpen();
+  if (a === 'name') { const n = prompt('Dein Name (so sehen dich deine Freunde):', friends.me.name); if (n && n.trim()) friendsLoad('/api/friends/name?' + q({ name: n.trim() }), 'POST'); return; }
+  if (a === 'party') return friendsLoad('/api/friends/party?' + q({ open: friends.partyOpen ? '0' : '1' }), 'POST');
+  const party = { leave: 'leave', invite: 'invite?' + q({ id }), pjoin: 'join?' + q({ leader: id, party: t.dataset.party }), pdecline: 'decline?' + q({ id }), popen: 'open?' + q({ id }) }[a];
+  if (party) return friendsLoad('/api/party/' + party, 'POST');
+  if (a === 'remove' && !confirm(`${t.dataset.name} als Freund entfernen?`)) return;
+  friendsLoad(`/api/friends/${a}?` + q({ id }), 'POST');
+};
+async function friendAddOpen() {
+  const d = $('#friendAdd');
+  d.innerHTML = `<h3>Freunde hinzufügen</h3>
+    <div class="sub">Code eines Freundes (Tasten oder Ziffern 1–8):</div>
+    <div class="row"><input id="frCode" class="grow" placeholder="z. B. ↓ ↓ A B X X → Y oder 22561487"><button id="frRedeem" class="primary">Hinzufügen</button></div>
+    <div id="frInfo" class="muted"></div>
+    <h4 style="margin-top:18px">Dein Code – der andere gibt ihn bei sich ein</h4>
+    <div id="frMine" class="keycode">…</div><div id="frMineSub" class="muted"></div>
+    <div class="row" style="margin-top:10px"><button id="frNew">Neuer Code</button><button id="frFile">Als Datei (LocalSend)</button>
+      <label class="btn"><input id="frImport" type="file" accept=".thorfriend" hidden>Datei importieren</label></div>
+    <div class="sub">Die Datei „Name.thorfriend“ per LocalSend o. ä. schicken. Landet sie auf dem anderen Thor im Download-Ordner, seid ihr beim nächsten Öffnen des Freunde-Menüs befreundet.</div>
+    <div class="row" style="margin-top:14px"><button id="frClose">Schließen</button></div>`;
+  d.showModal();
+  const mine = async (fresh) => { const { body } = await api('/api/friends/code' + (fresh ? '?fresh=1' : ''));
+    $('#frMine').textContent = body.code; $('#frMineSub').textContent = `als Ziffern ${body.digits} · gilt noch ${body.minutes} Min.`; };
+  mine(false);
+  $('#frNew').onclick = () => mine(true);
+  $('#frClose').onclick = () => { d.close(); friendsLoad(); };
+  $('#frFile').onclick = async () => {
+    const r = await fetch('/api/friends/file', { headers: { Authorization: 'Bearer ' + token } });
+    const name = (r.headers.get('Content-Disposition') || '').match(/filename="(.+)"/)?.[1] || 'ThorBro.thorfriend';
+    const a = document.createElement('a'); a.href = URL.createObjectURL(await r.blob()); a.download = name; a.click();
+  };
+  $('#frImport').onchange = async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const { body } = await api('/api/friends/import', { method: 'POST', body: await file.text() });
+    $('#frInfo').textContent = body.error ? body.error : 'Anfrage gesendet – sobald der andere online ist, seid ihr Freunde.'; friendsLoad();
+  };
+  $('#frRedeem').onclick = async () => {
+    const code = $('#frCode').value.trim(); if (!code) return;
+    $('#frRedeem').disabled = true; $('#frInfo').textContent = 'suche …';
+    try {
+      const { body } = await api('/api/friends/redeem?' + q({ code }), { method: 'POST' });
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 700));
+        const { body: j } = await api('/api/jobs/' + body.id);
+        if (j.done) { $('#frInfo').textContent = j.error ? j.error : `${j.result.name} ist jetzt dein Freund`; break; }
+      }
+    } catch (err) { $('#frInfo').textContent = err.message; }
+    $('#frRedeem').disabled = false; friendsLoad();
+  };
+}
+setTimeout(() => friendsLoad(), 1500);
+setInterval(() => { if (document.visibilityState === 'visible') friendsLoad(); }, 30000);
+
+// ---------- Verschicken (Gifts.kt): a save, a game or both to friends; the old nearby hand-over at the bottom ----------
+const KINDS = [['save', 'Nur Spielstand'], ['game', 'Nur Spiel'], ['both', 'Spiel + Spielstand']];
+async function openSend(path, sys, kind, title) {
+  const d = $('#sendDlg');
+  let what = kind, picked = new Set(), routes = null, busy = false, msg = '';
+  const kinds = sys === 'ports' ? KINDS.slice(0, 1) : KINDS;
+  const render = () => {
+    const fr = routes?.friends || [];
+    const names = fr.filter((f) => picked.has(f.id)).map((f) => f.name);
+    d.innerHTML = `<div class="muted">Verschicken</div><h3 style="margin:2px 0 10px">${esc(title || '')}</h3>
+      <div class="row">${kinds.map(([k, l]) => `<button class="${k === what ? 'primary' : ''}" data-sk="${k}">${l}</button>`).join('')}</div>
+      <h4>An wen</h4>
+      ${!routes ? '<div class="muted">Schaue, wer wie erreichbar ist …</div>' : routes.error ? `<div class="bad">${esc(routes.error)}</div>`
+        : !fr.length ? '<div class="muted">Noch keine Freunde – oben rechts im Freunde-Menü hinzufügen.</div>'
+        : fr.map((f) => `<label class="person${picked.has(f.id) ? ' on' : ''}"><input type="checkbox" data-sf="${esc(f.id)}" ${picked.has(f.id) ? 'checked' : ''}>
+          <div class="avatar${f.online ? ' on' : ''}">${esc(f.name[0].toUpperCase())}</div>
+          <div class="grow"><strong>${esc(f.name)}</strong><div class="muted">${f.near ? 'online · im selben Netz' : f.online ? 'online' : 'zuletzt ' + ago(f.seen)}</div></div>
+          <span class="cmpchip">${esc(f.label)}</span></label>`).join('')}
+      ${what === 'game' ? `<div class="person"><div class="grow"><strong>Thor in der Nähe (ohne Freundschaft)</strong><div class="muted">wie bisher: Wi-Fi Direct oder WLAN + PIN</div></div><button data-snear>Anbieten</button></div>` : ''}
+      ${msg ? `<div class="sub">${esc(msg)}</div>` : ''}
+      <div class="row" style="margin-top:14px"><button class="primary grow" data-sgo ${names.length && !busy ? '' : 'disabled'}>${busy ? 'Wird verschickt …' : !names.length ? 'Freunde auswählen'
+        : `An ${names.length <= 2 ? names.join(' & ') : names.length + ' Freunde'} schicken${routes?.size ? ' · ' + fmt(routes.size) : ''}`}</button><button data-sclose>Schließen</button></div>`;
+  };
+  const load = async () => { routes = null; render(); try { routes = (await api('/api/gifts/routes?' + q({ system: sys, path, kind: what }))).body; } catch (e) { routes = { error: e.message }; } render(); };
+  d.onclick = async (e) => {
+    const t = e.target;
+    if (t === d || t.dataset.sclose !== undefined) return d.close();
+    if (t.dataset.sk) { what = t.dataset.sk; return load(); }
+    if (t.dataset.sf) { t.checked ? picked.add(t.dataset.sf) : picked.delete(t.dataset.sf); return render(); }
+    if (t.dataset.snear !== undefined) {
+      try {
+        const { body } = await api('/api/netplay/host?' + q({ system: sys, path, share: '1' }), { method: 'POST' });
+        msg = body.error || (body.direct ? 'Wird angeboten – der Thor in der Nähe bekommt eine Einladung' : `Wird angeboten · PIN ${body.pin}`);
+      } catch (err) { msg = err.message; }
+      return render();
+    }
+    if (t.dataset.sgo !== undefined) {
+      busy = true; msg = 'Bereite vor …'; render();
+      try {
+        const { body } = await api('/api/gifts/send?' + q({ system: sys, path, kind: what, to: [...picked].join(',') }), { method: 'POST' });
+        if (body.error) throw new Error(body.error);
+        const j = await waitJob(body.id, (b) => { if (!b.done) { msg = (b.message || 'Bereite vor') + (b.progress ? ` · ${Math.floor(b.progress * 100)} %` : ''); render(); } });
+        if (j.error) throw new Error(j.error);
+        toast(j.result?.done || 'Verschickt'); d.close(); return;
+      } catch (err) { msg = err.message; }
+      busy = false; render();
+    }
+  };
+  d.showModal(); load();
+}

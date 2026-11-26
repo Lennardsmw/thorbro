@@ -143,8 +143,8 @@ object Direct {
         val txt = mapOf(
             "n" to Me.name(ctx), "i" to Me.id(ctx),
             "s" to g.optString("ssid"), "p" to g.optString("pass"),
-            "g" to (l?.public()?.optString("game")?.take(40) ?: if (Netplay.serverOn) "Spielserver" else ""),
-            "m" to (l?.mode ?: if (Netplay.serverOn) "server" else ""), "k" to (l?.pin ?: ""),
+            "g" to (l?.public()?.optString("game")?.take(40) ?: ""),
+            "m" to (l?.mode ?: ""), "k" to (l?.pin ?: ""),
         )
         call { cb -> m.clearLocalServices(c, cb) }
         call { cb -> m.addLocalService(c, WifiP2pDnsSdServiceInfo.newInstance("ThorBro", SERVICE, txt), cb) }

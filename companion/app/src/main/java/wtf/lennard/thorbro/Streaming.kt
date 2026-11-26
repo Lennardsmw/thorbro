@@ -105,6 +105,89 @@ object Streaming {
         })
     }
 
+    // ---- scrcpy: Thor screen on the Mac, through wireless debugging ----
+    // adbd is never restarted (no `adb tcpip`): Shizuku runs on the same adbd and would die with it.
+    // The Mac pairs once (adb pair, code from the Thor's pairing dialog), then connects to the TLS port.
+
+    /** wireless debugging state and the command for the Mac */
+    fun scrcpy(ctx: Context): JSONObject {
+        val wifi = runCatching { android.provider.Settings.Global.getInt(ctx.contentResolver, "adb_wifi_enabled") == 1 }.getOrDefault(false)
+        val port = prop("service.adb.tls.port")?.toIntOrNull()?.takeIf { it > 0 }
+        val ip = wtf.lennard.thorbro.ui.ipv4().first
+        val out = JSONObject().put("shell", Shell.state()).put("wifi", wifi).put("ip", ip).put("port", port)
+            .put("usb", usbAdb(ctx)).put("usbCommand", "scrcpy -d")
+        if (wifi && port != null && ip != null) {
+            out.put("address", "$ip:$port")
+            out.put("command", "scrcpy --tcpip=$ip:$port")
+        }
+        return out
+    }
+
+    /**
+     * a computer is on the cable with USB debugging (sticky USB_STATE broadcast). Rule for every
+     * Thor ↔ Mac path: a cable beats the air – RomBro uses USB then and falls back to Wi-Fi when it goes.
+     */
+    fun usbAdb(ctx: Context): Boolean {
+        val i = ctx.registerReceiver(null, android.content.IntentFilter("android.hardware.usb.action.USB_STATE")) ?: return false
+        return i.getBooleanExtra("connected", false) && i.getBooleanExtra("adb", false)
+    }
+
+    /** switches wireless debugging on (via Shizuku); the port appears a moment later */
+    fun scrcpyWifi(ctx: Context): JSONObject {
+        if (!Shell.run("settings", "put", "global", "adb_wifi_enabled", "1"))
+            throw IllegalStateException("Shizuku nicht bereit – Kabelloses Debugging in den Entwickleroptionen einschalten")
+        repeat(20) { if (prop("service.adb.tls.port")?.toIntOrNull()?.let { it > 0 } == true) return scrcpy(ctx); Thread.sleep(250) }
+        return scrcpy(ctx)
+    }
+
+    /** opens the developer options at "Wireless debugging", where "Pair device with pairing code" lives */
+    fun scrcpyPairing(ctx: Context) {
+        ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+            .putExtra(":settings:fragment_args_key", "toggle_adb_wireless")
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    // Wi-Fi power saving makes the stream come in bursts (ping 7–160 ms): hold HIGH_PERF (works with the
+    // game in front) plus LOW_LATENCY while someone mirrors. Released when the keep-alive stops for 90 s.
+    private val locks = mutableListOf<android.net.wifi.WifiManager.WifiLock>()
+    @Volatile private var lastPing = 0L
+
+    @Synchronized fun lowLatency(ctx: Context, on: Boolean): Boolean {
+        if (!on) { releaseLocks(); return false }
+        lastPing = System.currentTimeMillis()
+        if (locks.isEmpty()) {
+            val wm = ctx.applicationContext.getSystemService(android.net.wifi.WifiManager::class.java)
+            @Suppress("DEPRECATION")
+            listOf(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, android.net.wifi.WifiManager.WIFI_MODE_FULL_LOW_LATENCY).forEach { mode ->
+                runCatching { wm.createWifiLock(mode, "thorbro:mirror").apply { setReferenceCounted(false); acquire() } }.getOrNull()?.let { locks += it }
+            }
+            Logs.i("stream", "WLAN ohne Stromsparen (Spiegeln)")
+            Thread {
+                while (true) {
+                    Thread.sleep(15_000)
+                    synchronized(this) {
+                        if (locks.isEmpty()) return@Thread
+                        if (System.currentTimeMillis() - lastPing > 90_000) { releaseLocks(); return@Thread }
+                    }
+                }
+            }.apply { isDaemon = true }.start()
+        }
+        return locks.isNotEmpty()
+    }
+
+    @Synchronized private fun releaseLocks() {
+        if (locks.isEmpty()) return
+        locks.forEach { runCatching { if (it.isHeld) it.release() } }
+        locks.clear()
+        Logs.i("stream", "WLAN-Stromsparen wieder an")
+    }
+
+    /** a system property: through Shizuku if it runs, else plain getprop (may be hidden by SELinux) */
+    private fun prop(name: String): String? =
+        (Shell.out("getprop", name) ?: runCatching {
+            Runtime.getRuntime().exec(arrayOf("getprop", name)).inputStream.bufferedReader().use { it.readText() }
+        }.getOrNull())?.trim()?.takeIf { it.isNotEmpty() }
+
     private fun open(url: String) = (URL(url).openConnection() as HttpURLConnection).apply {
         connectTimeout = 10_000; readTimeout = 60_000; instanceFollowRedirects = true
         setRequestProperty("User-Agent", "ThorBro")

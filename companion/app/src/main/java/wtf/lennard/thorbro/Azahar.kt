@@ -22,7 +22,10 @@ import java.security.MessageDigest
  */
 object Azahar {
     const val PKG = "org.azahar_emu.azahar"
+    /** where Azahar always joins: 127.0.0.1:[PORT] is ThorBro's relay ([Relay]) to the room in use */
     const val PORT = 24872
+    /** where the rooms themselves listen (every Thor/Mac runs one all the time, [Room]) */
+    const val ROOM_PORT = 24873
     private const val USERNAME = 0x000A0000
     private const val CONSOLE_ID1 = 0x00090000
     private const val CONSOLE_ID2 = 0x00090001
@@ -130,11 +133,12 @@ object Azahar {
             ?: runCatching { File("/proc/net/udp").readText() + File("/proc/net/udp6").readText() }.getOrNull()
             ?: return "unknown"
         val hexPort = "%04X".format(PORT)
+        val hexRoom = "%04X".format(ROOM_PORT)
         var connected = false
         text.lineSequence().drop(1).forEach { line ->
             val cols = line.trim().split(Regex("\\s+"))
             if (cols.size < 3) return@forEach
-            if (cols[1].endsWith(":$hexPort")) return "hosting"
+            if (cols[1].endsWith(":$hexRoom") && cols[2].endsWith(":0000")) return "hosting"
             if (cols[2].endsWith(":$hexPort")) connected = true
         }
         if (text.isBlank()) return "unknown"

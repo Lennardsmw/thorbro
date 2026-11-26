@@ -50,6 +50,8 @@ fun StreamScreen() {
     var searching by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(tick) { st = withContext(Dispatchers.IO) { runCatching { Streaming.status(ctx) }.getOrNull() } }
+    var sc by remember { mutableStateOf<JSONObject?>(null) }
+    LaunchedEffect(tick) { sc = withContext(Dispatchers.IO) { runCatching { Streaming.scrcpy(ctx) }.getOrNull() } }
     // the stream state lives in the service; follow it so only one button shows
     var live by remember { mutableStateOf(wtf.lennard.thorbro.Screen.running) }
     var starting by remember { mutableStateOf(wtf.lennard.thorbro.Screen.starting) }
@@ -99,6 +101,16 @@ fun StreamScreen() {
                 menu = "screen"
             }
         }
+        item {
+            val c = sc
+            ConsoleTile("scrcpy am Mac", when {
+                c == null -> "…"
+                c.optBoolean("usb") -> "USB-Kabel"
+                c.has("address") -> c.optString("address")
+                c.optBoolean("wifi") -> "Port in Kabellosem Debugging"
+                else -> "WLAN-Debugging aus"
+            }, Icons.Filled.Computer) { menu = "scrcpy"; tick++ }
+        }
     }
 
     when (val m = menu) {
@@ -107,6 +119,25 @@ fun StreamScreen() {
             val ip = ipv4().first ?: "<Thor-IP>"
             ConsoleMenu("Am PC im Browser öffnen", "http://$ip:${wtf.lennard.thorbro.ThorService.PORT}\nCode: ${wtf.lennard.thorbro.Prefs.token(ctx)}\n→ Bildschirm",
                 mono = true, options = emptyList()) { menu = null; tick++ }
+        }
+        "scrcpy" -> {
+            val c = sc
+            val ip = c?.optString("ip")?.takeIf { it.isNotEmpty() } ?: "<Thor-IP>"
+            val wifi = c?.optBoolean("wifi") == true
+            val cmd = c?.optString("command")?.takeIf { it.isNotEmpty() } ?: "scrcpy --tcpip=$ip:<Port>"
+            ConsoleMenu("Thor am Mac (scrcpy)",
+                if (c?.optBoolean("usb") == true) "USB-Kabel steckt – geht ohne WLAN:\nscrcpy -d\n(RomBro nimmt USB von selbst; Kabel ab → weiter über WLAN)"
+                else "Mac: brew install scrcpy\nEinmal koppeln: adb pair $ip:<Kopplungsport> <Code>\nDann: $cmd\nMit USB-Kabel: scrcpy -d (RomBro wechselt von selbst)",
+                mono = true,
+                options = buildList {
+                    if (!wifi) add("WLAN-Debugging einschalten" to {
+                        scope.launch {
+                            sc = withContext(Dispatchers.IO) { runCatching { Streaming.scrcpyWifi(ctx) }.getOrElse { e -> JSONObject().put("error", e.message) } }
+                            sc?.optString("error")?.takeIf { it.isNotEmpty() }?.let { android.widget.Toast.makeText(ctx, it, android.widget.Toast.LENGTH_LONG).show() }
+                        }
+                    })
+                    add("Koppeln (Kopplungscode)" to { Streaming.scrcpyPairing(ctx); menu = null })
+                }) { menu = null; tick++ }
         }
         else -> {
             val h = JSONObject(m.removePrefix("host:"))

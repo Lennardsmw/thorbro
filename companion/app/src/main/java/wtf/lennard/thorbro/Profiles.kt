@@ -140,6 +140,7 @@ object Profiles {
         if (cur == id) return JSONObject().put("ok", true).put("profile", p.name).put("switched", false)
         runCatching { Saves.backup(ctx, null, label = "vor-profilwechsel") }
         val items = items(ctx, romPath)
+        runCatching { GameSave.backup(ctx, romPath, GameSave.Reason.PROFILE, items) }
         try {
             pack(ctx, stash(ctx, cur, romPath), romPath, items)
         } catch (e: Exception) {
@@ -173,7 +174,7 @@ object Profiles {
     }
 
     /** zip: "manifest.json" = [{i, path, folder}], files as "<i>" or "<i>/<relative path>" */
-    private fun pack(ctx: Context, zip: File, romPath: String, items: List<RommSync.SaveItem>) {
+    internal fun pack(ctx: Context, zip: File, romPath: String, items: List<RommSync.SaveItem>) {
         if (items.isEmpty()) { zip.delete(); return }
         zip.parentFile?.mkdirs()
         val tmp = File(zip.path + ".tmp")
@@ -193,7 +194,7 @@ object Profiles {
     }
 
     /** writes a stash back to the paths it came from; returns the number of files */
-    private fun unpack(zip: File): Int {
+    internal fun unpack(zip: File): Int {
         if (!zip.isFile) return 0
         val items = ZipInputStream(zip.inputStream().buffered()).use { z ->
             var e = z.nextEntry
