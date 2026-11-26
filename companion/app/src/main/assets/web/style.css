@@ -325,3 +325,14 @@ html[data-theme="doodle"] nav button.active { background: var(--text); color: #1
 /* small secondary buttons; driver names wrap instead of being cut */
 button.small { padding: 4px 12px; font-size: 13px; border-radius: 999px; }
 #drivers table.files td:first-child { word-break: break-word; overflow-wrap: anywhere; }
+
+/* transfers: the bar at the bottom while something moves, the "Später" button on store cards */
+.transferbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; background: var(--panel); border-top: 1px solid var(--line); padding: 8px 16px; display: flex; align-items: center; gap: 14px; font-size: 13px; }
+.transferbar span { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.transferbar .bar { width: 160px; flex: none; }
+body:has(.transferbar:not([hidden])) main { padding-bottom: 48px; }
+.romcard .later { position: absolute; top: 12px; right: 12px; z-index: 2; opacity: 0; }
+.romcard:hover .later, .romcard:focus-within .later { opacity: 1; }
+/* console badges and avatars: light disc, the robots have dark outlines */
+.fart .cbadge { background: rgba(239, 231, 210, .95); }
+.avatar { background: #EFE7D2; }

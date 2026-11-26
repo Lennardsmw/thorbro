@@ -781,7 +781,7 @@ function openRom(path, sysId) {
           ${lib?.connected && sysId !== 'ports' && sysId !== '_unassigned' ? `<button data-offload="${esc(JSON.stringify(r.group ? r.group.all.map((x) => x.path) : [r.path]))}" data-offload-size="${r.group ? r.group.size : r.size}" data-offload-in="${lib.games?.[r.path]?.inRomm ? 1 : 0}" data-offload-name="${esc(m.title || r.name.replace(/\s*[([].*$/, ''))}">${lib.games?.[r.path]?.inRomm ? 'In RomM auslagern' : 'Hochladen + auslagern'}</button>` : ''}
           ${lib?.connected && sysId !== 'ports' && sysId !== '_unassigned' && lib.games?.[r.path] && !lib.games[r.path].inRomm
             ? (lib.games[r.path].uploaded ? '<button disabled title="RomM zeigt es nach dem nächsten Scan">✓ In RomM hochgeladen</button>'
-              : `<button data-romm-up="${esc(JSON.stringify(r.group ? r.group.all.map((x) => x.path) : [r.path]))}">☁ Zu RomM hochladen</button>`) : ''}
+              : `<button data-romm-up="${esc(JSON.stringify(r.group ? r.group.all.map((x) => x.path) : [r.path]))}" data-name="${esc(romTitle(r, m))}" data-sys="${esc(sysId)}">☁ Zu RomM hochladen</button>`) : ''}
           <span class="grow"></span>
           <button data-close>Schließen</button>
         </div>
@@ -916,25 +916,55 @@ $('#romDetail').addEventListener('click', async (e) => {
   } catch (err) { alert(err.message); }
 });
 
-// one game to RomM without deleting it; progress on the button, the bubble top right shows it too
+// one game to RomM without deleting it: goes on the transfer queue (one after another, survives a restart); progress in the bar at the bottom
 $('#romDetail').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-romm-up]');
   if (!b) return;
   const paths = JSON.parse(b.dataset.rommUp);
-  b.disabled = true; b.textContent = 'Verbinde …';
+  b.disabled = true;
   try {
-    const { body: job } = await api('/api/romm/upload?' + paths.map((p) => 'path=' + encodeURIComponent(p)).join('&'), { method: 'POST' });
-    if (job.error && !job.id) throw new Error(job.error);
-    if (job.name !== 'Zu RomM hochladen') { b.textContent = 'RomM-Abgleich läuft schon'; toast('Ein RomM-Abgleich läuft schon – Fortschritt oben rechts'); return; }
-    pollActivity();
-    const res = await waitJob(job.id, (j) => { b.textContent = `Lädt hoch … ${Math.round(j.progress * 100)} %`; b.title = [j.message, j.transfer].filter(Boolean).join(' · '); });
-    const err = res.error || res.result?.errors?.[0];
-    if (err) { b.disabled = false; b.textContent = '☁ Zu RomM hochladen'; alert('Upload fehlgeschlagen: ' + err); return; }
-    b.textContent = '✓ In RomM hochgeladen'; b.title = 'RomM zeigt es nach dem nächsten Scan';
-    const g = lib?.games?.[paths[0]]; if (g) g.uploaded = true;
-    toast('In RomM hochgeladen');
-  } catch (err) { b.disabled = false; b.textContent = '☁ Zu RomM hochladen'; alert(err.message); }
+    const { body } = await api('/api/romm/upload?' + paths.map((p) => 'path=' + encodeURIComponent(p)).join('&') + '&' + q({ name: b.dataset.name || '', system: b.dataset.sys || '' }), { method: 'POST' });
+    if (body.error && !body.id) throw new Error(body.error);
+    b.textContent = '⬆ In der Warteschlange';
+    toast('Zu RomM: in der Warteschlange – Fortschritt unten');
+    pollTransfers();
+  } catch (err) { b.disabled = false; alert(err.message); }
 });
+
+// ---------- transfers: the queue for store downloads and RomM uploads ----------
+let transfers = { items: [], line: null };
+let trTimer = null;
+async function pollTransfers() {
+  clearTimeout(trTimer);
+  try { transfers = (await api('/api/transfers')).body; } catch { return; }
+  // the bar at the bottom: what runs, how far, how long still
+  const bar = $('#transferBar'), l = transfers.line;
+  bar.hidden = !l;
+  if (l) { bar.querySelector('span').textContent = l.text; bar.querySelector('i').style.width = Math.round(l.progress * 100) + '%'; }
+  if (!$('#store').hidden) { renderTransfers(); updateStoreCards(); }
+  if (!document.hidden) trTimer = setTimeout(pollTransfers, l ? 1000 : 5000);
+}
+const trState = { running: 'läuft', waiting: 'wartet', later: 'für später', error: 'Fehler' };
+function renderTransfers() {
+  const list = transfers.items || [];
+  $('#trCount').textContent = list.length ? `· ${list.length}` : '';
+  $('#trList').innerHTML = list.length ? `<table class="files"><tbody>${list.map((t) => `<tr>
+    <td>${t.kind === 'upload' ? '⬆ RomM · ' : '⬇ '}${esc(displayTitle(t.name))}<div class="muted">${t.state === 'running'
+      ? `${Math.round((t.progress || 0) * 100)} %${t.transfer ? ' · ' + esc(t.transfer) : ''}` : t.state === 'error' ? '<span class="err">' + esc(t.error) + '</span>' : trState[t.state]}</div>
+      ${t.state === 'running' ? `<div class="bar"><i style="width:${Math.round((t.progress || 0) * 100)}%"></i></div>` : ''}</td>
+    <td class="size">${fmt(t.size || 0)}</td>
+    <td class="acts">${t.state === 'later' || t.state === 'error' ? `<button class="small" data-tr-start="${esc(t.id)}">Jetzt starten</button>` : ''}
+      ${t.state !== 'running' ? `<button class="small" data-tr-remove="${esc(t.id)}">Entfernen</button>` : ''}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="muted">Nichts in der Warteschlange. Im Store „Laden“ oder „Später“ wählen.</p>';
+}
+$('#trList').addEventListener('click', async (e) => {
+  const s = e.target.closest('[data-tr-start]'), r = e.target.closest('[data-tr-remove]');
+  if (s) await api('/api/transfers/start?' + q({ id: s.dataset.trStart }), { method: 'POST' });
+  else if (r) await api('/api/transfers/remove?' + q({ id: r.dataset.trRemove }), { method: 'POST' });
+  else return;
+  pollTransfers();
+});
+$('#trStartAll').onclick = async () => { await api('/api/transfers/start', { method: 'POST' }); pollTransfers(); };
 
 // ---------- store: games only in RomM ----------
 let storeData = null;
@@ -957,39 +987,40 @@ function renderStore() {
     const games = s.games.filter((g) => !f || g.name.toLowerCase().includes(f));
     if (!games.length) return '';
     return `<div class="romhead">${sysIcon(s.system, 'headicon')}<h2>${esc(s.name)}</h2><span class="muted">${games.length}</span></div>
-      <div class="shelf">${games.map((g) => `<div class="romcard" tabindex="0" data-store="${g.id}" title="Laden · ${fmt(g.size)}">
+      <div class="shelf">${games.map((g) => `<div class="romcard" tabindex="0" data-store="${g.id}" data-name="${esc(g.name)}" data-size="${g.size}" data-sys="${esc(s.system)}" title="Laden · ${fmt(g.size)}">
+        <button class="small later" data-later="${g.id}" title="Für später merken">Später</button>
         ${g.hasCover ? `<img class="cover" loading="lazy" alt="" src="/api/romm/cover/${g.id}?token=${encodeURIComponent(token)}">` : `<div class="cover nocover">${sysIcon(s.system, 'bigicon')}<span>${esc(displayTitle(g.name))}</span></div>`}
         <div class="rtitle">${esc(displayTitle(g.name))}</div>
         <div class="rmeta" id="st-${g.id}">Laden · ${fmt(g.size)}</div>
         <div class="bar"><i id="sb-${g.id}" style="width:0"></i></div>
       </div>`).join('')}</div>`;
   }).join('');
-  pollStore();
+  updateStoreCards();
+  pollTransfers();
 }
-let storePoll = null;
-async function pollStore() {
-  clearTimeout(storePoll);
-  let busy = false;
-  try {
-    const { body } = await api('/api/store/downloads');
-    for (const [id, j] of Object.entries(body)) {
-      const t = $('#st-' + id), bar = $('#sb-' + id);
-      if (!t) continue;
-      if (j.error) t.textContent = 'Fehler: ' + j.error;
-      else if (j.done) { t.textContent = '✓ auf dem Thor'; bar.style.width = '100%'; }
-      else { busy = true; t.textContent = `${Math.round(j.progress * 100)} %`; bar.style.width = (j.progress * 100) + '%'; }
-    }
-  } catch {}
-  if (busy && !$('#store').hidden) storePoll = setTimeout(pollStore, 1000);
+/** each card shows what the queue does with it: wartet, 45 % · noch 2 min, für später */
+function updateStoreCards() {
+  for (const t of transfers.items || []) {
+    if (t.kind !== 'download') continue;
+    const id = String(t.romId), m = $('#st-' + id), bar = $('#sb-' + id);
+    if (!m) continue;
+    const eta = (t.transfer || '').includes('noch ') ? ' · noch ' + t.transfer.split('noch ').pop() : '';
+    m.textContent = t.state === 'running' ? `${Math.round((t.progress || 0) * 100)} %${eta}` : t.state === 'error' ? 'Fehler: ' + t.error : trState[t.state];
+    bar.style.width = t.state === 'running' ? Math.round((t.progress || 0) * 100) + '%' : '0';
+  }
 }
 $('#storeList').addEventListener('click', async (e) => {
   const c = e.target.closest('[data-store]');
   if (!c) return;
-  const id = c.dataset.store;
-  const t = $('#st-' + id);
-  if (t.textContent.includes('%') || t.textContent.startsWith('✓')) return;
-  try { await api('/api/store/download?' + q({ id }), { method: 'POST' }); t.textContent = '0 %'; pollStore(); }
-  catch (err) { alert(err.message); }
+  const later = !!e.target.closest('[data-later]');
+  const t = $('#st-' + c.dataset.store);
+  if (!later && /%|wartet|✓/.test(t.textContent)) return;
+  try {
+    await api('/api/store/download?' + q({ id: c.dataset.store, name: c.dataset.name, size: c.dataset.size, system: c.dataset.sys, later: later ? 1 : 0 }), { method: 'POST' });
+    t.textContent = later ? 'für später' : 'wartet';
+    toast(later ? 'Für später gemerkt – Store › Downloads' : 'In der Warteschlange');
+    pollTransfers();
+  } catch (err) { alert(err.message); }
 });
 $('#storeFilter').oninput = renderStore;
 $('#storeReload').onclick = () => loadStore(true);
@@ -1658,7 +1689,7 @@ function updMood() {
 async function start() {
   if (!token) return showLogin();
   loadTheme();
-  pollActivity();
+  pollActivity(); pollTransfers();
   try { await loadDevice(); showTab(store.get('tab', 'upload')); if (!romData) loadRoms(false); }
   catch (err) { if (!(err instanceof AuthError)) $('#conn').textContent = 'Thor nicht erreichbar'; }
 }
