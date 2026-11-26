@@ -57,6 +57,24 @@ object Shell {
         }.getOrNull()
     }
 
+    class Result(val code: Int, val out: String, val err: String)
+
+    /** runs [cmd] and returns exit code, stdout and stderr; null when Shizuku is not ready */
+    fun exec2(vararg cmd: String): Result? {
+        if (!ready()) return null
+        return runCatching {
+            val m = Shizuku::class.java.getDeclaredMethod("newProcess", Array<String>::class.java, Array<String>::class.java, String::class.java)
+            m.isAccessible = true
+            val p = m.invoke(null, arrayOf(*cmd), null, null) as Process
+            p.outputStream.close()
+            var err = ""
+            val t = Thread { err = p.errorStream.bufferedReader().use { it.readText() } }.apply { start() }
+            val out = p.inputStream.bufferedReader().use { it.readText() }
+            t.join()
+            Result(p.waitFor(), out, err.trim())
+        }.getOrNull()
+    }
+
     /** single-quotes a path for sh -c */
     fun q(s: String) = "'" + s.replace("'", "'\\''") + "'"
 }

@@ -943,6 +943,68 @@ object Server {
                     if (ok) json(JSONObject().put("ok", true)) else fail("delete failed")
                 }
 
+                // ---- files ThorBro itself can't touch (Android/data, Android/obb) via the Shizuku shell ----
+                // Same path rules as /api/files (internal storage or SD card); the shell does the work.
+                // GET  /api/shell/files?path=           -> {path, exists, dir, size, entries:[{name,dir,size,mtime}]}
+                // POST /api/shell/copy?from=&to=&backup=1&move=1
+                //      copies from -> to (target dirs are created). backup=1 first keeps the old target as <to>.orig
+                //      (an existing .orig is never overwritten, so it stays the real original). move=1 deletes from afterwards.
+                //      Typical use: /api/upload into Download/…, then copy into Android/data/<pkg>/…
+                get("/api/shell/files") {
+                    if (denied(ctx)) return@get
+                    if (!Shell.ready()) return@get fail("Shizuku nicht bereit (${Shell.state()})", HttpStatusCode.ServiceUnavailable)
+                    val p = Storage.resolve(q("path"))?.path ?: return@get fail("path not allowed")
+                    val out = withContext(Dispatchers.IO) {
+                        Shell.out("sh", "-c", "if [ -d ${Shell.q(p)} ]; then echo D; cd ${Shell.q(p)} && stat -c '%F|%s|%Y|%n' -- * .[!.]* 2>/dev/null; " +
+                            "elif [ -e ${Shell.q(p)} ]; then echo F; stat -c '%F|%s|%Y|%n' -- ${Shell.q(p)}; else echo N; fi; true")
+                    } ?: return@get fail("shell failed", HttpStatusCode.InternalServerError)
+                    val lines = out.lines().filter { it.isNotBlank() }
+                    val rows = lines.drop(1).mapNotNull { l ->
+                        val parts = l.split('|', limit = 4)
+                        if (parts.size < 4) null else JSONObject()
+                            .put("name", parts[3].substringAfterLast('/'))
+                            .put("dir", parts[0] == "directory")
+                            .put("size", parts[1].toLongOrNull() ?: 0L)
+                            .put("mtime", (parts[2].toLongOrNull() ?: 0L) * 1000)
+                    }
+                    val kind = lines.firstOrNull()
+                    val j = JSONObject().put("path", p).put("exists", kind != "N").put("dir", kind == "D")
+                    if (kind == "F") j.put("size", rows.firstOrNull()?.optLong("size") ?: 0L)
+                    if (kind == "D") j.put("entries", JSONArray(rows.sortedWith(compareBy({ !it.getBoolean("dir") }, { it.getString("name").lowercase() }))))
+                    json(j)
+                }
+                post("/api/shell/copy") {
+                    if (denied(ctx)) return@post
+                    if (!Shell.ready()) return@post fail("Shizuku nicht bereit (${Shell.state()})", HttpStatusCode.ServiceUnavailable)
+                    val from = Storage.resolve(q("from"))?.path ?: return@post fail("from not allowed")
+                    val to = Storage.resolve(q("to"))?.path ?: return@post fail("to not allowed")
+                    if (from == to) return@post fail("from and to are the same")
+                    val backup = q("backup") == "1"
+                    val f = Shell.q(from); val t = Shell.q(to); val orig = Shell.q("$to.orig")
+                    val dir = Shell.q(to.substringBeforeLast('/'))
+                    // cat > target keeps an existing file's owner (the game's uid in Android/data)
+                    val script = "[ -f $f ] || { echo 'from: no such file' >&2; exit 2; }; [ -d $t ] && { echo 'to is a folder' >&2; exit 2; }; " +
+                        "mkdir -p $dir || exit 3; " +
+                        (if (backup) "if [ -f $t ] && [ ! -e $orig ]; then cp -p $t $orig || exit 4; echo B; fi; " else "") +
+                        "cat $f > $t || exit 5; stat -c '%s' $t; stat -c '%s' $f" + (if (backup) "; [ -f $orig ] && stat -c 'O%s' $orig" else "") + "; true"
+                    val res = withContext(Dispatchers.IO) { Shell.exec2("sh", "-c", script) }
+                        ?: return@post fail("shell failed", HttpStatusCode.InternalServerError)
+                    if (res.code != 0) return@post fail("copy failed (${res.code}): ${res.err.ifBlank { "?" }}", HttpStatusCode.InternalServerError)
+                    val lines = res.out.lines().filter { it.isNotBlank() }
+                    val backedUp = lines.firstOrNull() == "B"
+                    val nums = lines.filter { it.all(Char::isDigit) }.map { it.toLong() }
+                    val size = nums.getOrNull(0) ?: -1L
+                    val srcSize = nums.getOrNull(1) ?: -1L
+                    if (size != srcSize) return@post fail("size mismatch after copy ($size vs $srcSize)", HttpStatusCode.InternalServerError)
+                    val j = JSONObject().put("ok", true).put("path", to).put("size", size).put("backedUp", backedUp)
+                    lines.firstOrNull { it.startsWith("O") }?.let { j.put("orig", "$to.orig").put("origSize", it.drop(1).toLongOrNull() ?: 0L) }
+                    if (q("move") == "1") {
+                        val moved = withContext(Dispatchers.IO) { File(from).delete() || Shell.run("rm", "-f", from) }
+                        j.put("moved", moved)
+                    }
+                    json(j)
+                }
+
                 // ---- resumable upload ----
                 // 1. GET  /api/upload?path=&size=      -> {offset, exists, free}
                 // 2. PUT  /api/upload?path=&offset=N   raw bytes, appended; 409 + {offset} if N is wrong

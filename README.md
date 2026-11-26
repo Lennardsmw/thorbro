@@ -53,6 +53,8 @@ Alles unter `/api` außer `/api/ping` braucht `Authorization: Bearer <code>` (od
 | GET | `/api/upload?path=&size=` | Stand eines Uploads: `{offset, exists, free}` |
 | PUT | `/api/upload?path=&offset=` | Rohdaten anhängen; 409 + `{offset}` bei falschem Offset |
 | POST | `/api/upload/finish?path=&size=&overwrite=` | `.thorbro-part` umbenennen |
+| GET | `/api/shell/files?path=` | Wie `/api/files`, aber über Shizuku – auch `Android/data`, `Android/obb` |
+| POST | `/api/shell/copy?from=&to=&backup=1&move=1` | Kopiert per Shizuku (z. B. Upload → `Android/data/<pkg>/…`); `backup=1` sichert das Ziel einmalig als `<datei>.orig`, `move=1` löscht die Quelle danach |
 | POST | `/api/install?path=` · GET `/api/install/{id}` | APK installieren (Bestätigung auf dem Thor) |
 
 Pfade sind auf den internen Speicher und SD-Karten beschränkt.
