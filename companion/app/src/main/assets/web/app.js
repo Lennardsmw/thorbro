@@ -1492,6 +1492,15 @@ $('#mlScan').onclick = async () => {
 // ---------- multiplayer (the party plays together) ----------
 let np = null;
 const npModes = { retroarch: 'RetroArch', ppsspp: 'PPSSPP', eden: 'Eden', azahar: 'Azahar', share: 'Weitergeben' };
+// ---------- avatars: a console robot per person (same pick as the Thor app: Java hashCode of the name) ----------
+const AVATAR_CONSOLES = ['snes', 'n64', 'gba', 'psx', 'megadrive', 'gc', 'nes', 'ps2', 'dreamcast', 'switch', 'nds', 'psp',
+  'gb', 'saturn', 'wii', 'xbox', 'n3ds', 'gbc', 'pcengine', 'wonderswan'];
+const avatarConsole = (name) => {
+  let h = 0; for (const c of String(name || '').trim().toLowerCase()) h = (Math.imul(31, h) + c.charCodeAt(0)) | 0;
+  return AVATAR_CONSOLES[((h % AVATAR_CONSOLES.length) + AVATAR_CONSOLES.length) % AVATAR_CONSOLES.length];
+};
+const avatar = (name, cls = '') => `<div class="avatar ${cls}"><img alt="" src="${iconUrl(avatarConsole(name))}"></div>`;
+
 async function loadNetplay() {
   try { np = (await api('/api/netplay')).body; } catch (err) { $('#npStatus').textContent = 'Fehler: ' + err.message; return; }
   const p = np.party, n = np.partyNet || {}, l = np.lobby;
@@ -1501,12 +1510,17 @@ async function loadNetplay() {
     : n.connected ? `In der Party von ${n.leader} · verbunden ✓`
     : n.following ? `In der Party von ${n.leader} · verbinde …` : 'In einer Party · warte auf den Leiter';
   $('#npClose').hidden = !l;
+  // the party at a glance: you, the others, a seat to invite someone
+  $('#npParty').innerHTML = `<div class="face">${avatar(friends?.me?.name || 'Du', 'big me')}<span>Du</span></div>` +
+    (p ? p.members.filter((m) => !m.me).map((m) => `<div class="face">${avatar(m.name, 'big')}<span>${esc(m.name)}</span></div>`).join('') : '') +
+    `<button class="face invite" data-np-invite><div class="avatar big">+</div><span>Einladen</span></button>`;
   const room = np.azahar && np.azahar.server;
   $('#npLobby').innerHTML = l ? `<p><strong>${esc(l.game)}</strong> · ${esc(npModes[l.mode] || l.mode)}${l.mode === 'azahar' && room ? ' · im 3DS-Raum: ' + esc((room.members || []).join(', ') || 'niemand') : ''}</p>` : '';
   $('#npHow').textContent = (np.services || []).map((x) => `${x.name}\n  ${x.how}`).join('\n\n');
   clearTimeout(loadNetplay.t); loadNetplay.t = setTimeout(() => { if (!$('#netplay').hidden) loadNetplay(); }, 4000);
 }
 $('#npFriends').onclick = () => $('#friendsBtn').click();
+$('#npParty').addEventListener('click', (e) => { if (e.target.closest('[data-np-invite]')) $('#friendsBtn').click(); });
 $('#npClose').onclick = async () => { await api('/api/netplay/close', { method: 'POST' }); loadNetplay(); };
 $('#npPrepare').onclick = async () => {
   $('#npInfo').textContent = 'Richte ein …';
@@ -1705,15 +1719,15 @@ function giftHtml(g) {
     }
   }
   const title = g.state === 'loading' ? `Lädt: ${esc(g.title)}` : g.state === 'done' ? `${esc(g.title)} ist da` : `${esc(from)} schickt dir ${giftWhat(g.kind)}`;
-  return `<div class="person gift"><div class="avatar">${esc(from[0].toUpperCase())}</div><div class="grow"><strong>${title}</strong><div class="muted">${sub}</div></div>${btns}</div>`;
+  return `<div class="person gift">${avatar(from)}<div class="grow"><strong>${title}</strong><div class="muted">${sub}</div></div>${btns}</div>`;
 }
 function renderFriends() {
   const f = friends; if (!f) return;
   const n = f.requests.length + (f.invites || []).length + (gifts?.waiting || 0); const b = $('#friendsBadge'); b.hidden = !n; b.textContent = n;
   const d = $('#friendsDlg'); if (!d.open) return;
-  const person = (p, sub, btns) => `<div class="person"><div class="avatar${p.online ? ' on' : ''}">${esc((p.name || '?')[0].toUpperCase())}</div>
+  const person = (p, sub, btns) => `<div class="person">${avatar(p.name, p.online ? 'on' : '')}
     <div class="grow"><strong>${esc(p.name)}</strong><div class="muted">${esc(sub)}</div></div>${btns}</div>`;
-  d.innerHTML = `<div class="me"><div class="avatar big">👤</div><div class="grow"><strong style="font-size:19px">${esc(f.me.name)}</strong>
+  d.innerHTML = `<div class="me">${avatar(f.me.name, 'big me')}<div class="grow"><strong style="font-size:19px">${esc(f.me.name)}</strong>
       <div class="muted">ID ${esc(f.me.id.slice(0, 6))}</div></div><button data-fr="name">Name</button></div>
     <div class="row"><button data-fr="party" class="grow">${f.partyOpen ? 'Party: offen' : 'Party: nur Einladung'}</button></div>
     ${(() => {
@@ -1839,7 +1853,7 @@ async function openSend(path, sys, kind, title) {
       ${!routes ? '<div class="muted">Schaue, wer wie erreichbar ist …</div>' : routes.error ? `<div class="bad">${esc(routes.error)}</div>`
         : !fr.length ? '<div class="muted">Noch keine Freunde – oben rechts im Freunde-Menü hinzufügen.</div>'
         : fr.map((f) => `<label class="person${picked.has(f.id) ? ' on' : ''}"><input type="checkbox" data-sf="${esc(f.id)}" ${picked.has(f.id) ? 'checked' : ''}>
-          <div class="avatar${f.online ? ' on' : ''}">${esc(f.name[0].toUpperCase())}</div>
+          ${avatar(f.name, f.online ? 'on' : '')}
           <div class="grow"><strong>${esc(f.name)}</strong><div class="muted">${f.near ? 'online · im selben Netz' : f.online ? 'online' : 'zuletzt ' + ago(f.seen)}</div></div>
           <span class="cmpchip">${esc(f.label)}</span></label>`).join('')}
       ${what === 'game' ? `<div class="person"><div class="grow"><strong>Thor in der Nähe (ohne Freundschaft)</strong><div class="muted">wie bisher: Wi-Fi Direct oder WLAN + PIN</div></div><button data-snear>Anbieten</button></div>` : ''}
