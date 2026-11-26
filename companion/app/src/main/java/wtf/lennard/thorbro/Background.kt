@@ -91,23 +91,30 @@ object Background {
             .put("name", summary()).put("progress", 1.0).put("index", batchDone).put("total", batchTotal).put("done", true)
             .put("error", batchErrors.firstOrNull()))
 
-        val dl = dlBatch.mapNotNull { id -> Library.downloads[id]?.let { id to it } }
-        if (dl.isNotEmpty()) {
-            val active = dl.firstOrNull { !it.second.done }
-            val finished = dl.count { it.second.done }
-            val lastEnd = dl.maxOf { it.second.finishedAt }
-            if (active != null) out.put(JSONObject().put("kind", "download").put("title", "Aus RomM laden")
-                .put("name", active.second.message.ifEmpty { "…" }).put("progress", active.second.progress).also { active.second.gameJson(it) }
-                .put("index", finished + 1).put("total", dl.size).put("done", false))
-            else if (now - lastEnd < SHOW_DONE_MS) out.put(JSONObject().put("kind", "download").put("title", "Download fertig")
-                .put("name", "${dl.count { it.second.error == null }}/${dl.size} auf dem Thor").put("progress", 1.0)
-                .put("index", dl.size).put("total", dl.size).put("done", true).put("error", dl.firstNotNullOfOrNull { it.second.error }))
-        }
-
-        RommSync.current?.let { j ->
-            if (!j.done || now - j.finishedAt < SHOW_DONE_MS) out.put(JSONObject().put("kind", "upload")
-                .put("title", if (j.done) "Upload zu RomM fertig" else "Spiele zu RomM").put("name", j.message).put("progress", j.progress).also { if (!j.done) j.gameJson(it) }
-                .put("index", j.index).put("total", j.total).put("done", j.done).put("error", j.error))
+        // downloads and uploads come from the transfer queue: every running one is a card, paused ones too, "+n wartend" on the first
+        for (kind in listOf("download", "upload")) {
+            val b = TransferQueue.batch(kind)
+            val running = TransferQueue.running(kind)
+            val paused = TransferQueue.paused(kind)
+            val waiting = TransferQueue.waiting(kind).size
+            val title = if (kind == "download") "Aus RomM laden" else "Spiele zu RomM"
+            running.forEachIndexed { i, it ->
+                val j = it.job ?: return@forEachIndexed
+                out.put(JSONObject().put("kind", kind).put("title", title).put("name", j.message.ifEmpty { it.title }).put("step", j.message)
+                    .put("progress", j.progress).also { o -> j.gameJson(o) }.put("eta", j.eta())
+                    .put("index", b.done + 1 + i).put("total", b.total).put("waiting", if (i == 0) waiting else 0).put("done", false).put("id", it.id))
+            }
+            paused.forEach {
+                val j = it.job ?: return@forEach
+                out.put(JSONObject().put("kind", kind).put("title", "Pausiert").put("name", it.json().optString("title")).put("progress", j.gameProgress())
+                    .put("game", it.json().optString("title")).put("romId", it.romId).put("index", 1).put("total", 1).put("done", false).put("state", "paused").put("id", it.id))
+            }
+            if (running.isEmpty() && paused.isEmpty() && waiting == 0 && b.total > 0 && b.endedAt > 0 && now - b.endedAt < SHOW_DONE_MS) {
+                val ok = b.done - b.failed
+                out.put(JSONObject().put("kind", kind).put("title", if (kind == "download") "Download fertig" else "Upload zu RomM fertig")
+                    .put("name", if (kind == "download") "$ok/${b.total} auf dem Thor" else "$ok/${b.total} in RomM").put("progress", 1.0)
+                    .put("index", b.total).put("total", b.total).put("done", true).put("error", b.lastError))
+            }
         }
         return out
     }

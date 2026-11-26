@@ -176,32 +176,16 @@ object RommSync {
     /** the running "upload to RomM" job, so the UI finds it again after leaving the app */
     @Volatile var current: Jobs.Job? = null
 
-    /** starts the upload in the background service process; keeps running when you switch apps */
-    /** [systems] null = every console RomM is missing games of; the job starts at once and works that out itself */
-    /** [only] limits the upload to these local ROM paths (one game: base + updates/DLC) */
-    fun start(ctx: Context, systems: Set<String>?, withSaves: Boolean, only: Set<String>? = null): Jobs.Job {
-        current?.takeIf { !it.done }?.let { return it }
-        val app = ctx.applicationContext
-        val j = Jobs.start(if (only != null) "Zu RomM hochladen" else "RomM-Abgleich") { job ->
-            job.message = "Verbinde mit RomM …"
-            Transfers.begin(app)
-            val ticker = kotlin.concurrent.thread(isDaemon = true) {
-                while (!job.done) { Progress.show(app, "Spiele zu RomM", job.progress, job.message); runCatching { Thread.sleep(2000) } }
-            }
-            try { run(app, systems, withSaves, job, only) } finally {
-                Transfers.end(); ticker.interrupt()
-                Progress.done(app, "Abgleich mit RomM fertig", job.message)
-            }
-        }
-        current = j
-        return j
-    }
+    /** puts the upload on the queue (one after another, survives a restart); the job is there at once.
+     *  [systems] null = every console RomM is missing games of; [only] limits it to these local ROM paths (one game: base + updates/DLC) */
+    fun start(ctx: Context, systems: Set<String>?, withSaves: Boolean, only: Set<String>? = null, title: String = ""): Jobs.Job =
+        TransferQueue.enqueueUpload(ctx, title.ifEmpty { if (only != null) "Spiel" else "Abgleich mit RomM" }, only, systems, withSaves)
 
     /** uploads one game (all [paths] of it) on its own; the running job if a batch is already going */
-    fun uploadGame(ctx: Context, paths: Set<String>): Jobs.Job {
+    fun uploadGame(ctx: Context, paths: Set<String>, title: String = ""): Jobs.Job {
         val systems = localSystems(ctx).filter { (_, roms) -> roms.any { it.getString("path") in paths } }.map { it.first }.toSet()
         require(systems.isNotEmpty()) { "Spiel nicht gefunden" }
-        return start(ctx, systems, withSaves = false, only = paths)
+        return start(ctx, systems, withSaves = false, only = paths, title = title.ifEmpty { File(paths.first()).nameWithoutExtension })
     }
 
     fun run(ctx: Context, systems: Set<String>?, withSaves: Boolean, job: Jobs.Job, only: Set<String>? = null): JSONObject {
@@ -219,6 +203,7 @@ object RommSync {
         var done = 0L
         job.total = todo.size
         for ((n, pair) in todo.withIndex()) {
+            job.check()
             val (sys, rom) = pair
             job.index = n + 1
             val slug = slugFor(sys)
@@ -229,6 +214,7 @@ object RommSync {
             job.message = "Lade ${f.name} hoch"
             /** the file actually sent can differ from the listed size (zipped folders): scale it onto the rom's share */
             fun report(file: File): (Long) -> Unit { val len = file.length().coerceAtLeast(1); return { sent ->
+                job.check()
                 val now = done + sent * romSize / len
                 job.progress = now.toDouble() / total
                 job.bytes(now, total); job.gameBytes(sent, len)
@@ -244,6 +230,7 @@ object RommSync {
                 } else upload(ctx, pid, f.name, f, assembling, report(f))
                 remember(ctx, slug, rom.getString("file"), romSize)
                 romsUp++; History.add(ctx, "rom_up", rom.optString("name").ifEmpty { f.name }, sys, ms = System.currentTimeMillis() - t0, size = romSize, path = f.path)
+            } catch (e: Jobs.Stopped) { throw e // paused/cancelled: the queue handles it, the upload session stays for resuming
             } catch (e: Exception) { errors.put("${f.name}: ${e.message}"); Logs.e("romm", "Upload ${f.name}", e) }
             done += romSize
             job.progress = done.toDouble() / total

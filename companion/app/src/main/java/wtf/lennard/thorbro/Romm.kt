@@ -194,12 +194,16 @@ object Romm {
                     val buf = ByteArray(1 shl 20)
                     var done = if (append) part.length() else 0L
                     while (true) {
+                        job.check()
                         val n = inp.read(buf); if (n < 0) break
                         out.write(buf, 0, n); done += n
                         if (total > 0) { job.progress = done.toDouble() / total * (if (multi) 0.9 else 1.0); job.bytes(done, total); job.gameBytes(done, total) }
                     }
                 }
             }
+        } catch (s: Jobs.Stopped) {
+            if (s.cancel) part.delete() // paused keeps the part: loading goes on from there
+            throw s
         } finally { Transfers.end() }
         if (target.exists()) target.delete()
         part.renameTo(target)

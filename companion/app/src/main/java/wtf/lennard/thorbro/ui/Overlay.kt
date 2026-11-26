@@ -59,6 +59,11 @@ import wtf.lennard.thorbro.Background
 fun BackgroundOverlay(modifier: Modifier = Modifier) {
     var items by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
     WhileVisible { while (true) { items = Background.list().objs(); delay(500) } }
+    // the new design opens the queue page (pause, cancel, order); the old one keeps its card drawer
+    if (UiMode.newDesign) {
+        if (ActivityUi.open) TransfersDialog { ActivityUi.open = false }
+        return
+    }
     if (items.isEmpty() && ActivityUi.open) ActivityUi.open = false
     AnimatedVisibility(items.isNotEmpty() && (!UiMode.newDesign || ActivityUi.open), modifier, enter = fadeIn() + slideInHorizontally { it / 2 }, exit = fadeOut() + slideOutHorizontally { it / 2 }) {
         Column(Modifier.padding(top = 58.dp, end = 24.dp).width(320.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -108,7 +113,8 @@ internal fun ActivityCard(a: JSONObject) {
             Column(Modifier.weight(1f)) {
                 Text(game ?: a.optString("title"), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(if (game != null) a.optString("title") + (if (total > 1) " · ${a.optInt("index")}/$total" else "") +
-                    (a.optString("batch").takeIf { it.isNotEmpty() && it != "null" }?.let { " · $it" } ?: "")
+                    (a.optString("batch").takeIf { it.isNotEmpty() && it != "null" }?.let { " · $it" } ?: "") +
+                    (a.optInt("waiting").takeIf { it > 0 }?.let { " · +$it wartend" } ?: "")
                     else a.optString("name"), fontSize = 12.sp, color = Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             if (game == null && (total > 1 || (total == 1 && !done))) Text("${a.optInt("index")}/$total", fontSize = 14.sp, fontWeight = FontWeight.Bold)

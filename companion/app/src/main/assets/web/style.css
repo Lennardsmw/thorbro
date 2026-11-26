@@ -138,6 +138,7 @@ pre.code { background: var(--bg); border: 1px solid var(--line); border-radius: 
 .ri.on { background: #fff; opacity: 1; }
 .bar { height: 4px; background: var(--line); border-radius: 2px; margin-top: 4px; overflow: hidden; }
 .bar i { display: block; height: 100%; background: var(--accent); transition: width .5s; }
+#activity .act { pointer-events: auto; cursor: pointer; }
 #activity { position: fixed; top: 56px; right: 16px; width: min(320px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 8px; z-index: 50; pointer-events: none; }
 .act { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; box-shadow: 0 6px 24px rgba(0,0,0,.25); font-size: 13px; }
 .act.ok { border-color: var(--ok); } .act.bad { border-color: var(--err); }
@@ -325,3 +326,16 @@ html[data-theme="doodle"] nav button.active { background: var(--text); color: #1
 /* small secondary buttons; driver names wrap instead of being cut */
 button.small { padding: 4px 12px; font-size: 13px; border-radius: 999px; }
 #drivers table.files td:first-child { word-break: break-word; overflow-wrap: anywhere; }
+
+/* Downloads & Uploads page */
+dialog#xfers { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 48px); }
+dialog#xfers::backdrop { background: rgba(0, 0, 0, .6); }
+.xfhead { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.xfhead h3 { margin: 0; flex: 1; }
+.xfrow { display: flex; gap: 12px; align-items: center; padding: 10px 12px; margin-top: 8px; border: 1px solid var(--line); border-radius: 12px; }
+.xfrow.error { border-color: var(--err); }
+.xfmain { flex: 1; min-width: 0; }
+.xfmain b, .xfmain .muted { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xfbtns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.xfbtns button { font-size: 13px; padding: 5px 10px; }
+@media (max-width: 560px) { .xfrow { flex-direction: column; align-items: stretch; } .xfbtns { justify-content: flex-start; } }

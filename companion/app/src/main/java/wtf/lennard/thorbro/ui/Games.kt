@@ -198,14 +198,15 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
     }
     // single-game upload to RomM: picks up a running one for this game (dialog reopened, started from the web panel)
     val paths = remember(group) { group.map { it.getString("path") }.toSet() }
-    var upJob by remember { mutableStateOf(wtf.lennard.thorbro.RommSync.current?.takeIf { !it.done && it.file in paths }) }
+    var upJob by remember { mutableStateOf(wtf.lennard.thorbro.TransferQueue.all().firstOrNull { it.kind == "upload" && it.only == paths && it.state != "done" && it.state != "error" }?.job) }
     var upLabel by remember { mutableStateOf("") }
     var uploaded by remember(lib) { mutableStateOf(lib?.optBoolean("uploaded") == true) }
     upJob?.let { j ->
         LaunchedEffect(j) {
+            // the button keeps one short label and no changing text appears here, so nothing in this page re-wraps while it loads;
+            // progress, speed and time left are in the bottom bar (and on Downloads & Uploads, Select)
             while (!j.done) {
-                upLabel = "Lädt hoch … ${(j.progress * 100).toInt()} %"
-                msg = listOfNotNull(j.message.ifEmpty { null }, j.transfer()).joinToString(" · ")
+                upLabel = when (j.state) { "queued" -> "Wartet auf Upload …"; "paused" -> "Upload pausiert"; else -> "Lädt hoch …" }
                 kotlinx.coroutines.delay(500)
             }
             val res = j.result
@@ -250,10 +251,10 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
                 upJob != null -> add(Triple(upLabel.ifEmpty { "Lädt hoch …" }, Icons.Filled.CloudUpload, {}))
                 uploaded -> add(Triple("In RomM hochgeladen ✓", Icons.Filled.CloudUpload, {}))
                 else -> add(Triple("Zu RomM hochladen", Icons.Filled.CloudUpload, {
-                    msg = "Verbinde mit RomM …"
+                    msg = "Kommt auf die Upload-Warteschlange – Fortschritt unten"
                     scope.launch {
-                        runCatching { withContext(Dispatchers.IO) { wtf.lennard.thorbro.RommSync.uploadGame(ctx, paths) } }
-                            .onSuccess { j -> if (j.name == "Zu RomM hochladen") upJob = j else msg = "RomM-Abgleich läuft schon – Fortschritt oben rechts" }
+                        runCatching { withContext(Dispatchers.IO) { wtf.lennard.thorbro.RommSync.uploadGame(ctx, paths, title(r, m)) } }
+                            .onSuccess { j -> upJob = j }
                             .onFailure { msg = it.message ?: "Fehler" }
                     }
                 }))
