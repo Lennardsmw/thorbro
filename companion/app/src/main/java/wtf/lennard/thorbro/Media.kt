@@ -115,7 +115,7 @@ object Media {
             cocoon[r.getString("file")]?.fields?.let { g ->
                 m.put("source", "cocoon")
                 fill("title", g["cocoon:displayname"] ?: g["name"])
-                fill("desc", g["desc"]?.replace("&quot;", "\"")?.replace("&amp;", "&"))
+                fill("desc", (g["desc_de"] ?: g["desc-de"] ?: g["cocoon:desc_de"] ?: g["desc"])?.replace("&quot;", "\"")?.replace("&amp;", "&"))
                 fill("year", g["releasedate"]?.take(4))
                 fill("developer", g["developer"])
                 fill("publisher", g["publisher"])

@@ -69,16 +69,24 @@ val ART = 150.dp
  */
 @Composable
 fun ArtTile(title: String, sub: String = "", image: File?, modifier: Modifier = Modifier, fit: Boolean = false,
-            progress: Float? = null, corner: @Composable (androidx.compose.foundation.layout.BoxScope.() -> Unit)? = null, onClick: () -> Unit) {
+            progress: Float? = null, badge: String? = null, hint: String = "Details",
+            corner: @Composable (androidx.compose.foundation.layout.BoxScope.() -> Unit)? = null, onClick: () -> Unit) {
     val fx = rememberFx()
     Column(modifier) {
-        Box(Modifier.fillMaxWidth().aspectRatio(1f).fx(fx, RoundedCornerShape(16.dp), lift = 1.06f, onClick = onClick).background(Panel),
+        Box(Modifier.fillMaxWidth().aspectRatio(1f).hintA(hint).fx(fx, RoundedCornerShape(16.dp), lift = 1.06f, onClick = onClick).background(Panel),
             contentAlignment = Alignment.Center) {
             when {
                 image != null && fit -> Img(image, 300, Modifier.fillMaxSize(0.6f))
                 image != null -> Img(image, 400, Modifier.fillMaxSize(), ContentScale.Crop, title)
+                // no cover: the console icon big + the title, never a bare text box
+                badge != null -> Column(Modifier.fillMaxSize().padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center) {
+                    ConsoleIcon(badge, 64.dp)
+                    Text(title, Modifier.padding(top = 6.dp), textAlign = TextAlign.Center, fontSize = 12.sp, color = Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
                 else -> Text(title, Modifier.padding(12.dp), textAlign = TextAlign.Center, fontSize = 14.sp, color = Muted, maxLines = 4, overflow = TextOverflow.Ellipsis)
             }
+            if (badge != null && image != null) ConsoleBadge(badge)
             if (progress != null) Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(6.dp).background(Color(0x66000000))) {
                 Box(Modifier.fillMaxWidth(progress.coerceIn(0f, 1f)).height(6.dp).background(Accent))
             }
@@ -91,14 +99,22 @@ fun ArtTile(title: String, sub: String = "", image: File?, modifier: Modifier = 
     }
 }
 
-/** grid of square tiles; focus stays centered, room around the edge for the lifted focus tile */
+/**
+ * grid of square tiles; focus stays centered, room around the edge for the lifted focus tile.
+ * [rows] > 0: tiles sized so exactly that many rows (with title + sub line) fit on screen.
+ */
 @Composable
-fun ArtGrid(min: Dp = ART, content: androidx.compose.foundation.lazy.grid.LazyGridScope.() -> Unit) {
+fun ArtGrid(min: Dp = ART, rows: Int = 0, content: androidx.compose.foundation.lazy.grid.LazyGridScope.() -> Unit) {
     val (st, fl) = snapGrid()
     HeaderFollows(st)
-    CenteredFocus {
-        LazyVerticalGrid(GridCells.Adaptive(min), state = st, flingBehavior = fl, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.spacedBy(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp), content = content)
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+        // measured once per page: the head hiding must not resize the tiles
+        val h = remember { maxHeight }
+        val side = if (rows > 0) ((h - 28.dp - 14.dp * (rows - 1) - 44.dp * rows) / rows).coerceIn(96.dp, 220.dp) else min
+        CenteredFocus {
+            LazyVerticalGrid(GridCells.Adaptive(side), state = st, flingBehavior = fl, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp), content = content)
+        }
     }
 }
 
@@ -130,7 +146,7 @@ private fun Folders(list: List<Sys>) {
     // back from a folder: focus the folder we came from
     val last = remember { NewGamesNav.lastFolder }
     LaunchedEffect(Unit) { delay(200); runCatching { first.requestFocus() } }
-    ArtGrid {
+    ArtGrid(rows = 2) {
         items(list, key = { it.id }) { s ->
             val isFirst = if (last != null && list.any { it.id == last }) s.id == last else s == list.first()
             FolderTile(s, if (isFirst) Modifier.focusRequester(first) else Modifier) { NewGamesNav.lastFolder = s.id; NewGamesNav.folder.value = s.id }
@@ -143,11 +159,12 @@ private fun Folders(list: List<Sys>) {
 private fun FolderTile(s: Sys, modifier: Modifier, onOpen: () -> Unit) {
     val ctx = LocalContext.current
     val fx = rememberFx()
-    val icon by produceState<File?>(null, s.id) { value = withContext(Dispatchers.IO) { runCatching { Media.icon(ctx, s.id) }.getOrNull() } }
+    // one cover per game (Switch: base + updates are one game), never the same picture twice
     val covers by produceState<List<File>>(emptyList(), s.id) {
         value = withContext(Dispatchers.IO) {
             if (s.id == "ports") emptyList()
-            else s.roms.asSequence().mapNotNull { r -> runCatching { Cocoon.media(ctx, s.id, r.getString("path"), "icon") }.getOrNull() }.take(4).toList()
+            else entries(s).asSequence().mapNotNull { r -> runCatching { Cocoon.media(ctx, s.id, r.getString("path"), "icon") }.getOrNull() }
+                .distinctBy { runCatching { it.canonicalPath }.getOrDefault(it.path) }.distinctBy { it.length() }.take(4).toList()
         }
     }
     val count = remember(s) { entries(s).size }
@@ -155,28 +172,30 @@ private fun FolderTile(s: Sys, modifier: Modifier, onOpen: () -> Unit) {
         // folder tab
         Box(Modifier.padding(start = 14.dp).width(56.dp).height(9.dp)
             .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp)).background(if (fx.active) Color(0xF2FFFFFF) else Color(0x40FFFFFF)))
-        Box(Modifier.fillMaxWidth().aspectRatio(1f).fx(fx, RoundedCornerShape(16.dp), lift = 1.06f, onClick = onOpen).background(GlassFill),
+        Box(Modifier.fillMaxWidth().aspectRatio(1f).hintA("Öffnen").fx(fx, RoundedCornerShape(16.dp), lift = 1.06f, onClick = onOpen).background(GlassFill),
             contentAlignment = Alignment.Center) {
-            if (covers.isNotEmpty()) {
+            if (covers.size >= 2) {
+                // the covers as they are: a clean 2×2 collage, the console only as the small badge
                 Column(Modifier.fillMaxSize()) {
                     covers.chunked(2).take(2).forEach { row ->
                         Row(Modifier.weight(1f).fillMaxWidth()) {
                             row.forEach { f -> Img(f, 200, Modifier.weight(1f).fillMaxSize(), ContentScale.Crop) }
-                            if (row.size == 1) Spacer(Modifier.weight(1f))
+                            if (row.size == 1) Box(Modifier.weight(1f).fillMaxSize().background(Panel), contentAlignment = Alignment.Center) { ConsoleIcon(s.id, 40.dp) }
                         }
                     }
                 }
-                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xB3050608), Color(0xE6050608)))))
-            }
-            if (icon != null) Img(icon, 240, Modifier.fillMaxSize(0.5f))
-            else Text(s.name, fontSize = 18.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 2, modifier = Modifier.padding(12.dp))
-            Box(Modifier.align(Alignment.BottomEnd).padding(8.dp).clip(RoundedCornerShape(50)).background(Color(0xCC000000)).padding(horizontal = 9.dp, vertical = 3.dp)) {
-                Text("$count", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                ConsoleBadge(s.id)
+            } else if (covers.size == 1) {
+                Img(covers[0], 300, Modifier.fillMaxSize(), ContentScale.Crop)
+                ConsoleBadge(s.id)
+            } else {
+                // no covers (yet): the console itself, big
+                ConsoleIcon(s.id, 96.dp)
             }
         }
-        Text(s.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+        Text(s.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (fx.active) Ink else Muted,
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp, start = 2.dp, end = 2.dp))
-        Text(fmtBytes(s.roms.sumOf { it.optLong("size") }), fontSize = 12.sp, color = Muted, maxLines = 1, modifier = Modifier.padding(horizontal = 2.dp))
+        Text("$count · ${fmtBytes(s.roms.sumOf { it.optLong("size") })}", fontSize = 12.sp, color = Muted, maxLines = 1, modifier = Modifier.padding(horizontal = 2.dp))
     }
 }
 
@@ -190,25 +209,22 @@ private fun FolderContent(cur: Sys, reload: Int, changed: () -> Unit) {
     var open by remember { mutableStateOf<JSONObject?>(null) }
     val first = remember { FocusRequester() }
     LaunchedEffect(cur.id) { delay(200); runCatching { first.requestFocus() } }
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.padding(start = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (icon != null) { Img(icon, 96, Modifier.size(30.dp)); Spacer(Modifier.width(12.dp)) }
-            Text(cur.name, fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("   ${items.size} Spiele · ${fmtBytes(cur.roms.sumOf { it.optLong("size") })}", fontSize = 14.sp, color = Muted, maxLines = 1)
-        }
-        ArtGrid {
-            items(items, key = { it.getString("path") }) { r ->
-                val m = meta?.optJSONObject(r.getString("path")) ?: JSONObject()
-                val l = lib?.optJSONObject("games")?.optJSONObject(r.getString("path"))
-                val sub = listOf(m.optString("year"), r.optString("extra")).filter { it.isNotEmpty() }.joinToString(" · ").ifEmpty { fmtBytes(r.optLong("size")) }
-                ArtTile(gameTitle(r, m), sub, cover(cur.id, r, m), if (r == items.first()) Modifier.focusRequester(first) else Modifier,
-                    fit = cur.id == "ports", corner = if (l == null) null else { {
-                        Row(Modifier.align(Alignment.TopEnd).padding(6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            if (l.optBoolean("inRomm")) Badge(Icons.Filled.Cloud, true)
-                            if (l.optString("save") == "pending" || l.optString("save") == "local") Badge(Icons.Filled.Save, false)
-                        }
-                    } }) { open = r }
+    ArtGrid(rows = 2) {
+        item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }, key = "head") {
+            Row(Modifier.padding(start = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (icon != null) { Img(icon, 96, Modifier.size(30.dp)); Spacer(Modifier.width(12.dp)) }
+                Text(cur.name, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("   ${items.size} · ${fmtBytes(cur.roms.sumOf { it.optLong("size") })}", fontSize = 14.sp, color = Muted, maxLines = 1)
             }
+        }
+        // state (RomM, saves) lives on the detail page, not as icons on every cover
+        items(items, key = { it.getString("path") }) { r ->
+            val m = meta?.optJSONObject(r.getString("path")) ?: JSONObject()
+            val sub = listOf(m.optString("year"), r.optString("extra")).filter { it.isNotEmpty() }.joinToString(" · ").ifEmpty { fmtBytes(r.optLong("size")) }
+            val img = cover(cur.id, r, m)
+            // inside the folder no console badge on covers; without a cover the console icon stands in
+            ArtTile(gameTitle(r, m), sub, img, if (r == items.first()) Modifier.focusRequester(first) else Modifier,
+                fit = cur.id == "ports", badge = if (img == null && cur.id != "ports") cur.id else null) { open = r }
         }
     }
     open?.let { r ->

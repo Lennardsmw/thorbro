@@ -90,7 +90,7 @@ import java.util.Locale
 
 /** one game on the home row, with what is needed to show and start it */
 class HomeGame(val system: String, val rom: JSONObject, val meta: JSONObject) {
-    val title get() = meta.optString("title").ifEmpty { rom.getString("name").substringBefore(" (").substringBefore(" [") }
+    val title get() = displayTitle(meta.optString("title").ifEmpty { rom.getString("name").substringBefore(" (").substringBefore(" [") })
     val lastPlayed get() = meta.optString("lastplayed")
 }
 

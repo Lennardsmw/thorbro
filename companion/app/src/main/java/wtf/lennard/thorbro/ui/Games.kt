@@ -58,6 +58,7 @@ import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material.icons.filled.Cloud
@@ -142,7 +143,14 @@ internal fun cover(sys: String, r: JSONObject, m: JSONObject): File? {
 }
 
 internal fun gameTitle(r: JSONObject, m: JSONObject) = title(r, m)
-private fun title(r: JSONObject, m: JSONObject) = m.optString("title").ifEmpty { r.getString("name").substringBefore(" (").substringBefore(" [") }
+private fun title(r: JSONObject, m: JSONObject) = displayTitle(m.optString("title").ifEmpty { r.getString("name").substringBefore(" (").substringBefore(" [") })
+
+/** sort names as they are said: "Legend of Zelda, The - Breath of the Wild" → "The Legend of Zelda: Breath of the Wild" */
+fun displayTitle(t: String): String {
+    val m = Regex("^(.+?), (The|A|An|Der|Die|Das|Le|La|Les|El|Il)((?:\\s*[-:].*)?)$").find(t.trim()) ?: return t
+    val (name, art, rest) = m.destructured
+    return "$art $name" + rest.replaceFirst(Regex("^\\s*-\\s*"), ": ")
+}
 
 @Composable
 private fun GameCard(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject?, onOpen: () -> Unit) {
@@ -217,15 +225,14 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
     val fav = r.getString("path") in Favorites.paths
     val facts = listOf(m.optString("year"), m.optString("developer"), m.optString("genre"), r.optString("extra")).filter { it.isNotEmpty() }
 
+    // the state in one quiet line instead of a row of chips
     @Composable
-    fun Chips() = Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Chip(fmtBytes(size))
-        giftFrom?.let { Chip("neu · von $it", true) }
-        if (lib != null) Chip(if (lib.optBoolean("inRomm")) "☁ in RomM" else "☁ nicht in RomM", lib.optBoolean("inRomm"))
-        when (lib?.optString("save")) {
-            "synced" -> Chip("💾 Spielstand in RomM", true); "pending" -> Chip("💾 Spielstand geändert"); "local" -> Chip("💾 nur auf dem Thor")
-        }
-    }
+    fun Chips() = Text(listOfNotNull(
+        fmtBytes(size),
+        giftFrom?.let { "neu von $it" },
+        lib?.let { if (it.optBoolean("inRomm")) "in RomM" else "nicht in RomM" },
+        when (lib?.optString("save")) { "synced" -> "Spielstand in RomM"; "pending" -> "Spielstand geändert"; "local" -> "Spielstand nur auf dem Thor"; else -> null },
+    ).joinToString("  ·  "), fontSize = 14.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
 
     @Composable
     fun Buttons(stacked: Boolean) {
@@ -259,9 +266,12 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
                     BigButton(l, ic, primary = row == 0 && i == 0 && play != null, modifier = Modifier.weight(1f).firstFocus(first, row == 0 && i == 0), onClick = a)
                 }
             } }
-        } else Row(Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 6.dp, horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        } else @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class) androidx.compose.foundation.layout.FlowRow(
+            Modifier.padding(vertical = 6.dp, horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // wraps instead of running off screen: every button stays visible and reachable with the d-pad
             list.forEachIndexed { i, (l, ic, a) ->
-                BigButton(l, ic, primary = i == 0 && play != null, modifier = (if (i == 0 && play != null) Modifier.width(220.dp) else Modifier).firstFocus(first, i == 0), onClick = a)
+                BigButton(l, ic, primary = i == 0 && play != null, modifier = (if (i == 0 && play != null) Modifier.width(220.dp) else Modifier)
+                    .hintA(if (l == "Spielen") "Spielen" else "Auswählen").firstFocus(first, i == 0), onClick = a)
             }
         }
     }
@@ -279,12 +289,12 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
             val boxW = maxWidth
             val wide = maxWidth / maxHeight > 1.3f   // top screen 16:9; the bottom screen is almost square
             if (wide) {
-                Row(Modifier.fillMaxSize().padding(horizontal = 56.dp, vertical = 40.dp), verticalAlignment = Alignment.CenterVertically,
+                Row(Modifier.fillMaxSize().padding(start = 56.dp, end = 56.dp, top = 32.dp, bottom = if (UiMode.newDesign) 56.dp else 40.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(40.dp)) {
                     Box(Modifier.fillMaxHeight(0.82f).aspectRatio(3f / 4f).clip(RoundedCornerShape(18.dp)).background(Panel)) {
                         Img(cover, 900, Modifier.fillMaxSize(), ContentScale.Crop)
                     }
-                    Column(Modifier.weight(1f)) {
+                    Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             if (sysIcon != null) { Img(sysIcon, 96, Modifier.size(28.dp)); Spacer(Modifier.width(10.dp)) }
                             Text(facts.joinToString("  ·  "), color = Muted, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -324,6 +334,9 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
                     if (msg.isNotEmpty()) Text(msg, color = if (job != null || upJob != null || uploaded) Muted else Bad, modifier = Modifier.padding(bottom = 10.dp))
                     Buttons(stacked = true)
                 }
+            }
+            if (UiMode.newDesign) Box(Modifier.align(Alignment.BottomCenter)) {
+                ButtonHints("A" to (Hints.a ?: "Auswählen"), "B" to "Zurück")
             }
         }
     }
