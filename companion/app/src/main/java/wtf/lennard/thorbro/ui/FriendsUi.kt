@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -22,7 +24,18 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
@@ -64,8 +77,13 @@ import wtf.lennard.thorbro.Pals
 /** the friends menu: button top right on every page, or L2 */
 object FriendsUi {
     var open by mutableStateOf(false)
-    fun toggle() { open = !open }
+    /** "Für dich" slid in over the friends list (gift button or X) */
+    var gifts by mutableStateOf(false)
+    fun toggle() { open = !open; gifts = false }
 }
+
+/** System › Allgemein scrolls to this group when set (the gear in the friends menu) */
+object SystemNav { val focus = mutableStateOf<String?>(null) }
 
 private fun org.json.JSONArray?.list(): List<JSONObject> = if (this == null) emptyList() else (0 until length()).map { getJSONObject(it) }
 
@@ -90,9 +108,7 @@ fun FriendsButton() {
             .then(if (fx.active) Modifier.background(Accent) else Modifier.background(GlassFill)), contentAlignment = Alignment.Center) {
             Icon(Icons.Filled.Group, "Freunde (L2)", Modifier.size(22.dp), tint = if (fx.active) OnAccent else Color.White)
         }
-        if (waiting > 0) Box(Modifier.align(Alignment.TopEnd).size(16.dp).clip(CircleShape).background(Color(0xFFE5484D)), contentAlignment = Alignment.Center) {
-            Text("$waiting", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
-        }
+        CountBadge(waiting, Modifier.align(Alignment.TopEnd))
     }
 }
 
@@ -135,11 +151,12 @@ fun FriendsPanel() {
     var gifts by remember { mutableStateOf<JSONObject?>(null) }
     var gift by remember { mutableStateOf<JSONObject?>(null) }
     var add by remember { mutableStateOf(false) }
-    var rename by remember { mutableStateOf(false) }
     var pick by remember { mutableStateOf<JSONObject?>(null) }
     var msg by remember { mutableStateOf("") }
     val first = remember { FocusRequester() }
-    fun close() { FriendsUi.open = false }
+    val giftFirst = remember { FocusRequester() }
+    fun close() { FriendsUi.open = false; FriendsUi.gifts = false }
+    fun settings() { close(); SystemNav.focus.value = "friends"; Nav.go(Screen.SETTINGS) }
     fun refresh() = scope.launch {
         st = withContext(Dispatchers.IO) { Pals.status(ctx) }
         gifts = withContext(Dispatchers.IO) { runCatching { wtf.lennard.thorbro.Gifts.status(ctx) }.getOrNull() }
@@ -167,48 +184,50 @@ fun FriendsPanel() {
     Dialog(::close, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         ImmersiveDialog()
         Box(Modifier.fillMaxSize().onPreviewKeyEvent { e ->
-            if (e.type != KeyEventType.KeyDown || add || rename || pick != null || gift != null) return@onPreviewKeyEvent false
-            when (e.key) {
-                Key.ButtonY -> { add = true; true }
-                Key.ButtonL2 -> { close(); true }
+            if (e.type != KeyEventType.KeyDown || add || pick != null || gift != null) return@onPreviewKeyEvent false
+            when {
+                FriendsUi.gifts && (e.key == Key.ButtonB || e.key == Key.Back) -> { FriendsUi.gifts = false; true }
+                e.key == Key.ButtonX && !FriendsUi.gifts -> { FriendsUi.gifts = true; true }
+                e.key == Key.ButtonY && !FriendsUi.gifts -> { add = true; true }
+                e.key == Key.ButtonL2 -> { close(); true }
                 else -> false
             }
         }, contentAlignment = Alignment.TopEnd) {
             val s = st
-            Column(Modifier.padding(14.dp).width(430.dp).fillMaxHeight().clip(RoundedCornerShape(22.dp)).background(Color(0xF2141519))
+            // gifts: games and saves from friends, and friends who want a game to a save we sent
+            val inc = gifts?.optJSONArray("incoming").list().filter { it.optString("state") != "done" || System.currentTimeMillis() - it.optLong("at") < 86_400_000 }
+            val wants = gifts?.optJSONArray("outgoing").list().flatMap { o -> o.optJSONArray("to").list().filter { it.optBoolean("want") }.map { o to it } }
+            val fresh = inc.count { it.optString("state") == "new" } + wants.size
+            LaunchedEffect(FriendsUi.gifts) { delay(260); runCatching { (if (FriendsUi.gifts) giftFirst else first).requestFocus() } }
+            Column(Modifier.padding(14.dp).width(470.dp).fillMaxHeight().clip(RoundedCornerShape(22.dp)).background(Color(0xF2141519))
                 .border(1.dp, GlassLine, RoundedCornerShape(22.dp))) {
-                Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 16.dp)) {
-                    // me
+              AnimatedContent(FriendsUi.gifts, Modifier.weight(1f), label = "gifts", transitionSpec = {
+                  if (targetState) slideInHorizontally(tween(240)) { it } togetherWith slideOutHorizontally(tween(240)) { -it / 3 } + fadeOut(tween(240))
+                  else slideInHorizontally(tween(240)) { -it / 3 } + fadeIn(tween(240)) togetherWith slideOutHorizontally(tween(240)) { it }
+              }) { showGifts ->
+               if (showGifts) GiftsPage(inc, wants, giftFirst, onOpen = { gift = it },
+                    onDismiss = { g -> act { wtf.lennard.thorbro.Gifts.dismiss(ctx, g.optString("gid")); null } },
+                    onSendWanted = { o, t -> act { Jobs.start("Spiel nachschicken") { j -> wtf.lennard.thorbro.Gifts.sendWanted(ctx, o.optString("gid"), t.optString("id"), j) }; null } })
+               else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 16.dp)) {
+                    // me: name + short id, then party mode · gifts · settings
                     val me = s?.optJSONObject("me")
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Avatar(me?.optString("name") ?: "", 52, me = true)
+                        Avatar(me?.optString("name") ?: "", 56, me = true)
                         Column(Modifier.weight(1f).padding(start = 14.dp)) {
-                            Text(me?.optString("name") ?: "…", fontSize = 21.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text("ID ${me?.optString("id")?.take(6) ?: ""}", fontSize = 12.sp, color = Muted)
+                            Text(me?.optString("name") ?: "…", fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("ID ${me?.optString("id")?.take(6) ?: ""}", fontSize = 13.sp, color = Muted, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                         }
                     }
                     Spacer(Modifier.height(12.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         val open = s?.optBoolean("partyOpen") == true
                         BigButton(if (open) "Party: offen" else "Party: nur Einladung", modifier = Modifier.weight(1f).focusRequester(first)) {
                             act { Pals.setPartyOpen(ctx, !open); null }
                         }
-                        BigButton("Name") { rename = true }
+                        RoundIcon(Icons.Filled.CardGiftcard, "Für dich (X)", badge = fresh) { FriendsUi.gifts = true }
+                        RoundIcon(Icons.Filled.Settings, "Einstellungen › Freunde") { settings() }
                     }
                     if (msg.isNotEmpty()) Text(msg, color = Bad, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
-
-                    // gifts: games and saves from friends, and friends who want a game to a save we sent
-                    val inc = gifts?.optJSONArray("incoming").list().filter { it.optString("state") != "done" || System.currentTimeMillis() - it.optLong("at") < 86_400_000 }
-                    val wants = gifts?.optJSONArray("outgoing").list().flatMap { o -> o.optJSONArray("to").list().filter { it.optBoolean("want") }.map { o to it } }
-                    if (inc.isNotEmpty() || wants.isNotEmpty()) {
-                        Section("Für dich")
-                        inc.forEach { g -> GiftRow(g, Modifier.padding(bottom = 6.dp)) { gift = g } }
-                        wants.forEach { (o, t) ->
-                            PersonRow(t.optString("name"), "möchte auch das Spiel: ${o.optString("title")}", Modifier.padding(bottom = 6.dp), "A: schicken") {
-                                act { Jobs.start("Spiel nachschicken") { j -> wtf.lennard.thorbro.Gifts.sendWanted(ctx, o.optString("gid"), t.optString("id"), j) }; null }
-                            }
-                        }
-                    }
 
                     val party = s?.optJSONObject("party")
                     if (party != null) {
@@ -255,18 +274,25 @@ fun FriendsPanel() {
                             }
                         }
                     }
-                }
+               }
+              }
                 Row(Modifier.fillMaxWidth().background(Color(0x66000000)).padding(horizontal = 18.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Hint("Y", "Freunde hinzufügen") { add = true }
-                    Hint("B", "Schließen") { close() }
+                    horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (FriendsUi.gifts) {
+                        Hint("A", "Öffnen") {}
+                        Hint("X", "Entfernen") {}
+                        Hint("B", "Zurück") { FriendsUi.gifts = false }
+                    } else {
+                        Hint("X", "Für dich") { FriendsUi.gifts = true }
+                        Hint("Y", "Hinzufügen") { add = true }
+                        Hint("B", "Schließen") { close() }
+                    }
                 }
             }
         }
     }
     if (add) AddFriendPopup(onClose = { add = false; refresh() })
     gift?.let { g -> GiftMenu(g, onAct = { work -> act(work) }) { gift = null; refresh() } }
-    if (rename) NameDialog(st?.optJSONObject("me")?.optString("name") ?: "", onClose = { rename = false }) { n -> act { Pals.setName(ctx, n); null }; rename = false }
     pick?.let { p ->
         val name = p.optString("name")
         if (p.optString("kind") == "request") ConsoleMenu(name, "möchte dein Freund sein", options = listOf(
@@ -289,8 +315,8 @@ fun FriendsPanel() {
 private fun Hint(btn: String, what: String, onClick: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clip(RoundedCornerShape(12.dp))
         .then(Modifier.background(Color.Transparent))) {
-        Box(Modifier.size(24.dp).clip(CircleShape).background(if (btn == "Y") Color(0xFF3FB950) else Color.White), contentAlignment = Alignment.Center) {
-            Text(btn, color = if (btn == "Y") Color.White else Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Box(Modifier.size(24.dp).clip(CircleShape).background(when (btn) { "Y" -> Color(0xFF3FB950); "X" -> Color(0xFF3B82F6); else -> Color.White }), contentAlignment = Alignment.Center) {
+            Text(btn, color = if (btn == "Y" || btn == "X") Color.White else Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         }
         androidx.compose.material3.TextButton(onClick) { Text(what, fontSize = 14.sp, color = Color.White) }
     }
@@ -354,7 +380,7 @@ private fun AddFriendPopup(onClose: () -> Unit) {
 }
 
 @Composable
-private fun NameDialog(current: String, onClose: () -> Unit, onSave: (String) -> Unit) {
+fun NameDialog(current: String, onClose: () -> Unit, onSave: (String) -> Unit) {
     var name by remember { mutableStateOf(current) }
     val f = remember { FocusRequester() }
     LaunchedEffect(Unit) { delay(150); runCatching { f.requestFocus() } }
@@ -377,44 +403,126 @@ private fun NameDialog(current: String, onClose: () -> Unit, onSave: (String) ->
 private fun giftWhat(kind: String) = when (kind) { "save" -> "einen Spielstand"; "both" -> "ein Spiel mit Spielstand"; else -> "ein Spiel" }
 private val wayLabel = mapOf("lan" to "lokal", "romm" to "RomM", "tunnel" to "Tunnel")
 
-/** one gift under "Für dich": who, what, and where it stands (with a bar while it loads) */
+/**
+ * red count on a round button: a pill that grows with the number (9+ at most), sits on the button's corner
+ * (half outside), with a dark ring so it separates from the button; the digit is centred without font padding.
+ */
 @Composable
-private fun GiftRow(g: JSONObject, modifier: Modifier = Modifier, onClick: () -> Unit) {
+fun CountBadge(n: Int, modifier: Modifier = Modifier) {
+    if (n <= 0) return
+    Box(modifier.offset(x = 5.dp, y = (-5).dp).height(20.dp).widthIn(min = 20.dp).clip(CircleShape)
+        .background(Color(0xFFE5484D)).border(2.dp, Color(0xFF141519), CircleShape).padding(horizontal = 5.dp),
+        contentAlignment = Alignment.Center) {
+        Text(if (n > 9) "9+" else "$n", color = Color.White, fontWeight = FontWeight.Bold,
+            style = androidx.compose.ui.text.TextStyle(fontSize = 11.sp, lineHeight = 11.sp,
+                platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false),
+                lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
+                    androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center, androidx.compose.ui.text.style.LineHeightStyle.Trim.Both)))
+    }
+}
+
+/** round icon button next to the party switch (gift, settings); a red count when something waits */
+@Composable
+private fun RoundIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, desc: String, badge: Int = 0, onClick: () -> Unit) {
     val fx = rememberFx()
-    val shape = RoundedCornerShape(14.dp)
+    Box {
+        Box(Modifier.size(50.dp).fx(fx, CircleShape, lift = 1.1f, onClick = onClick)
+            .then(if (fx.active) Modifier.background(Accent) else Modifier.background(GlassFill)), contentAlignment = Alignment.Center) {
+            Icon(icon, desc, Modifier.size(24.dp), tint = if (fx.active) OnAccent else Color.White)
+        }
+        CountBadge(badge, Modifier.align(Alignment.TopEnd))
+    }
+}
+
+/** cover + banner of a gift's game: the local ROM's scraped art when the game is here, else libretro's boxart by name */
+private fun giftArt(ctx: android.content.Context, g: JSONObject): Pair<java.io.File?, java.io.File?> = runCatching {
+    val sys = g.optString("system")
+    val file = g.optString("file")
+    val rom = g.optJSONObject("result")?.optString("game")?.takeIf { it.isNotEmpty() }?.let { java.io.File(it) }?.takeIf { it.exists() }
+        ?: file.takeIf { it.isNotEmpty() }?.let { runCatching { wtf.lennard.thorbro.Netplay.findRom(ctx, name = it)?.second }.getOrNull() }
+    val cover = rom?.let { wtf.lennard.thorbro.Media.coverForFile(ctx, sys, it) }
+        ?: listOf(file.substringBeforeLast('.'), g.optString("title")).filter { it.isNotEmpty() }.firstNotNullOfOrNull { wtf.lennard.thorbro.Media.cover(ctx, sys, it) }
+    val banner = rom?.let { runCatching { wtf.lennard.thorbro.Cocoon.media(ctx, sys, it.path, "hero") }.getOrNull() }
+    cover to banner
+}.getOrDefault(null to null)
+
+/** "Für dich", slid in over the friends list: one card per gift (artwork, banner behind it, save badge), A opens, X removes */
+@Composable
+private fun GiftsPage(inc: List<JSONObject>, wants: List<Pair<JSONObject, JSONObject>>, first: FocusRequester,
+                      onOpen: (JSONObject) -> Unit, onDismiss: (JSONObject) -> Unit, onSendWanted: (JSONObject, JSONObject) -> Unit) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.CardGiftcard, null, Modifier.size(28.dp), tint = Accent)
+            Text("Für dich", fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 12.dp))
+        }
+        Text("Spiele und Spielstände von Freunden", fontSize = 13.sp, color = Muted, modifier = Modifier.padding(top = 2.dp, bottom = 12.dp))
+        if (inc.isEmpty() && wants.isEmpty()) {
+            // something focusable so B / the dialog keep working
+            Box(Modifier.fillMaxWidth().height(140.dp).clip(RoundedCornerShape(18.dp)).background(Color(0xFF1C1E23)).focusRequester(first)
+                .fx(rememberFx(), RoundedCornerShape(18.dp)) {}, contentAlignment = Alignment.Center) {
+                Text("Gerade nichts – wenn dir jemand etwas schickt, liegt es hier.", fontSize = 14.sp, color = Muted, modifier = Modifier.padding(20.dp))
+            }
+        }
+        inc.forEachIndexed { i, g ->
+            GiftCard(g, Modifier.padding(bottom = 10.dp).then(if (i == 0) Modifier.focusRequester(first) else Modifier), onDismiss = { onDismiss(g) }) { onOpen(g) }
+        }
+        if (wants.isNotEmpty()) Section("Möchten das Spiel dazu")
+        wants.forEachIndexed { i, (o, t) ->
+            PersonRow(t.optString("name"), o.optString("title"), Modifier.padding(bottom = 6.dp).then(if (inc.isEmpty() && i == 0) Modifier.focusRequester(first) else Modifier),
+                "A: schicken") { onSendWanted(o, t) }
+        }
+    }
+}
+
+/** one gift: banner of the game behind (dimmed), the artwork on the left, a save icon top right for saves, a bar while it loads */
+@Composable
+private fun GiftCard(g: JSONObject, modifier: Modifier = Modifier, onDismiss: () -> Unit, onClick: () -> Unit) {
+    val ctx = LocalContext.current
+    val fx = rememberFx()
+    val shape = RoundedCornerShape(18.dp)
     val from = g.optJSONObject("from")?.optString("name") ?: "Freund"
     val state = g.optString("state")
+    val kind = g.optString("kind")
     val live = g.optJSONObject("live")
-    Column(modifier.fillMaxWidth().fx(fx, shape, lift = 1.02f, onClick = onClick).background(if (fx.active) Color(0x33FFFFFF) else Color(0xFF1C1E23))
-        .padding(horizontal = 12.dp, vertical = 9.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Avatar(from, 38)
-            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                Text(when (state) {
-                    "loading" -> "Lädt: ${g.optString("title")}"
-                    "done" -> "${g.optString("title")} ist da"
-                    else -> "$from schickt dir ${giftWhat(g.optString("kind"))}"
-                }, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    val art by androidx.compose.runtime.produceState<Pair<java.io.File?, java.io.File?>>(null to null, g.optString("gid"), state) {
+        value = withContext(Dispatchers.IO) { giftArt(ctx, g) }
+    }
+    Box(modifier.fillMaxWidth().height(128.dp)
+        .onPreviewKeyEvent { e -> if (e.type == KeyEventType.KeyDown && e.key == Key.ButtonX && state != "loading") { onDismiss(); true } else false }
+        .fx(fx, shape, lift = 1.02f, onClick = onClick).clip(shape).background(Color(0xFF1C1E23))) {
+        // banner: the game's hero art, else the cover blown up – always dimmed so the text stays readable
+        (art.second ?: art.first)?.let { Img(it, 640, Modifier.matchParentSize(), scale = androidx.compose.ui.layout.ContentScale.Crop) }
+        Box(Modifier.matchParentSize().background(androidx.compose.ui.graphics.Brush.horizontalGradient(
+            listOf(Color(0xF0141519), Color(0xC0141519), Color(if (fx.active) 0x40141519 else 0x80141519)))))
+        Row(Modifier.fillMaxSize().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.width(78.dp).fillMaxHeight().clip(RoundedCornerShape(10.dp)).background(Color(0x33FFFFFF)), contentAlignment = Alignment.Center) {
+                if (art.first != null) Img(art.first, 256, Modifier.fillMaxSize(), scale = androidx.compose.ui.layout.ContentScale.Crop)
+                else Icon(if (kind == "save") Icons.Filled.Save else Icons.Filled.SportsEsports, null, Modifier.size(34.dp), tint = Muted)
+            }
+            Column(Modifier.weight(1f).padding(start = 14.dp, end = 28.dp)) {
+                Text(g.optString("title"), fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("von $from · " + when (kind) { "save" -> "Spielstand"; "both" -> "Spiel + Spielstand"; else -> "Spiel" }, fontSize = 13.sp, color = Color(0xFFD5D8DE), maxLines = 1)
                 val size = g.optLong("size").takeIf { it > 0 } ?: g.optJSONObject("save")?.optLong("size") ?: 0L
                 Text(when (state) {
-                    "loading" -> "von $from" + (live?.optString("way")?.let { wayLabel[it] }?.let { " · $it" } ?: "") +
-                        (live?.takeIf { it.optLong("total") > 0 }?.let { " · ${fmtBytes(it.optLong("done"))} von ${fmtBytes(it.optLong("total"))}" } ?: "")
+                    "loading" -> "lädt" + (live?.optString("way")?.let { wayLabel[it] }?.let { " · $it" } ?: "") +
+                        (live?.takeIf { it.optLong("total") > 0 }?.let { " · ${it.optLong("done") * 100 / it.optLong("total")} %" } ?: " …")
                     "failed", "wifi" -> g.optString("error")
                     "expired" -> "abgelaufen"
-                    "done" -> "von $from · " + (g.optJSONObject("result")?.optString("save")?.takeIf { it.isNotEmpty() }?.let { "Spielstand $it" } ?: "fertig")
-                    else -> listOf(g.optString("title"), if (size > 0) fmtBytes(size) else "", if (g.optString("kind") == "both") "mit Spielstand" else "",
-                        if (g.optBoolean("missing")) "Spiel fehlt" else "").filter { it.isNotEmpty() }.joinToString(" · ")
-                }, fontSize = 12.sp, color = if (state == "failed") Bad else Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
-            Text(when (state) { "new" -> "neu"; "loading" -> live?.let { l -> if (l.optLong("total") > 0) "${l.optLong("done") * 100 / l.optLong("total")} %" else "…" } ?: "…"
-                "failed", "wifi" -> "A: nochmal"; else -> "" }, fontSize = 13.sp, color = if (state == "new") Ok else if (fx.active) Color.White else Muted)
-        }
-        if (state == "loading" && live != null && live.optLong("total") > 0) {
-            val p = live.optLong("done").toFloat() / live.optLong("total")
-            Box(Modifier.padding(top = 8.dp).fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color(0x22FFFFFF))) {
-                Box(Modifier.fillMaxWidth(p.coerceIn(0f, 1f)).height(4.dp).background(Color.White))
+                    "done" -> "ist da" + (g.optJSONObject("result")?.optString("save")?.takeIf { it.isNotEmpty() }?.let { " · $it" } ?: "")
+                    else -> listOf("neu", if (size > 0) fmtBytes(size) else "", if (g.optBoolean("missing")) "Spiel fehlt" else "").filter { it.isNotEmpty() }.joinToString(" · ")
+                }, fontSize = 12.sp, color = when (state) { "failed", "wifi" -> Bad; "new", "done" -> Ok; else -> Muted }, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 4.dp))
+                if (state == "loading" && live != null && live.optLong("total") > 0) {
+                    val p = live.optLong("done").toFloat() / live.optLong("total")
+                    Box(Modifier.padding(top = 6.dp).fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color(0x33FFFFFF))) {
+                        Box(Modifier.fillMaxWidth(p.coerceIn(0f, 1f)).height(4.dp).background(Color.White))
+                    }
+                }
             }
         }
+        // saves get the save icon in the corner
+        if (kind == "save" || kind == "both") Box(Modifier.align(Alignment.TopEnd).padding(8.dp).size(30.dp).clip(CircleShape).background(Color(0xCC000000)),
+            contentAlignment = Alignment.Center) { Icon(Icons.Filled.Save, "Spielstand", Modifier.size(18.dp), tint = Color.White) }
     }
 }
 

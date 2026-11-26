@@ -310,6 +310,16 @@ object Gifts {
     private class Live(@Volatile var done: Long, @Volatile var total: Long, @Volatile var way: String, @Volatile var job: Int)
     private val live = ConcurrentHashMap<String, Live>()
 
+    /** X under "Für dich": takes a gift off the list; a new one is declined (the sender learns it), a running one stays */
+    fun dismiss(ctx: Context, gid: String) {
+        val e = incoming(ctx).firstOrNull { it.optString("gid") == gid } ?: return
+        when (e.optString("state")) {
+            "loading" -> {}
+            "new" -> decline(ctx, gid)
+            else -> updateIn(ctx, gid) { it.put("state", "declined") }
+        }
+    }
+
     fun decline(ctx: Context, gid: String) {
         val e = incoming(ctx).firstOrNull { it.optString("gid") == gid } ?: return
         updateIn(ctx, gid) { it.put("state", "declined") }

@@ -44,6 +44,19 @@ object Shell {
         }.getOrNull()
     }
 
+    /** runs [cmd] and returns raw stdout bytes (e.g. a PNG from screencap); null when Shizuku is not ready or it failed */
+    fun bytes(vararg cmd: String): ByteArray? {
+        if (!ready()) return null
+        return runCatching {
+            val m = Shizuku::class.java.getDeclaredMethod("newProcess", Array<String>::class.java, Array<String>::class.java, String::class.java)
+            m.isAccessible = true
+            val p = m.invoke(null, arrayOf(*cmd), null, null) as Process
+            p.outputStream.close()
+            val out = p.inputStream.readBytes()
+            if (p.waitFor() == 0 && out.isNotEmpty()) out else null
+        }.getOrNull()
+    }
+
     /** single-quotes a path for sh -c */
     fun q(s: String) = "'" + s.replace("'", "'\\''") + "'"
 }
