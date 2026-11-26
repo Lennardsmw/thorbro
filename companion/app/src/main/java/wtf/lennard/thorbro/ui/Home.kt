@@ -189,10 +189,21 @@ fun ButtonHints(vararg hints: Pair<String, String>) {
     WhileVisible { while (true) { TransferLine.text = withContext(Dispatchers.IO) { wtf.lennard.thorbro.TransferQueue.line(ctx) }; delay(1000) } }
     Box(Modifier.fillMaxWidth().background(Theme.p.hintBar).padding(horizontal = 32.dp, vertical = 10.dp)) {
         val transfer = TransferLine.text
-        if (BottomStatus.text == null && transfer != null) Row(Modifier.align(Alignment.CenterStart).fillMaxWidth(0.55f), verticalAlignment = Alignment.CenterVertically) {
+        var transferMenu by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+        if (BottomStatus.text == null && transfer != null) Row(Modifier.align(Alignment.CenterStart).fillMaxWidth(0.55f).tap { transferMenu = true },
+            verticalAlignment = Alignment.CenterVertically) {
             androidx.compose.material3.CircularProgressIndicator(progress = { transfer.second }, modifier = Modifier.size(18.dp), strokeWidth = 2.5.dp, color = Ink, trackColor = Soft)
-            Text("  ${transfer.first}", fontSize = 14.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            Text("  ${transfer.first}", fontSize = 14.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+            Text("  ✕", fontSize = 15.sp, color = Muted)
         }
+        // tap on the line (touch) – with the pad: Store › Downloads, X on the row
+        if (transferMenu) ConsoleMenu("Übertragung", transfer?.first ?: "", options = listOf(
+            "Abbrechen" to {
+                wtf.lennard.thorbro.TransferQueue.current?.optString("id")?.let { id -> kotlin.concurrent.thread { wtf.lennard.thorbro.TransferQueue.cancel(ctx, id) } }
+                transferMenu = false
+            },
+            "Alle Übertragungen" to { Nav.go(Screen.TRANSFERS); transferMenu = false },
+        )) { transferMenu = false }
         BottomStatus.text?.let { t -> // e.g. "Verbinde mit Thor-8b8e …" while a job runs, then its result for a moment
             Row(Modifier.align(Alignment.CenterStart).fillMaxWidth(0.62f), verticalAlignment = Alignment.CenterVertically) {
                 val p = BottomStatus.progress

@@ -24,6 +24,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,7 +63,7 @@ fun TransfersScreen() {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(if (items.isEmpty()) "Nichts in der Warteschlange" else "${items.size} in der Warteschlange · eins nach dem anderen",
                         fontSize = 15.sp, color = Muted, modifier = Modifier.weight(1f))
-                    val later = items.count { it.optString("state") in listOf("later", "error") }
+                    val later = items.count { it.optString("state") in listOf("later", "error", "cancelled") }
                     if (later > 0) SmallButton("Alle starten ($later)", Icons.Filled.PlayArrow, Modifier.focusRequester(first)) { act { TransferQueue.start(ctx, null) } }
                     else SmallButton("Zum Store", Icons.Filled.CloudDownload, Modifier.focusRequester(first)) { Nav.go(Screen.STORE) }
                 }
@@ -68,6 +73,7 @@ fun TransfersScreen() {
                 "Wartet" to items.filter { it.optString("state") == "waiting" },
                 "Für später" to items.filter { it.optString("state") == "later" },
                 "Fehlgeschlagen" to items.filter { it.optString("state") == "error" },
+                "Abgebrochen" to items.filter { it.optString("state") == "cancelled" },
             ).filter { it.second.isNotEmpty() }.forEach { (title, group) ->
                 item(key = "g-$title") {
                     SettingsGroup(title) {
@@ -78,11 +84,17 @@ fun TransfersScreen() {
                                 "running" -> listOfNotNull("${(e.optDouble("progress", 0.0) * 100).toInt()} %", e.optString("transfer").takeIf { e.has("transfer") && it.isNotEmpty() }).joinToString(" · ")
                                 "error" -> e.optString("error")
                                 "later" -> fmtBytes(e.optLong("size")) + " · A = jetzt starten"
+                                "cancelled" -> "abgebrochen · A = neu starten oder entfernen"
                                 else -> fmtBytes(e.optLong("size"))
                             }
+                            val canCancel = state in listOf("running", "waiting", "later")
                             SettingRow((if (up) "⬆ RomM · " else "⬇ ") + e.optString("name"), sub,
                                 when { state == "error" -> Icons.Filled.ErrorOutline; state == "later" -> Icons.Filled.WatchLater; up -> Icons.Filled.CloudUpload; else -> Icons.Filled.CloudDownload },
-                                warn = state == "error", value = if (state == "running") "" else "Optionen") { menu = e }
+                                warn = state == "error", value = if (canCancel) "X Abbrechen" else "Optionen",
+                                // X on a row = cancel it right away (also the running one)
+                                modifier = Modifier.hintA("Optionen").onPreviewKeyEvent { k ->
+                                    if (canCancel && k.type == KeyEventType.KeyDown && k.key == Key.ButtonX) { act { TransferQueue.cancel(ctx, e.optString("id")) }; true } else false
+                                }) { menu = e }
                         }
                     }
                 }
@@ -95,11 +107,13 @@ fun TransfersScreen() {
         val id = e.optString("id")
         val state = e.optString("state")
         ConsoleMenu(e.optString("name"), when (state) {
-            "running" -> "Läuft gerade. Ein abgebrochener Download macht beim nächsten Start dort weiter, wo er war."
+            "running" -> "Läuft gerade. Abbrechen stoppt die Übertragung sofort und löscht den halb geladenen Teil."
             "error" -> "Fehler: ${e.optString("error")}"
+            "cancelled" -> "Abgebrochen."
             else -> fmtBytes(e.optLong("size"))
         }, options = buildList {
-            if (state == "later" || state == "error") add("Jetzt starten" to { act { TransferQueue.start(ctx, id) }; menu = null })
+            if (state in listOf("running", "waiting", "later")) add("Abbrechen" to { act { TransferQueue.cancel(ctx, id) }; menu = null })
+            if (state == "later" || state == "error" || state == "cancelled") add((if (state == "cancelled") "Neu starten" else "Jetzt starten") to { act { TransferQueue.start(ctx, id) }; menu = null })
             if (state != "running") add("Aus der Liste nehmen" to { act { TransferQueue.remove(ctx, id) }; menu = null })
         }) { menu = null }
     }

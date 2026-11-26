@@ -53,9 +53,21 @@ object TransferQueue {
     /** start a "für später" or failed item (or all with [id] = null) */
     fun start(ctx: Context, id: String?) = synchronized(lock) {
         val l = items(ctx)
-        l.filter { id == null || it.optString("id") == id }.forEach { it.put("later", false).remove("error") }
+        l.filter { id == null || it.optString("id") == id }.forEach { it.put("later", false).remove("error"); it.remove("cancelled") }
         store(ctx, l); kick(ctx)
     }
+
+    /**
+     * Stops an item: a waiting one is just marked, the running one is stopped for real (the download stream ends and its
+     * .thorbro-part is deleted, the upload ends). It stays in the list as "abgebrochen" until removed; the queue goes on.
+     */
+    fun cancel(ctx: Context, id: String) = synchronized(lock) {
+        val l = items(ctx)
+        l.firstOrNull { it.optString("id") == id }?.put("cancelled", true)?.remove("error")
+        store(ctx, l)
+        if (current?.optString("id") == id) { cancelRequested = id; currentJob?.stop = 2 }
+    }
+    @Volatile private var cancelRequested: String? = null
 
     fun remove(ctx: Context, id: String) = synchronized(lock) {
         if (current?.optString("id") == id) return@synchronized // the running one finishes (a download keeps its .part for later)
@@ -71,7 +83,7 @@ object TransferQueue {
         val j = currentJob
         return JSONArray(items(ctx).map { e ->
             val o = JSONObject(e.toString())
-            o.put("state", when { e.optString("id") == cur -> "running"; e.has("error") -> "error"; e.optBoolean("later") -> "later"; else -> "waiting" })
+            o.put("state", when { e.optBoolean("cancelled") -> "cancelled"; e.optString("id") == cur -> "running"; e.has("error") -> "error"; e.optBoolean("later") -> "later"; else -> "waiting" })
             if (e.optString("id") == cur && j != null) o.put("progress", j.gameProgress()).put("transfer", j.transfer())
             o
         })
@@ -81,7 +93,7 @@ object TransferQueue {
     fun line(ctx: Context): Pair<String, Float>? {
         val e = current ?: return null
         val j = currentJob ?: return null
-        val waiting = items(ctx).count { it.optString("id") != e.optString("id") && !it.optBoolean("later") && !it.has("error") }
+        val waiting = items(ctx).count { it.optString("id") != e.optString("id") && !it.optBoolean("later") && !it.has("error") && !it.optBoolean("cancelled") }
         val eta = j.transfer()?.substringAfter("noch ", "")?.takeIf { it.isNotEmpty() }
         val p = j.gameProgress().toFloat().coerceIn(0f, 1f)
         val arrow = if (e.optString("kind") == "upload") "⬆ RomM" else "⬇"
@@ -100,16 +112,21 @@ object TransferQueue {
 
     private fun loop(ctx: Context) {
         while (true) {
-            val next = synchronized(lock) { items(ctx).firstOrNull { !it.optBoolean("later") && !it.has("error") } } ?: break
-            current = next
+            val next = synchronized(lock) { items(ctx).firstOrNull { !it.optBoolean("later") && !it.has("error") && !it.optBoolean("cancelled") } } ?: break
+            current = next; cancelRequested = null
             val err = runCatching { run(ctx, next) }.fold({ it }, { it.message ?: "Fehler" })
+            val wasCancelled = cancelRequested == next.optString("id")
             synchronized(lock) {
                 val l = items(ctx)
-                if (err == null) l.removeAll { it.optString("id") == next.optString("id") }
-                else l.firstOrNull { it.optString("id") == next.optString("id") }?.put("error", err)
+                val e = l.firstOrNull { it.optString("id") == next.optString("id") }
+                when {
+                    wasCancelled || e?.optBoolean("cancelled") == true -> e?.put("cancelled", true)?.remove("error")
+                    err == null -> l.removeAll { it.optString("id") == next.optString("id") }
+                    else -> e?.put("error", err)
+                }
                 store(ctx, l)
             }
-            current = null; currentJob = null
+            current = null; currentJob = null; cancelRequested = null
         }
     }
 
@@ -122,11 +139,15 @@ object TransferQueue {
                 val paths = (0 until a.length()).map { a.getString(it) }.filter { java.io.File(it).exists() }.toSet()
                 if (paths.isEmpty()) return null // gone (offloaded / deleted): nothing left to send
                 // a running RomM batch (Abgleich) first: wait for it, then send ours
-                while (RommSync.current?.let { !it.done } == true && RommSync.current?.file !in paths) Thread.sleep(1000)
+                while (RommSync.current?.let { !it.done } == true && RommSync.current?.file !in paths) {
+                    if (cancelRequested == e.optString("id")) return "Abgebrochen"
+                    Thread.sleep(1000)
+                }
                 RommSync.uploadGame(ctx, paths)
             }
         }
         currentJob = job
+        if (cancelRequested == e.optString("id")) job.stop = 2 // cancelled in the moment it started
         while (!job.done) Thread.sleep(500)
         val res = job.result
         return job.error ?: res?.optJSONArray("errors")?.takeIf { it.length() > 0 }?.optString(0)

@@ -337,3 +337,4 @@ body:has(.transferbar:not([hidden])) main { padding-bottom: 48px; }
 .fart .cbadge { background: rgba(239, 231, 210, .95); }
 .avatar { background: #EFE7D2; }
 .transferbar[hidden] { display: none; }
+.romcard .later[data-cancel]:not([data-cancel=""]) { opacity: 1; }

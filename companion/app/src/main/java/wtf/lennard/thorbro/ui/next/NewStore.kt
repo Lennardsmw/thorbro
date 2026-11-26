@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.WatchLater
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.verticalScroll
@@ -92,6 +93,7 @@ private fun storeState(id: Int): Pair<String, Float?>? {
         q?.optString("state") == "waiting" -> "wartet" to 0f
         q?.optString("state") == "later" -> "für später" to null
         q?.optString("state") == "error" -> "Fehler" to null
+        q?.optString("state") == "cancelled" -> "abgebrochen" to null
         job?.done == true && job.error == null -> "auf dem Thor ✓" to null
         else -> null
     }
@@ -297,10 +299,16 @@ private fun StoreDetail(s: StoreGame, free: Long, @Suppress("UNUSED_PARAMETER") 
                     if (state == "error") Text("Letzter Versuch: ${q.optString("error")}", color = Bad, fontSize = 14.sp, maxLines = 2, modifier = Modifier.padding(top = 10.dp))
                     if (done) Text("Zu finden unter Spiele › ${s.sysName}", color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 10.dp))
                     Spacer(Modifier.height(12.dp))
+                    if (running || waiting || state == "later") {
+                        BigButton("Abbrechen", Icons.Filled.Close, modifier = Modifier.width(320.dp).hintA("Abbrechen")) {
+                            scope.launch { withContext(Dispatchers.IO) { wtf.lennard.thorbro.TransferQueue.cancel(ctx, q!!.optString("id")) }; StoreQueue.poll(ctx) }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                    }
                     if (q == null && !done) {
                         BigButton("Für später merken", Icons.Filled.WatchLater, modifier = Modifier.width(320.dp).hintA("Merken")) { add(true) }
                         Spacer(Modifier.height(12.dp))
-                    } else if (state == "later" || state == "error") {
+                    } else if (state == "later" || state == "error" || state == "cancelled") {
                         BigButton("Jetzt laden", Icons.Filled.CloudDownload, modifier = Modifier.width(320.dp)) {
                             scope.launch { withContext(Dispatchers.IO) { wtf.lennard.thorbro.TransferQueue.start(ctx, q.optString("id")) }; StoreQueue.poll(ctx) }
                         }

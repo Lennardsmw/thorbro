@@ -229,6 +229,7 @@ object RommSync {
             job.message = "Lade ${f.name} hoch"
             /** the file actually sent can differ from the listed size (zipped folders): scale it onto the rom's share */
             fun report(file: File): (Long) -> Unit { val len = file.length().coerceAtLeast(1); return { sent ->
+                job.check() // cancelled from the transfer list: ends the upload right here
                 val now = done + sent * romSize / len
                 job.progress = now.toDouble() / total
                 job.bytes(now, total); job.gameBytes(sent, len)
@@ -244,6 +245,7 @@ object RommSync {
                 } else upload(ctx, pid, f.name, f, assembling, report(f))
                 remember(ctx, slug, rom.getString("file"), romSize)
                 romsUp++; History.add(ctx, "rom_up", rom.optString("name").ifEmpty { f.name }, sys, ms = System.currentTimeMillis() - t0, size = romSize, path = f.path)
+            } catch (e: Jobs.Stopped) { throw e // cancelled: the queue handles it
             } catch (e: Exception) { errors.put("${f.name}: ${e.message}"); Logs.e("romm", "Upload ${f.name}", e) }
             done += romSize
             job.progress = done.toDouble() / total

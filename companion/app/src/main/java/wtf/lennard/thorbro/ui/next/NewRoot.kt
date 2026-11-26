@@ -65,7 +65,8 @@ fun NewRoot(screen: Screen?) {
                 }
             }
             }
-            ButtonHints("A" to (Hints.a ?: "Auswählen"), "B" to "Zurück", "L1 R1" to "Bereich")
+            if (screen == Screen.TRANSFERS) ButtonHints("A" to (Hints.a ?: "Auswählen"), "X" to "Abbrechen", "B" to "Zurück", "L1 R1" to "Bereich")
+            else ButtonHints("A" to (Hints.a ?: "Auswählen"), "B" to "Zurück", "L1 R1" to "Bereich")
         }
     }
     detail?.let { g ->

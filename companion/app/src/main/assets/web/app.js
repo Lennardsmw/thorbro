@@ -941,10 +941,13 @@ async function pollTransfers() {
   const bar = $('#transferBar'), l = transfers.line;
   bar.hidden = !l;
   if (l) { bar.querySelector('span').textContent = l.text; bar.querySelector('i').style.width = Math.round(l.progress * 100) + '%'; }
+  bar.dataset.id = (transfers.items || []).find((t) => t.state === 'running')?.id || '';
   if (!$('#store').hidden) { renderTransfers(); updateStoreCards(); }
   if (!document.hidden) trTimer = setTimeout(pollTransfers, l ? 1000 : 5000);
 }
-const trState = { running: 'läuft', waiting: 'wartet', later: 'für später', error: 'Fehler' };
+const trState = { running: 'läuft', waiting: 'wartet', later: 'für später', error: 'Fehler', cancelled: 'abgebrochen' };
+/** stop a waiting or running transfer (the running one really stops, its half file is deleted); it stays as "abgebrochen" */
+async function cancelTransfer(id) { await api(`/api/transfers/${encodeURIComponent(id)}/cancel`, { method: 'POST' }); pollTransfers(); }
 function renderTransfers() {
   const list = transfers.items || [];
   $('#trCount').textContent = list.length ? `· ${list.length}` : '';
@@ -953,17 +956,20 @@ function renderTransfers() {
       ? `${Math.round((t.progress || 0) * 100)} %${t.transfer ? ' · ' + esc(t.transfer) : ''}` : t.state === 'error' ? '<span class="err">' + esc(t.error) + '</span>' : trState[t.state]}</div>
       ${t.state === 'running' ? `<div class="bar"><i style="width:${Math.round((t.progress || 0) * 100)}%"></i></div>` : ''}</td>
     <td class="size">${fmt(t.size || 0)}</td>
-    <td class="acts">${t.state === 'later' || t.state === 'error' ? `<button class="small" data-tr-start="${esc(t.id)}">Jetzt starten</button>` : ''}
+    <td class="acts">${['running', 'waiting', 'later'].includes(t.state) ? `<button class="small" data-tr-cancel="${esc(t.id)}">Abbrechen</button>` : ''}
+      ${['later', 'error', 'cancelled'].includes(t.state) ? `<button class="small" data-tr-start="${esc(t.id)}">${t.state === 'cancelled' ? 'Neu starten' : 'Jetzt starten'}</button>` : ''}
       ${t.state !== 'running' ? `<button class="small" data-tr-remove="${esc(t.id)}">Entfernen</button>` : ''}</td></tr>`).join('')}</tbody></table>`
     : '<p class="muted">Nichts in der Warteschlange. Im Store „Laden“ oder „Später“ wählen.</p>';
 }
 $('#trList').addEventListener('click', async (e) => {
-  const s = e.target.closest('[data-tr-start]'), r = e.target.closest('[data-tr-remove]');
+  const s = e.target.closest('[data-tr-start]'), r = e.target.closest('[data-tr-remove]'), c = e.target.closest('[data-tr-cancel]');
+  if (c) return cancelTransfer(c.dataset.trCancel);
   if (s) await api('/api/transfers/start?' + q({ id: s.dataset.trStart }), { method: 'POST' });
   else if (r) await api('/api/transfers/remove?' + q({ id: r.dataset.trRemove }), { method: 'POST' });
   else return;
   pollTransfers();
 });
+$('#transferBar button').onclick = () => { const id = $('#transferBar').dataset.id; if (id && confirm('Übertragung abbrechen?')) cancelTransfer(id); };
 $('#trStartAll').onclick = async () => { await api('/api/transfers/start', { method: 'POST' }); pollTransfers(); };
 
 // ---------- store: games only in RomM ----------
@@ -1007,12 +1013,17 @@ function updateStoreCards() {
     const eta = (t.transfer || '').includes('noch ') ? ' · noch ' + t.transfer.split('noch ').pop() : '';
     m.textContent = t.state === 'running' ? `${Math.round((t.progress || 0) * 100)} %${eta}` : t.state === 'error' ? 'Fehler: ' + t.error : trState[t.state];
     bar.style.width = t.state === 'running' ? Math.round((t.progress || 0) * 100) + '%' : '0';
+    const card = m.closest('.romcard'), later = card?.querySelector('[data-later]');
+    const active = ['running', 'waiting', 'later'].includes(t.state);
+    if (later) { later.textContent = active ? 'Abbrechen' : 'Später'; later.dataset.cancel = active ? t.id : ''; }
   }
 }
 $('#storeList').addEventListener('click', async (e) => {
   const c = e.target.closest('[data-store]');
   if (!c) return;
-  const later = !!e.target.closest('[data-later]');
+  const lb = e.target.closest('[data-later]');
+  if (lb?.dataset.cancel) return cancelTransfer(lb.dataset.cancel);
+  const later = !!lb;
   const t = $('#st-' + c.dataset.store);
   if (!later && /%|wartet|✓/.test(t.textContent)) return;
   try {

@@ -623,6 +623,13 @@ object Server {
                     withContext(Dispatchers.IO) { TransferQueue.start(ctx, q("id")) }
                     json(JSONObject().put("ok", true))
                 }
+                // stop a waiting or running transfer; it stays as "cancelled" until removed
+                post("/api/transfers/{id}/cancel") {
+                    if (denied(ctx)) return@post
+                    val id = call.parameters["id"] ?: return@post fail("id missing")
+                    withContext(Dispatchers.IO) { TransferQueue.cancel(ctx, id) }
+                    json(JSONObject().put("ok", true))
+                }
                 post("/api/transfers/remove") {
                     if (denied(ctx)) return@post
                     val id = q("id") ?: return@post fail("id missing")
