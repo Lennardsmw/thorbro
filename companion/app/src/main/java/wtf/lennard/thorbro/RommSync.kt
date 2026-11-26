@@ -169,7 +169,7 @@ object RommSync {
         val saves = localSaves(ctx)
         val pendingSaves = saves.count { s -> st.optJSONObject(stateKey(ctx, s))?.optString("local") != md5(s.file) }
         return JSONObject().put("systems", systems).put("saves", saves.size).put("savesPending", pendingSaves)
-            .put("canWrite", Romm.hasScope(ctx, "roms.write")).put("canFirmware", Romm.hasScope(ctx, "firmware.write")).put("auto", auto(ctx))
+            .put("canWrite", Romm.hasScope(ctx, "roms.write")).put("auto", auto(ctx))
             .put("watcher", SaveWatcher.last).put("wifi", SaveWatcher.onWifi(ctx))
     }
 
@@ -254,10 +254,6 @@ object RommSync {
             savesDown = d.optInt("downloaded"); d.optJSONArray("errors")?.let { for (i in 0 until it.length()) errors.put(it.get(i)) }
             val r = syncSaves(ctx, job)
             savesUp = r.optInt("uploaded"); r.optJSONArray("errors")?.let { for (i in 0 until it.length()) errors.put(it.get(i)) }
-            // Switch keys + firmware from Eden, for RomBro on the Mac; unchanged files cost only a fingerprint
-            job.message = "Switch-Keys & Firmware"
-            val fw = SwitchFirmware.sync(ctx)
-            fw.optString("error").takeIf { it.isNotEmpty() }?.let { errors.put("Switch-Firmware: $it") }
         }
         return JSONObject().put("romsUploaded", romsUp).put("savesUploaded", savesUp).put("savesDownloaded", savesDown).put("errors", errors)
     }

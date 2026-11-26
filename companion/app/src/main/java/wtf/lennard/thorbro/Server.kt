@@ -489,10 +489,6 @@ object Server {
                     val j = withContext(Dispatchers.IO) { runCatching { RommSync.uploadGame(ctx, paths) } }
                     j.fold({ json(it.json()) }, { fail(it.message ?: "Fehler") })
                 }
-                post("/api/romm/firmware") {
-                    if (denied(ctx)) return@post
-                    json(SwitchFirmware.start(ctx).json())
-                }
                 post("/api/romm/sync/config") {
                     if (denied(ctx)) return@post
                     q("auto")?.let { RommSync.setAuto(ctx, it == "1") }

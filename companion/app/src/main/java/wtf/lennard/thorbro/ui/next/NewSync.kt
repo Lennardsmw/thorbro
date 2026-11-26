@@ -25,7 +25,6 @@ import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -57,7 +56,6 @@ import wtf.lennard.thorbro.Media
 import wtf.lennard.thorbro.Romm
 import wtf.lennard.thorbro.RommSync
 import wtf.lennard.thorbro.Saves
-import wtf.lennard.thorbro.SwitchFirmware
 
 /** a game that has a save on the Thor, for the Spielstände shelf */
 private class SaveGame(val sys: String, val rom: JSONObject)
@@ -76,7 +74,6 @@ fun SyncScreenNew() {
     var auto by remember { mutableStateOf(RommSync.auto(ctx)) }
     var busy by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
-    var fwNote by remember { mutableStateOf("") }
     var history by remember { mutableStateOf(org.json.JSONArray()) }
     var profiles by remember { mutableStateOf(emptyList<JSONObject>()) }
     var profileOpen by remember { mutableStateOf<JSONObject?>(null) }
@@ -165,20 +162,6 @@ fun SyncScreenNew() {
                     }
                     SettingRow("Alle Spielstände sichern", "Backup auf dem Thor", Icons.Filled.History) {
                         scope.launch { withContext(Dispatchers.IO) { runCatching { Saves.backup(ctx, null) } }; note = "Alle Spielstände gesichert"; tick += 8 }
-                    }
-                    if (connected) SettingRow("Switch-Keys & Firmware", "für RomBro auf dem Mac", Icons.Filled.Key, value = fwNote) {
-                        fwNote = "Lädt hoch …"
-                        scope.launch {
-                            val r = withContext(Dispatchers.IO) { SwitchFirmware.sync(ctx, force = true) }
-                            val up = r.optJSONArray("uploaded")?.length() ?: 0
-                            fwNote = when {
-                                r.optBoolean("needsRepair") -> "RomM neu koppeln"
-                                r.has("error") -> "Fehler"
-                                r.has("missing") -> r.optString("missing")
-                                up > 0 -> "$up hochgeladen"
-                                else -> "RomM hat sie schon"
-                            }
-                        }
                     }
                     SettingRow(if (connected) "RomM-Server" else "RomM-Server hinzufügen", if (connected) "" else "Adresse eingeben, Code in RomM bestätigen",
                         if (connected) Icons.Filled.Dns else Icons.Filled.AddLink,

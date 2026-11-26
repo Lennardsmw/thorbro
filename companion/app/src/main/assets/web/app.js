@@ -1048,29 +1048,12 @@ async function loadSyncPlan() {
     <h4 style="margin:12px 0 4px">Spiele, die RomM noch nicht hat</h4>
     ${missing.length ? missing.map((s) => `<label style="display:block"><input type="checkbox" data-sync-sys="${s.system}"> ${esc((romData?.systems.find((x) => x.id === s.system) || {}).name || s.system)}: ${s.missing} Spiele, ${fmt(s.missingSize)}</label>`).join('') : '<span class="ok">✓ RomM hat alle Spiele vom Thor</span>'}
     <div class="row"><label class="muted">Heimnetz-Adresse (direkt statt übers Internet):</label><input id="rommLan" value="${esc(st.lanUrl || '')}" placeholder="aus" style="flex:1"><button id="rommLanSave">Speichern</button><span class="muted">${st.viaLan ? '✓ gerade im Heimnetz' : 'zuletzt nicht erreichbar'}</span></div>
-    <div class="row"><button id="syncRun" class="primary">Jetzt abgleichen</button><span id="syncState" class="muted"></span></div>
-    <h4 style="margin:12px 0 4px">Switch-Keys &amp; Firmware</h4>
-    <div class="muted">Lädt prod.keys, title.keys und die Firmware aus Eden als RomM-Firmware hoch, damit RomBro auf dem Mac sie installiert. Läuft auch bei jedem Abgleich mit (nur wenn sich etwas geändert hat).</div>
-    ${p.canFirmware ? '' : '<p class="err">Dafür braucht ThorBro das Recht firmware.write: RomM neu koppeln für Firmware. <button id="rommRepair2">Neu koppeln</button></p>'}
-    <div class="row"><button id="fwRun">Switch-Keys &amp; Firmware zu RomM</button><span id="fwState" class="muted"></span></div>`;
+    <div class="row"><button id="syncRun" class="primary">Jetzt abgleichen</button><span id="syncState" class="muted"></span></div>`;
 }
 document.addEventListener('change', (e) => { if (e.target.id === 'syncAuto') api('/api/romm/sync/config?' + q({ auto: e.target.checked ? 1 : 0 }), { method: 'POST' }); });
 document.addEventListener('click', async (e) => {
-  if (e.target.id === 'rommRepair' || e.target.id === 'rommRepair2') { $('#rommSetup').hidden = false; $('#rommConnect').click(); }
+  if (e.target.id === 'rommRepair') { $('#rommSetup').hidden = false; $('#rommConnect').click(); }
   if (e.target.id === 'rommLanSave') { await api('/api/romm/lan?' + q({ url: $('#rommLan').value }), { method: 'POST' }); loadSyncPlan(); return; }
-  if (e.target.id === 'fwRun') {
-    e.target.disabled = true;
-    const { body: job } = await api('/api/romm/firmware', { method: 'POST' });
-    const res = await waitJob(job.id, (j) => { $('#fwState').textContent = j.message || '…'; });
-    e.target.disabled = false;
-    const r = res.result || {};
-    $('#fwState').textContent = res.error ? 'Fehler: ' + res.error
-      : r.needsRepair ? 'RomM neu koppeln für Firmware'
-      : r.error ? 'Fehler: ' + r.error
-      : r.missing ? r.missing
-      : r.uploaded?.length ? 'Hochgeladen: ' + r.uploaded.join(', ') : 'RomM hat Keys & Firmware schon';
-    return;
-  }
   if (e.target.id !== 'syncRun') return;
   const systems = [...document.querySelectorAll('[data-sync-sys]:checked')].map((x) => x.dataset.syncSys).join(',');
   e.target.disabled = true;
@@ -1120,7 +1103,7 @@ $('#rommList').onclick = async (e) => {
 };
 
 // ---------- save backups ----------
-const histLabel = { save_up: '⬆ Spielstand hochgeladen', save_down: '⬇ Spielstand von RomM', rom_up: '⬆ Spiel zu RomM', offload: '📦 Ausgelagert', download: '⬇ Aus RomM geladen', restore: '↺ Spielstand zurückgesetzt', save_install: '⤓ Spielstand installiert', firmware_up: '🔑 Switch-Keys & Firmware zu RomM' };
+const histLabel = { save_up: '⬆ Spielstand hochgeladen', save_down: '⬇ Spielstand von RomM', rom_up: '⬆ Spiel zu RomM', offload: '📦 Ausgelagert', download: '⬇ Aus RomM geladen', restore: '↺ Spielstand zurückgesetzt', save_install: '⤓ Spielstand installiert' };
 async function loadHistory() {
   try {
     const list = (await api('/api/history?limit=30')).body;
