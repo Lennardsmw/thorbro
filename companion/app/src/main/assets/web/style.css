@@ -262,3 +262,16 @@ html[data-theme="doodle"] :focus-visible { outline: 3px solid var(--sage); outli
 html[data-theme="doodle"] .fav { color: var(--orange); }
 html[data-theme="doodle"] .friendsbtn { margin-left: auto; }
 @media (max-width: 760px) { html[data-theme="doodle"] .mood { display: none; } }
+
+/* Dev-Versionen + version tag bottom left */
+.vertag { position: fixed; left: 10px; bottom: 8px; z-index: 50; background: none; border: 0; padding: 2px 4px; font-size: 11px; color: var(--muted); opacity: .7; cursor: pointer; }
+.vertag:hover { opacity: 1; text-decoration: underline; }
+dialog.devdlg { width: min(720px, calc(100vw - 32px)); }
+dialog.devdlg .devsrc { margin: 8px 0 10px; gap: 6px; }
+.devitem { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-top: 8px; }
+.devitem.cur { border-color: var(--accent); }
+.devitem .devhead { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.devitem strong { overflow-wrap: anywhere; }
+.devitem ul { margin: 6px 0 0; padding-left: 20px; font-size: 13px; }
+.devbadge { font-size: 11px; color: var(--accent); border: 1px solid var(--accent); border-radius: 6px; padding: 0 5px; margin-left: 4px; }
+.devold { font-size: 12px; white-space: nowrap; }

@@ -83,6 +83,7 @@ let info = null;
 async function loadDevice() {
   const { body } = await api('/api/info');
   info = body;
+  if ($('#verTag')) { $('#verTag').textContent = 'v' + body.appVersion; $('#verTag').hidden = false; }
   updMood();
   $('#conn').textContent = `${body.manufacturer} ${body.model} · ${body.ip}:${body.port}`;
   const p = body.permissions;
@@ -92,7 +93,7 @@ async function loadDevice() {
     <div class="card"><h3>Akku</h3>${body.battery.percent}%${body.battery.charging ? ' · lädt' : ''}</div>
     ${body.storage.map((v) => `<div class="card"><h3>${esc(v.label)}</h3>${fmt(v.free)} frei von ${fmt(v.total)}<br><span class="muted">${esc(v.path)}</span></div>`).join('')}
     <div class="card"><h3>ThorBro-Update</h3>Installiert: <strong>${esc(body.appVersion)}</strong>
-      <div class="row" style="margin:8px 0"><button id="updCheck" class="primary">Nach Updates suchen</button></div>
+      <div class="row" style="margin:8px 0"><button id="updCheck" class="primary">Nach Updates suchen</button> <button id="devOpen">Dev-Versionen</button></div>
       <div id="selfStatus" class="muted"></div>
       <label style="display:block;margin-top:8px"><input id="updAuto" type="checkbox"> Automatisch aktualisieren (alle 6 h)</label>
       <details style="margin-top:6px"><summary class="muted">Weitere Optionen</summary>
@@ -200,6 +201,61 @@ document.addEventListener('change', async (e) => {
   if (e.target.id === 'updAuto') await api('/api/update/config?' + q({ auto: e.target.checked ? 1 : 0 }), { method: 'POST' });
   if (e.target.id === 'updFeed') { await api('/api/update/config?' + q({ feed: e.target.value }), { method: 'POST' }); loadUpdateConfig(); }
 });
+// ---------- Dev-Versionen: test builds from GitHub / home network / own URL ----------
+const DEV_SOURCES = [['github', 'GitHub'], ['home', 'Heimnetz'], ['custom', 'Eigene URL']];
+const devAgo = (iso) => {
+  const t = Date.parse(iso); if (!t) return '';
+  const m = Math.round((Date.now() - t) / 60000);
+  if (m < 60) return `vor ${Math.max(m, 1)} Min.`;
+  if (m < 1440) return `vor ${Math.round(m / 60)} Std.`;
+  const d = Math.round(m / 1440); return d === 1 ? 'gestern' : `vor ${d} Tagen`;
+};
+document.addEventListener('click', (e) => { if (e.target.id === 'devOpen' || e.target.id === 'verTag') openDev(); });
+function openDev() {
+  const d = $('#devDlg');
+  d.innerHTML = `<h3>Dev-Versionen</h3>
+    <div class="row devsrc">${DEV_SOURCES.map(([id, label]) => `<button data-devsrc="${id}">${label}</button>`).join('')}</div>
+    <div class="row" id="devCustomRow" style="display:none"><input id="devCustom" class="grow" placeholder="https://…/index.json"><button id="devCustomGo">Laden</button></div>
+    <div id="devStatus" class="muted">Lade …</div>
+    <div id="devList"></div>
+    <div class="row" style="margin-top:14px"><button id="devClose">Schließen</button></div>`;
+  d.showModal();
+  $('#devClose').onclick = () => d.close();
+  d.querySelectorAll('[data-devsrc]').forEach((b) => { b.onclick = () => devLoad({ source: b.dataset.devsrc }); });
+  $('#devCustomGo').onclick = () => devLoad({ source: 'custom', custom: $('#devCustom').value.trim() });
+  devLoad({});
+}
+async function devLoad(params) {
+  const d = $('#devDlg');
+  const say = (t) => { $('#devStatus').textContent = t; };
+  const mark = (src) => d.querySelectorAll('[data-devsrc]').forEach((b) => b.classList.toggle('primary', b.dataset.devsrc === src));
+  say('Lade …'); $('#devList').innerHTML = '';
+  if (params.source) mark(params.source);
+  let c;
+  try { c = (await api('/api/update/dev?' + q(params))).body; } catch (err) { return say('Fehler: ' + err.message); }
+  mark(c.source);
+  $('#devCustomRow').style.display = c.source === 'custom' ? '' : 'none';
+  if (c.source === 'custom' && !$('#devCustom').value) $('#devCustom').value = c.custom || '';
+  const vs = c.versions || [];
+  say(c.error ? c.error : vs.length ? `Installiert: ${c.current}` : 'Keine Test-Builds in dieser Quelle.');
+  $('#devList').innerHTML = vs.map((v, i) => `<div class="devitem${v.current ? ' cur' : ''}">
+      <div class="devhead"><div><strong>${esc(v.versionName)}</strong>${v.current ? ' <span class="devbadge">installiert</span>' : ''}
+        <div class="muted">${esc(v.branch || '')}${v.published ? ' · ' + devAgo(v.published) : ''}${v.size ? ' · ' + fmt(v.size) : ''}</div></div>
+        ${v.current ? '' : v.older ? '<span class="muted devold">älter – nur nach Deinstallation</span>' : `<button class="primary" data-devinst="${i}">Installieren</button>`}</div>
+      ${(v.features || []).length ? `<details><summary class="muted">${v.features.length} Features</summary><ul>${v.features.map((f) => `<li>${esc(f)}</li>`).join('')}</ul></details>` : ''}
+    </div>`).join('');
+  const btns = () => d.querySelectorAll('[data-devinst]');
+  btns().forEach((b) => { b.onclick = async () => {
+    const v = vs[+b.dataset.devinst];
+    btns().forEach((x) => { x.disabled = true; });
+    say(`Lade ${v.versionName} …`);
+    try {
+      const { body } = await api('/api/update/dev/install?' + q({ url: v.url }), { method: 'POST' });
+      if (body.error) { say(body.error); btns().forEach((x) => { x.disabled = false; }); }
+      else await waitForRestart(body.session, body.current, say);
+    } catch (err) { say('Fehler: ' + err.message); }
+  }; });
+}
 async function waitForRestart(session, before, say) {
   say('Installiere … falls der Thor fragt: „Aktualisieren“ tippen (oder die Benachrichtigung).');
   for (let i = 0; i < 300; i++) {

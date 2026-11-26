@@ -121,6 +121,117 @@ object Updater {
         return c.put("session", id).put("status", Installer.status[id])
     }
 
+    // ---- Dev dialog: list test builds from a chosen source and install one (protocol: Ordnung doc "Dev-Versionen") ----
+    const val HOME_INDEX = "http://192.168.178.97:8097/thorbro/index.json"
+    val DEV_SOURCES = listOf("github" to "GitHub", "home" to "Heimnetz", "custom" to "Eigene URL")
+    fun devSource(ctx: Context): String = Prefs.of(ctx).getString("devSource", null)?.takeIf { s -> DEV_SOURCES.any { it.first == s } } ?: "github"
+    fun devCustom(ctx: Context): String = Prefs.of(ctx).getString("devCustom", "") ?: ""
+    fun setDevSource(ctx: Context, source: String?, custom: String?) {
+        val e = Prefs.of(ctx).edit()
+        if (source != null && DEV_SOURCES.any { it.first == source }) e.putString("devSource", source)
+        if (custom != null) e.putString("devCustom", custom.trim())
+        e.apply()
+    }
+
+    /** where the list for [source] comes from */
+    fun devIndexUrl(ctx: Context, source: String = devSource(ctx)): String = when (source) {
+        "home" -> HOME_INDEX
+        "custom" -> devCustom(ctx).let { if (it.isEmpty() || it.endsWith(".json")) it else it.trimEnd('/') + "/index.json" }
+        else -> DEFAULT_FEED
+    }
+
+    /**
+     * {source, custom, index, current, currentCode, versions:[{versionName, versionCode, branch, commit, published, features,
+     *  url, size, current, older}]} (newest first) or with "error". "older" builds cannot be installed over this one (Android).
+     */
+    fun devVersions(ctx: Context): JSONObject {
+        val source = devSource(ctx)
+        val index = devIndexUrl(ctx, source)
+        val code = currentCode(ctx)
+        val cur = current(ctx)
+        val out = JSONObject().put("source", source).put("custom", devCustom(ctx)).put("index", index)
+            .put("current", cur).put("currentCode", code)
+        if (index.isEmpty()) return out.put("versions", org.json.JSONArray()).put("error", "Keine URL angegeben")
+        val list = try {
+            if (source == "github") githubDevs() else indexDevs(get(index))
+        } catch (e: Exception) {
+            if (source == "github") runCatching { atomDevs() }.getOrNull()
+                ?: return out.put("versions", org.json.JSONArray()).put("error", "GitHub nicht erreichbar: ${e.message}")
+            else return out.put("versions", org.json.JSONArray()).put("error", "Quelle nicht erreichbar: ${e.message}")
+        }
+        val arr = org.json.JSONArray()
+        list.sortedByDescending { it.optLong("versionCode") }.forEach { v ->
+            val vc = v.optLong("versionCode")
+            arr.put(v.put("current", vc == code || v.optString("versionName") == cur).put("older", vc in 1 until code))
+        }
+        return out.put("versions", arr)
+    }
+
+    private fun indexDevs(body: String): List<JSONObject> {
+        val a = JSONObject(body).optJSONArray("versions") ?: return emptyList()
+        return (0 until a.length()).map { a.getJSONObject(it) }.filter { it.optString("url").isNotEmpty() }
+    }
+
+    private val DEV_LINE = Regex("<!--\\s*dev:\\s*(\\{.*?\\})\\s*-->", RegexOption.DOT_MATCHES_ALL)
+
+    private fun githubDevs(): List<JSONObject> {
+        val arr = org.json.JSONArray(get("$DEFAULT_FEED?per_page=50"))
+        return (0 until arr.length()).map { arr.getJSONObject(it) }
+            .filter { !it.optBoolean("draft") && Regex("^dev-\\d+$").matches(it.optString("tag_name")) }
+            .mapNotNull { r ->
+                val assets = r.optJSONArray("assets")
+                val apk = (0 until (assets?.length() ?: 0)).map { assets!!.getJSONObject(it) }
+                    .firstOrNull { it.optString("name").endsWith(".apk", true) } ?: return@mapNotNull null
+                val notes = r.optString("body")
+                val meta = DEV_LINE.find(notes)?.let { runCatching { JSONObject(it.groupValues[1]) }.getOrNull() }
+                val v = meta ?: JSONObject()
+                    .put("versionName", r.optString("name").removePrefix("ThorBro ").ifEmpty { r.optString("tag_name") })
+                    .put("features", org.json.JSONArray(notes.lines().map { it.trim() }.filter { it.startsWith("- ") }.map { it.removePrefix("- ").trim() }))
+                if (!v.has("versionCode")) v.put("versionCode", r.getString("tag_name").removePrefix("dev-").toLong())
+                if (!v.has("branch")) v.put("branch", Regex("-([^+]+)\\+").find(v.optString("versionName"))?.groupValues?.get(1) ?: "")
+                if (!v.has("published")) v.put("published", r.optString("published_at"))
+                v.put("url", apk.optString("browser_download_url")).put("size", apk.optLong("size"))
+            }
+    }
+
+    /** GitHub's API allows 60 anonymous requests an hour; the Atom feed has no limit but only names and dates */
+    private fun atomDevs(): List<JSONObject> {
+        val atom = get("https://github.com/Lennardsmw/thorbro/releases.atom")
+        return Regex("<entry>(.*?)</entry>", RegexOption.DOT_MATCHES_ALL).findAll(atom).mapNotNull { m ->
+            val e = m.groupValues[1]
+            val code = Regex("/releases/tag/dev-(\\d+)").find(e)?.groupValues?.get(1)?.toLong() ?: return@mapNotNull null
+            val title = Regex("<title>(.*?)</title>").find(e)?.groupValues?.get(1)?.removePrefix("ThorBro ") ?: "dev-$code"
+            // <content> holds the rendered notes, HTML-escaped: branch in the first <code>, features as <li>
+            val html = Regex("<content[^>]*>(.*?)</content>", RegexOption.DOT_MATCHES_ALL).find(e)?.groupValues?.get(1)?.let(::unescape) ?: ""
+            val features = Regex("<li>(.*?)</li>", RegexOption.DOT_MATCHES_ALL).findAll(html)
+                .map { unescape(it.groupValues[1].replace(Regex("<[^>]+>"), "")).trim() }.filter { it.isNotEmpty() }.toList()
+            JSONObject().put("versionName", title).put("versionCode", code)
+                .put("branch", Regex("Zweig <code>([^<]+)</code>").find(html)?.groupValues?.get(1)
+                    ?: Regex("-([^+]+)\\+").find(title)?.groupValues?.get(1) ?: "")
+                .put("published", Regex("<updated>(.*?)</updated>").find(e)?.groupValues?.get(1) ?: "")
+                .put("features", org.json.JSONArray(features))
+                .put("url", "https://github.com/Lennardsmw/thorbro/releases/download/dev-$code/ThorBro-dev.apk")
+        }.toList()
+    }
+
+    private fun unescape(s: String) = s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"")
+        .replace("&#39;", "'").replace("&amp;", "&")
+
+    /** downloads [url] (a ThorBro APK from the Dev list) and installs it; {session, status, latest} or {error} */
+    fun installDev(ctx: Context, url: String): JSONObject {
+        val out = JSONObject().put("current", current(ctx)).put("url", url)
+        if (!url.startsWith("http://") && !url.startsWith("https://")) return out.put("error", "Ungültige URL")
+        val apk = File(ctx.cacheDir, "update.apk")
+        try { download(url, apk) } catch (e: Exception) { return out.put("error", "Download fehlgeschlagen: ${e.message}") }
+        val info = ctx.packageManager.getPackageArchiveInfo(apk.path, 0)
+        if (info?.packageName != ctx.packageName) { apk.delete(); return out.put("error", "Heruntergeladene Datei ist keine ThorBro-APK") }
+        if (info.longVersionCode < currentCode(ctx)) { apk.delete(); return out.put("error", "Älter als die installierte Version – nur nach Deinstallation") }
+        out.put("latest", info.versionName ?: "")
+        Logs.i("update", "Dev-Version ${info.versionName} installieren (von ${current(ctx)})")
+        val id = Installer.install(ctx, apk)
+        return out.put("session", id).put("status", Installer.status[id])
+    }
+
     // ---- periodic check while the server runs ----
     private val handler = Handler(Looper.getMainLooper())
     private var task: Runnable? = null
