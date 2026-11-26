@@ -504,6 +504,12 @@ object Server {
                     json(Players.overview(ctx))
                 }
 
+                // live pressed buttons / sticks (fed while the Thor shows System → Controller)
+                get("/api/pads/live") {
+                    if (denied(ctx)) return@get
+                    json(wtf.lennard.thorbro.ui.Pads.liveJson())
+                }
+
                 get("/api/bt/pads") {
                     if (denied(ctx)) return@get
                     json(org.json.JSONArray(BtPads.list(ctx).map { JSONObject().put("address", it.address).put("name", it.name) }))

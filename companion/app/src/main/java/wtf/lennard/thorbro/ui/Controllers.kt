@@ -119,6 +119,14 @@ object Pads {
         lastFrom = e.device?.name ?: ""
     }
 
+    /** names of the buttons held right now, in the order of [padButtons] */
+    fun held(): List<String> = padButtons.filter { pressed[it.first] == true }.map { it.second }
+
+    fun liveJson(): org.json.JSONObject = org.json.JSONObject().put("from", lastFrom)
+        .put("held", org.json.JSONArray(held()))
+        .put("left", org.json.JSONArray(listOf(lx, ly))).put("right", org.json.JSONArray(listOf(rx, ry)))
+        .put("lt", lt).put("rt", rt)
+
     fun onMotion(e: MotionEvent) {
         lx = e.getAxisValue(MotionEvent.AXIS_X); ly = e.getAxisValue(MotionEvent.AXIS_Y)
         rx = e.getAxisValue(MotionEvent.AXIS_Z); ry = e.getAxisValue(MotionEvent.AXIS_RZ)

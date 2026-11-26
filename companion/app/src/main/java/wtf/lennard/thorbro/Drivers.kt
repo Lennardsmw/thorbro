@@ -22,6 +22,9 @@ object Drivers {
         Source("k11", "K11MCH1 AdrenoToolsDrivers", "K11MCH1/AdrenoToolsDrivers", "Turnip-Builds und originale Qualcomm-Treiber"),
         Source("purple", "MrPurple Turnip", "MrPurple666/purple-turnip", "Turnip mit Fixes für Switch-Emulatoren"),
         Source("mainline", "Mainline Turnip (whitebelyash)", "whitebelyash/freedreno_turnip-CI", "Turnip direkt aus Mesa"),
+        Source("steven", "StevenMXZ Turnip", "StevenMXZ/freedreno_turnip-CI", "Tägliche Mesa-Builds, auch ältere Versionen (v27, v891 …)"),
+        Source("weab", "weab-chan Turnip", "weab-chan/freedreno_turnip-CI", "Turnip mit Patches, auch für OneUI/8 Gen 2"),
+        Source("banner", "Banner's Turnip", "The412Banner/Banners-Turnip", "Automatische Turnip-Builds (v27)"),
     )
 
     /** emulators that load custom drivers, with where the import lives in their menus */
@@ -39,8 +42,11 @@ object Drivers {
     /** {soc, gpu, sources:[{id,name,note,releases:[{tag,name,date,assets:[{name,url,size}]}],error?}], downloaded, emulators} */
     fun overview(ctx: Context, refresh: Boolean): JSONObject {
         val c = cache
-        val src = if (!refresh && c != null && System.currentTimeMillis() - c.first < CACHE_MS) c.second else
-            JSONArray(sources.map { fetch(it) }).also { cache = System.currentTimeMillis() to it }
+        val src = if (!refresh && c != null && System.currentTimeMillis() - c.first < CACHE_MS) c.second else {
+            // all repos at once; a list with an error is not cached, so the next visit tries again
+            val res = sources.map { s -> java.util.concurrent.CompletableFuture.supplyAsync { fetch(s) } }.map { it.get() }
+            JSONArray(res).also { arr -> if (res.none { it.has("error") }) cache = System.currentTimeMillis() to arr }
+        }
         val soc = if (Build.VERSION.SDK_INT >= 31) Build.SOC_MODEL else Build.HARDWARE
         return JSONObject()
             .put("soc", soc)

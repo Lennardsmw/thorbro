@@ -20,6 +20,7 @@
     <button data-tab="screen">Bildschirm</button>
     <button data-tab="stream">Streaming</button>
     <button data-tab="netplay">Multiplayer</button>
+    <button data-tab="controller">Controller</button>
     <button data-tab="drivers">Treiber</button>
     <button data-tab="apps">Apps</button>
     <button data-tab="files">Dateien</button>
@@ -183,6 +184,18 @@
       <h3>ThorBro weitergeben</h3>
       <div class="sub">Im selben WLAN per Link/QR-Code, sonst über Wi-Fi Direct: andere Geräte verbinden sich in den WLAN-Einstellungen und laden ThorBro dort herunter.</div>
       <div class="row"><button id="dxStart">Wi-Fi Direct starten</button><button id="dxStop" hidden>Beenden</button><span id="dxInfo" class="muted grow"></span></div>
+    </div>
+  </section>
+
+  <section id="controller" class="tab" hidden>
+    <div class="panel">
+      <h3>Spieler</h3>
+      <div id="padPlayers"></div>
+    </div>
+    <div class="panel">
+      <h3>Live</h3>
+      <div id="padLive" class="muted">Lade …</div>
+      <div class="sub">Zeigt gedrückte Tasten und Sticks, solange am Thor System → Controller offen ist.</div>
     </div>
   </section>
 
