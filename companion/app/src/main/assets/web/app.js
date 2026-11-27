@@ -373,7 +373,7 @@ function renderQueue() {
     const ex = isArchiveName(it.name) && !it.isFolder ? `<label class="muted"><input type="checkbox" data-extract="${it.id}" ${it.extract ? 'checked' : ''} ${it.state !== 'wartet' ? 'disabled' : ''}> entpacken</label>` : '';
     return `<li class="${cls}"><div class="qhead"><span class="qname">${it.isFolder ? '📁 ' : ''}${esc(it.name)}</span>${sys}${ex}${btn}${rm}</div>
       <div class="qmeta">${it.files.length > 1 ? it.files.length + ' Dateien · ' : ''}${fmt(it.sent)} / ${fmt(it.total)} · ${esc(it.state)}${it.speed ? ' · ' + fmt(it.speed) + '/s' : ''}${it.eta ? ' · noch ' + it.eta : ''}${it.state === 'läuft' ? (link.via === 'usb' ? ' · über USB' : ' · über WLAN') : ''}
-      → ${esc(targetDir(it))}${it.error ? '<br>' + esc(it.error) : ''}</div>
+      → ${esc(targetDir(it))}${it.note ? '<br>' + esc(it.note) : ''}${it.error ? '<br>' + esc(it.error) : ''}</div>
       <div class="bar"><div style="width:${pct}%"></div></div></li>`;
   }).join('');
 }
@@ -526,20 +526,33 @@ async function runQueue() {
     while ((item = queue.find((x) => x.state === 'wartet'))) {
       item.state = 'läuft'; item.error = ''; renderQueue();
       const dir = targetDir(item);
+      // slow SD card: send at full speed to internal storage first, the Thor puts it into place afterwards
+      let upDir = dir, staged = false;
+      if (!item.isApk) {
+        try {
+          const { body: plan } = await api('/api/upload/plan?' + q({ dir, size: item.total }));
+          if (plan.stage) { upDir = `${plan.staging}/${item.id}`; staged = true; }
+        } catch (err) { if (err instanceof AuthError) throw err; }
+      }
+      item.note = '';
       let before = 0;
       try {
         for (const f of item.files) {
-          const dest = `${dir}/${item.isFolder ? item.name + '/' : ''}${f.rel || f.file.name}`;
+          const dest = `${upDir}/${item.isFolder ? item.name + '/' : ''}${f.rel || f.file.name}`;
           await uploadOne(item, f.file, dest, before);
           before += f.file.size;
           item.sent = before;
         }
-        if (item.extract) {
-          item.state = 'entpacke auf dem Thor …'; renderQueue();
-          const { body: job } = await api('/api/extract?' + q({ path: `${dir}/${item.name}`, dest: dir, delete: 1 }), { method: 'POST' });
-          const res = await waitJob(job.id, (j) => { item.state = `entpacke ${Math.round(j.progress * 100)} %`; renderQueue(); });
-          if (res.error) throw new Error('Entpacken: ' + res.error);
+        // copying to the SD card and unpacking run in the Thor's queue: Store › Downloads (native + web)
+        if (staged || item.extract) {
+          await api('/api/transfers/move?' + q({
+            src: `${staged ? upDir : dir}/${item.name}`, dest: dir, name: item.name, size: item.total, system: item.system,
+            extract: item.extract ? 1 : 0, overwrite: $('#overwrite').checked ? 1 : 0,
+          }), { method: 'POST' });
+          item.note = staged ? 'wird jetzt auf die SD-Karte eingespielt' : 'wird jetzt entpackt';
+          item.note += ' – siehe Store › Downloads';
           romData = null;
+          pollTransfers();
         }
         if (item.isApk) {
           item.state = 'installiere (auf dem Thor bestätigen)'; renderQueue();
@@ -998,7 +1011,7 @@ function renderTransfers() {
   const list = transfers.items || [];
   $('#trCount').textContent = list.length ? `· ${list.length}` : '';
   $('#trList').innerHTML = list.length ? `<table class="files"><tbody>${list.map((t) => `<tr>
-    <td>${t.kind === 'upload' ? '⬆ RomM · ' : t.kind === 'url' ? '🔗 ' : '⬇ '}${esc(t.kind === 'url' ? t.name : displayTitle(t.name))}<div class="muted">${t.state === 'running'
+    <td>${t.kind === 'upload' ? '⬆ RomM · ' : t.kind === 'url' ? '🔗 ' : t.kind === 'move' ? '📦 Einspielen · ' : '⬇ '}${esc(t.kind === 'url' || t.kind === 'move' ? t.name : displayTitle(t.name))}${t.kind === 'move' ? `<span class="muted"> → ${esc(t.dest)}</span>` : ''}<div class="muted">${t.state === 'running'
       ? `${Math.round((t.progress || 0) * 100)} %${t.transfer ? ' · ' + esc(t.transfer) : ''}` : t.state === 'error' ? '<span class="err">' + esc(t.error) + '</span>' : trState[t.state]}</div>
       ${t.state === 'running' ? `<div class="bar"><i style="width:${Math.round((t.progress || 0) * 100)}%"></i></div>` : ''}</td>
     <td class="size">${fmt(t.size || 0)}</td>
@@ -1034,16 +1047,16 @@ $('#linkForm').onsubmit = async (e) => {
   pollTransfers();
 };
 function renderLinks() {
-  const list = (transfers.items || []).filter((t) => t.kind === 'url');
+  const list = (transfers.items || []).filter((t) => t.kind === 'url' || t.kind === 'move');
   $('#linkList').innerHTML = list.map((t) => {
     const pct = Math.round((t.progress || 0) * 100);
     const cls = t.state === 'error' ? 'failed' : '';
     const acts = (['running', 'waiting', 'later'].includes(t.state) ? `<button data-tr-cancel="${esc(t.id)}">Abbrechen</button>` : '')
       + (['later', 'error', 'cancelled'].includes(t.state) ? `<button data-tr-start="${esc(t.id)}">${t.state === 'cancelled' ? 'Neu starten' : 'Nochmal'}</button>` : '')
       + (t.state !== 'running' ? `<button data-tr-remove="${esc(t.id)}">✕</button>` : '');
-    return `<li class="${cls}"><div class="qhead"><span class="qname">🔗 ${esc(t.name)}</span>${acts}</div>
+    return `<li class="${cls}"><div class="qhead"><span class="qname">${t.kind === 'move' ? '📦 Einspielen · ' : '🔗 '}${esc(t.name)}</span>${acts}</div>
       <div class="qmeta">${t.state === 'running' ? `${pct} %${t.transfer ? ' · ' + esc(t.transfer) : ''}` : t.state === 'error' ? esc(t.error) : trState[t.state]}
-      · <span class="muted">${esc(t.url)}</span></div>
+      · <span class="muted">${esc(t.kind === 'move' ? '→ ' + t.dest : t.url)}</span></div>
       ${t.state === 'running' ? `<div class="bar"><div style="width:${pct}%"></div></div>` : ''}</li>`;
   }).join('');
 }

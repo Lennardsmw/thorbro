@@ -623,6 +623,24 @@ object Server {
                     val id = q("id")?.toIntOrNull() ?: return@post fail("id missing")
                     json(withContext(Dispatchers.IO) { TransferQueue.addDownload(ctx, id, q("name") ?: "Spiel $id", q("size")?.toLongOrNull() ?: 0L, q("system") ?: "", q("later") == "1") })
                 }
+                // two-step upload to a slow SD card: where to send first ({stage, staging}); then /api/transfers/move
+                get("/api/upload/plan") {
+                    if (denied(ctx)) return@get
+                    val dir = Storage.resolve(q("dir")) ?: return@get fail("path not allowed")
+                    json(Staging.plan(dir, q("size")?.toLongOrNull() ?: 0L))
+                }
+                // put an upload into place in the background (Downloads page): copy staged files to dest, or unpack
+                post("/api/transfers/move") {
+                    if (denied(ctx)) return@post
+                    val src = Storage.resolve(q("src")) ?: return@post fail("path not allowed")
+                    val dest = Storage.resolve(q("dest")) ?: return@post fail("path not allowed")
+                    val staged = src.path.startsWith(Staging.dir.path + "/")
+                    if (!staged && !(src.isFile && Archives.isArchive(src))) return@post fail("src must be staged or an archive")
+                    json(withContext(Dispatchers.IO) {
+                        TransferQueue.addMove(ctx, src.path, dest.path, q("name") ?: src.name, q("size")?.toLongOrNull() ?: 0L, q("system") ?: "",
+                            q("extract") == "1", q("overwrite") == "1")
+                    })
+                }
                 // "Upload per Link": the Thor downloads the file itself (transfer queue, survives a restart)
                 post("/api/transfers/url") {
                     if (denied(ctx)) return@post

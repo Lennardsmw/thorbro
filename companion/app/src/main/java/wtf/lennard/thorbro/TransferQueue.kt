@@ -63,6 +63,16 @@ object TransferQueue {
         l += e; store(ctx, l); if (!later) kick(ctx); e
     }
 
+    /** an upload that still has to be put into place (staged → SD card, or an archive to unpack): "Einspielen" */
+    fun addMove(ctx: Context, src: String, dest: String, name: String, size: Long, system: String, extract: Boolean, overwrite: Boolean): JSONObject = synchronized(lock) {
+        val id = "m" + src.hashCode().toUInt().toString(16)
+        val l = items(ctx)
+        l.firstOrNull { it.optString("id") == id }?.let { e -> e.put("later", false).remove("error"); e.remove("cancelled"); store(ctx, l); kick(ctx); return e }
+        val e = JSONObject().put("id", id).put("kind", "move").put("src", src).put("dest", dest).put("name", name).put("size", size)
+            .put("system", system).put("extract", extract).put("overwrite", overwrite).put("later", false).put("added", System.currentTimeMillis())
+        l += e; store(ctx, l); kick(ctx); e
+    }
+
     private fun update(ctx: Context, id: String, f: (JSONObject) -> Unit) = synchronized(lock) {
         val l = items(ctx); l.firstOrNull { it.optString("id") == id }?.let(f); store(ctx, l)
     }
@@ -88,7 +98,9 @@ object TransferQueue {
 
     fun remove(ctx: Context, id: String) = synchronized(lock) {
         if (current?.optString("id") == id) return@synchronized // the running one finishes (a download keeps its .part for later)
-        store(ctx, items(ctx).filter { it.optString("id") != id })
+        val l = items(ctx)
+        l.filter { it.optString("id") == id && it.optString("kind") == "move" }.forEach { Staging.discard(it) }
+        store(ctx, l.filter { it.optString("id") != id })
     }
 
     fun isQueued(ctx: Context, romId: Int) = items(ctx).any { it.optString("kind") == "download" && it.optInt("romId") == romId }
@@ -113,7 +125,7 @@ object TransferQueue {
         val waiting = items(ctx).count { it.optString("id") != e.optString("id") && !it.optBoolean("later") && !it.has("error") && !it.optBoolean("cancelled") }
         val eta = j.transfer()?.substringAfter("noch ", "")?.takeIf { it.isNotEmpty() }
         val p = j.gameProgress().toFloat().coerceIn(0f, 1f)
-        val arrow = if (e.optString("kind") == "upload") "⬆ RomM" else "⬇"
+        val arrow = when (e.optString("kind")) { "upload" -> "⬆ RomM"; "move" -> "📦 Einspielen"; else -> "⬇" }
         return listOfNotNull("$arrow ${e.optString("name")}", "${(p * 100).toInt()} %", eta?.let { "noch $it" },
             if (waiting > 0) "$waiting weitere" else null).joinToString(" · ") to p
     }
@@ -151,6 +163,7 @@ object TransferQueue {
     private fun run(ctx: Context, e: JSONObject): String? {
         val job = when (e.optString("kind")) {
             "download" -> Library.download(ctx, e.optInt("romId"))
+            "move" -> Staging.start(ctx, e)
             "url" -> UrlDownload.start(ctx, e) { name -> e.put("name", name); update(ctx, e.optString("id")) { it.put("name", name).put("file", e.optString("file")) } }
             else -> {
                 val a = e.optJSONArray("paths") ?: return "keine Dateien"

@@ -89,16 +89,17 @@ fun TransfersScreen() {
                         group.forEach { e ->
                             val up = e.optString("kind") == "upload"
                             val link = e.optString("kind") == "url"
+                            val move = e.optString("kind") == "move"
                             val state = e.optString("state")
                             val sub = when (state) {
                                 "running" -> listOfNotNull("${(e.optDouble("progress", 0.0) * 100).toInt()} %", e.optString("transfer").takeIf { e.has("transfer") && it.isNotEmpty() }).joinToString(" · ")
                                 "error" -> e.optString("error")
                                 "later" -> (if (link) e.optString("url").take(60) else fmtBytes(e.optLong("size"))) + " · A = jetzt starten"
                                 "cancelled" -> "abgebrochen · A = neu starten oder entfernen"
-                                else -> if (link) e.optString("url").take(80) else fmtBytes(e.optLong("size"))
+                                else -> if (link) e.optString("url").take(80) else if (move) "→ " + e.optString("dest") else fmtBytes(e.optLong("size"))
                             }
                             val canCancel = state in listOf("running", "waiting", "later")
-                            SettingRow((if (up) "⬆ RomM · " else if (link) "🔗 " else "⬇ ") + e.optString("name"), sub,
+                            SettingRow((if (up) "⬆ RomM · " else if (link) "🔗 " else if (move) "📦 Einspielen · " else "⬇ ") + e.optString("name"), sub,
                                 when { state == "error" -> Icons.Filled.ErrorOutline; state == "later" -> Icons.Filled.WatchLater; up -> Icons.Filled.CloudUpload; else -> Icons.Filled.CloudDownload },
                                 warn = state == "error", value = if (canCancel) "X Abbrechen" else "Optionen",
                                 // X on a row = cancel it right away (also the running one)
