@@ -348,7 +348,10 @@ function enqueue(name, files, isFolder) {
     sent: 0, state: 'wartet', error: '', paused: false,
   });
   renderQueue();
+  // starts by itself; the short wait lets one drop (several files, a folder) land in the queue first
+  clearTimeout(autoStart); autoStart = setTimeout(runQueue, 400);
 }
+let autoStart = null;
 
 function targetDir(item) {
   if (item.isApk) return APK_DIR;
