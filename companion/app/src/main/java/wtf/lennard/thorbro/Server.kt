@@ -53,6 +53,11 @@ object Server {
                 allowMethod(HttpMethod.Put)
                 allowMethod(HttpMethod.Delete)
             }
+            // the web panel on the Mac reaches the Thor also over USB (adb forward to 127.0.0.1:7331, set up by RomBro):
+            // Chrome asks before a LAN page may call loopback (Private/Local Network Access), the preflight needs this
+            intercept(io.ktor.server.application.ApplicationCallPipeline.Setup) {
+                context.response.header("Access-Control-Allow-Private-Network", "true")
+            }
             routing {
                 // ---- web UI ----
                 get("/") { asset(ctx, "index.html") }
@@ -76,6 +81,11 @@ object Server {
                 // ---- device ----
                 get("/api/ping") {
                     json(JSONObject().put("name", "ThorBro").put("model", android.os.Build.MODEL))
+                }
+                // which way the web panel should send: usb = cable with USB debugging in; uid tells two Thors apart
+                get("/api/link") {
+                    if (denied(ctx)) return@get
+                    json(JSONObject().put("usb", Streaming.usbAdb(ctx)).put("uid", Device.uid(ctx)).put("usbPort", 7331))
                 }
                 get("/api/info") {
                     if (denied(ctx)) return@get
@@ -612,6 +622,16 @@ object Server {
                     if (denied(ctx)) return@post
                     val id = q("id")?.toIntOrNull() ?: return@post fail("id missing")
                     json(withContext(Dispatchers.IO) { TransferQueue.addDownload(ctx, id, q("name") ?: "Spiel $id", q("size")?.toLongOrNull() ?: 0L, q("system") ?: "", q("later") == "1") })
+                }
+                // "Upload per Link": the Thor downloads the file itself (transfer queue, survives a restart)
+                post("/api/transfers/url") {
+                    if (denied(ctx)) return@post
+                    val url = q("url")?.trim() ?: return@post fail("url missing")
+                    if (!UrlDownload.validUrl(url)) return@post fail("Nur http- und https-Links")
+                    val dir = q("dir")?.takeIf { it.isNotBlank() }
+                    if (dir != null && Storage.resolve(dir) == null) return@post fail("path not allowed")
+                    val extract = when (q("extract")) { "1" -> true; "0" -> false; else -> null }
+                    json(withContext(Dispatchers.IO) { TransferQueue.addUrl(ctx, url, q("system") ?: "", dir ?: "", extract, q("later") == "1") })
                 }
                 get("/api/transfers") {
                     if (denied(ctx)) return@get

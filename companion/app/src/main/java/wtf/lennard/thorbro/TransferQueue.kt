@@ -50,6 +50,23 @@ object TransferQueue {
         l += e; store(ctx, l); if (!later) kick(ctx); e
     }
 
+    /** "Upload per Link": the Thor loads [url] itself ([system] "" = guess from the file, "apk", a console id; [dir] = a folder instead) */
+    fun addUrl(ctx: Context, url: String, system: String, dir: String, extract: Boolean?, later: Boolean = false): JSONObject = synchronized(lock) {
+        val id = "l" + url.hashCode().toUInt().toString(16)
+        val l = items(ctx)
+        l.firstOrNull { it.optString("id") == id }?.let { e ->
+            if (!later) { e.put("later", false).remove("error"); e.remove("cancelled"); store(ctx, l); kick(ctx) }
+            return e
+        }
+        val e = JSONObject().put("id", id).put("kind", "url").put("url", url).put("name", UrlDownload.nameOf(url)).put("size", 0L)
+            .put("system", system).put("dir", dir).put("extract", extract ?: JSONObject.NULL).put("later", later).put("added", System.currentTimeMillis())
+        l += e; store(ctx, l); if (!later) kick(ctx); e
+    }
+
+    private fun update(ctx: Context, id: String, f: (JSONObject) -> Unit) = synchronized(lock) {
+        val l = items(ctx); l.firstOrNull { it.optString("id") == id }?.let(f); store(ctx, l)
+    }
+
     /** start a "für später" or failed item (or all with [id] = null) */
     fun start(ctx: Context, id: String?) = synchronized(lock) {
         val l = items(ctx)
@@ -134,6 +151,7 @@ object TransferQueue {
     private fun run(ctx: Context, e: JSONObject): String? {
         val job = when (e.optString("kind")) {
             "download" -> Library.download(ctx, e.optInt("romId"))
+            "url" -> UrlDownload.start(ctx, e) { name -> e.put("name", name); update(ctx, e.optString("id")) { it.put("name", name).put("file", e.optString("file")) } }
             else -> {
                 val a = e.optJSONArray("paths") ?: return "keine Dateien"
                 val paths = (0 until a.length()).map { a.getString(it) }.filter { java.io.File(it).exists() }.toSet()

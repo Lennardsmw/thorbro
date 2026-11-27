@@ -52,10 +52,18 @@
       <label>ROM-Ordner <input id="romRoot"></label>
       <label><input id="overwrite" type="checkbox"> Vorhandene Dateien überschreiben</label>
       <span class="grow"></span>
+      <span id="via" class="muted">Senden über WLAN</span>
       <button id="startAll" class="primary">Start</button>
       <button id="clearDone">Fertige entfernen</button>
     </div>
     <ul id="queue" class="queue"></ul>
+    <form id="linkForm" class="row linkrow">
+      <label class="grow">Per Link <input id="linkUrl" type="url" placeholder="https://… – der Thor lädt die Datei selbst" required></label>
+      <label>Ziel <select id="linkSys"></select></label>
+      <button class="primary">Laden</button>
+    </form>
+    <p id="linkMsg" class="muted"></p>
+    <ul id="linkList" class="queue"></ul>
   </section>
 
   <section id="roms" class="tab" hidden>

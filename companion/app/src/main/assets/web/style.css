@@ -338,3 +338,7 @@ body:has(.transferbar:not([hidden])) main { padding-bottom: 48px; }
 .avatar { background: #EFE7D2; }
 .transferbar[hidden] { display: none; }
 .romcard .later[data-cancel]:not([data-cancel=""]) { opacity: 1; }
+
+/* upload per link */
+.linkrow { margin-top: 18px; }
+.linkrow input[type=url] { width: 100%; min-width: 260px; }
