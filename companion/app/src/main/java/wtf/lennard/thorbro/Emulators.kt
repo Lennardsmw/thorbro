@@ -31,6 +31,7 @@ object Emulators {
         Emu("melonds", "melonDS", "me.magnum.melonds", "me.magnum.melonds.ui.emulator.EmulatorActivity", Pass.EXTRA, "me.magnum.melonds.LAUNCH_ROM", "uri", setOf("nds")),
         Emu("dolphin", "Dolphin", "org.dolphinemu.dolphinemu", "org.dolphinemu.dolphinemu.ui.main.MainActivity", Pass.EXTRA, Intent.ACTION_VIEW, "AutoStartFile", setOf("gc", "wii")),
         Emu("xendroid", "XenDroid", "xendroid.compose", "xendroid.compose.EmulatorHostActivity", Pass.EXTRA, "xendroid.intent.action.xendroid", "AutoStartFile", setOf("xbox360")),
+        Emu("gamehub", "GameHub Lite", GameHub.PKG, GameHub.ACTIVITY, Pass.EXTRA, GameHub.ACTION, "localGameId", setOf("pc")),
         Emu("cemu", "Cemu", "info.cemu.cemu", "info.cemu.cemu.emulation.EmulationActivity", Pass.DATA, systems = setOf("wiiu")),
         Emu("ppsspp", "PPSSPP", "org.ppsspp.ppsspp", "org.ppsspp.ppsspp.PpssppActivity", Pass.DATA, systems = setOf("psp")),
         Emu("nethersx2", "NetherSX2", "xyz.aethersx2.android", "xyz.aethersx2.android.EmulationActivity", Pass.EXTRA, Intent.ACTION_MAIN, "bootPath", setOf("ps2")),
@@ -126,6 +127,7 @@ object Emulators {
         }
         val emu = (emuId?.let { id -> installed(ctx).firstOrNull { it.id == id } }) ?: forSystem(ctx, system)
             ?: return JSONObject().put("error", "Kein passender Emulator installiert").put("code", "no_emulator")
+        if (emu.id == "gamehub") return GameHub.launch(ctx, rom)
         val file = target(system, rom) ?: return JSONObject().put("error", "Keine startbare Datei im Spielordner").put("code", "no_file")
         val i = Intent(emu.action).setComponent(ComponentName(emu.pkg, emu.activity))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
