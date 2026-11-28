@@ -30,6 +30,7 @@ object Emulators {
         Emu("azahar", "Azahar", "org.azahar_emu.azahar", "org.citra.citra_emu.activities.EmulationActivity", Pass.DATA, systems = setOf("n3ds")),
         Emu("melonds", "melonDS", "me.magnum.melonds", "me.magnum.melonds.ui.emulator.EmulatorActivity", Pass.EXTRA, "me.magnum.melonds.LAUNCH_ROM", "uri", setOf("nds")),
         Emu("dolphin", "Dolphin", "org.dolphinemu.dolphinemu", "org.dolphinemu.dolphinemu.ui.main.MainActivity", Pass.EXTRA, Intent.ACTION_VIEW, "AutoStartFile", setOf("gc", "wii")),
+        Emu("xendroid", "XenDroid", "xendroid.compose", "xendroid.compose.EmulatorHostActivity", Pass.EXTRA, "xendroid.intent.action.xendroid", "AutoStartFile", setOf("xbox360")),
         Emu("cemu", "Cemu", "info.cemu.cemu", "info.cemu.cemu.emulation.EmulationActivity", Pass.DATA, systems = setOf("wiiu")),
         Emu("ppsspp", "PPSSPP", "org.ppsspp.ppsspp", "org.ppsspp.ppsspp.PpssppActivity", Pass.DATA, systems = setOf("psp")),
         Emu("nethersx2", "NetherSX2", "xyz.aethersx2.android", "xyz.aethersx2.android.EmulationActivity", Pass.EXTRA, Intent.ACTION_MAIN, "bootPath", setOf("ps2")),

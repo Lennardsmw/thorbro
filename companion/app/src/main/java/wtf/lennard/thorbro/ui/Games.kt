@@ -245,7 +245,7 @@ fun GameDetail(sys: String, r: JSONObject, m: JSONObject, lib: JSONObject? = nul
             add(Triple(if (fav) "Favorit ✓" else "Favorit", if (fav) Icons.Filled.Star else Icons.Filled.StarBorder, { Favorites.toggle(ctx, r.getString("path")) }))
             val queued = Background.isQueued(r.getString("path"))
             if (sys != "ports" && lib != null && !queued) add(Triple(if (lib.optBoolean("inRomm")) "Auslagern" else "Hochladen + auslagern", Icons.Filled.CloudUpload, { confirm = true }))
-            if (queued) add(Triple("Wird ausgelagert …", Icons.Filled.CloudUpload, {}))
+            if (queued) add(Triple("Auslagern stoppen", Icons.Filled.CloudUpload, { Background.cancel() }))
             // to RomM: through the transfer queue (one after another, survives a restart); progress shows in the bottom bar
             if (sys != "ports" && lib != null && !lib.optBoolean("inRomm") && !queued) {
                 val inQueue = upQueued || wtf.lennard.thorbro.TransferQueue.isQueuedPath(ctx, r.getString("path"))

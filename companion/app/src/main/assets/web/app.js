@@ -48,6 +48,8 @@ function showTab(name) {
   if (tabHistory[tabHistory.length - 1] !== name) tabHistory.push(name);
   if (name === 'roms' && !romData) loadRoms(false);
   if (name === 'apps') loadApps();
+  if (name === 'upload') pollTransfers();
+  if (name === 'store') loadDlSettings();
   if (name === 'saves') loadSaves();
   if (name === 'library') loadLibrary();
   if (name === 'screen') screenStatus();
@@ -308,11 +310,22 @@ const SYSTEMS = {
   nes: ['nes'], snes: ['sfc', 'smc'], n64: ['n64', 'z64', 'v64'], gc: ['rvz', 'gcz'], wii: ['wbfs'],
   switch: ['nsp', 'xci', 'nsz', 'xcz'], psx: ['pbp'], ps2: [], psp: ['cso'], dreamcast: ['gdi', 'cdi'],
   megadrive: ['md', 'gen'], mastersystem: ['sms'], gamegear: ['gg'], saturn: [], pcengine: ['pce'],
+  pc: ['exe'],
 };
+// PC (Windows) games always go to internal storage (the SD card is far too slow for them), one folder per game
+const PC_DIR = '/storage/emulated/0/ROMs/pc';
+// same as Discs.cleanName on the Thor: "Game (site.com)" → "Game"
+function cleanName(n) {
+  const dot = n.lastIndexOf('.'); const e = dot > 0 ? n.slice(dot) : ''; const base = e ? n.slice(0, dot) : n;
+  const c = base.replace(/\s*[\[(][^\])]*\b[\w-]+\.(com|net|org|to|cc|io|ws|me|info|ru|xyz|club|site)\b[^\])]*[\])]/gi, '')
+    .replace(/\s*-?\s*www\.[\w-]+\.[a-z]{2,6}/gi, '').replace(/\s{2,}/g, ' ').trim() || base;
+  return c + e;
+}
+const pcName = (item) => (item.isFolder ? cleanName(item.name + '.d').slice(0, -2) : cleanName(item.name).replace(/\.[^.]+$/, ''));
 const EXT_TO_SYS = {};
 Object.entries(SYSTEMS).forEach(([s, exts]) => exts.forEach((e) => (EXT_TO_SYS[e] = s)));
 const ext = (n) => (n.includes('.') ? n.split('.').pop().toLowerCase() : '');
-const isArchiveName = (n) => ['zip', '7z'].includes(ext(n));
+const isArchiveName = (n) => ['zip', '7z', 'rar'].includes(ext(n));
 // RetroArch cores read these zipped; everything else is unpacked by default
 const KEEP_ZIPPED = new Set(['nes', 'snes', 'gb', 'gbc', 'gba', 'megadrive', 'mastersystem', 'gamegear', 'pcengine', 'atari2600', 'lynx', 'ngp', 'wonderswan', 'arcade', 'n64']);
 const APK_DIR = '/storage/emulated/0/Download/ThorBro';
@@ -330,8 +343,10 @@ const queue = [];
 let running = false;
 
 function guessSystem(files) {
+  // a Windows game: an .exe at the top of the dropped folder or one folder down
+  if (files.some((f) => f.rel && ext(f.file.name) === 'exe' && f.rel.split('/').length <= 2)) return 'pc';
   const count = {};
-  for (const f of files) { const s = EXT_TO_SYS[ext(f.file.name)]; if (s) count[s] = (count[s] || 0) + 1; }
+  for (const f of files) { const s = EXT_TO_SYS[ext(f.file.name)]; if (s && !(s === 'pc' && f.rel)) count[s] = (count[s] || 0) + 1; }
   const best = Object.entries(count).sort((a, b) => b[1] - a[1])[0];
   return best ? best[0] : '';
 }
@@ -347,10 +362,14 @@ function enqueue(name, files, isFolder) {
     sent: 0, state: 'wartet', error: '', paused: false,
   });
   renderQueue();
+  // starts by itself; the short wait lets one drop (several files, a folder) land in the queue first
+  clearTimeout(autoStart); autoStart = setTimeout(runQueue, 400);
 }
+let autoStart = null;
 
 function targetDir(item) {
   if (item.isApk) return APK_DIR;
+  if (item.system === 'pc') return item.isFolder ? PC_DIR : `${PC_DIR}/${pcName(item)}`;
   const root = $('#romRoot').value.replace(/\/+$/, '');
   return item.system ? `${root}/${item.system}` : root;
 }
@@ -368,8 +387,8 @@ function renderQueue() {
     const rm = it.state !== 'läuft' ? `<button data-rm="${it.id}">✕</button>` : '';
     const ex = isArchiveName(it.name) && !it.isFolder ? `<label class="muted"><input type="checkbox" data-extract="${it.id}" ${it.extract ? 'checked' : ''} ${it.state !== 'wartet' ? 'disabled' : ''}> entpacken</label>` : '';
     return `<li class="${cls}"><div class="qhead"><span class="qname">${it.isFolder ? '📁 ' : ''}${esc(it.name)}</span>${sys}${ex}${btn}${rm}</div>
-      <div class="qmeta">${it.files.length > 1 ? it.files.length + ' Dateien · ' : ''}${fmt(it.sent)} / ${fmt(it.total)} · ${esc(it.state)}${it.speed ? ' · ' + fmt(it.speed) + '/s' : ''}${it.eta ? ' · noch ' + it.eta : ''}
-      → ${esc(targetDir(it))}${it.error ? '<br>' + esc(it.error) : ''}</div>
+      <div class="qmeta">${it.files.length > 1 ? (it.filesDone ? it.filesDone + ' / ' : '') + it.files.length + ' Dateien · ' : ''}${fmt(it.sent)} / ${fmt(it.total)} · ${esc(it.state)}${it.speed ? ' · ' + fmt(it.speed) + '/s' : ''}${it.eta ? ' · noch ' + it.eta : ''}${it.state === 'läuft' ? (link.via === 'usb' ? ' · über USB' : ' · über WLAN') : ''}
+      → ${esc(it.system === 'pc' && it.isFolder ? `${PC_DIR}/${pcName(it)}` : targetDir(it))}${it.system === 'pc' ? ' (intern, PC-Spiel)' : ''}${it.note ? '<br>' + esc(it.note) : ''}${it.error ? '<br>' + esc(it.error) : ''}</div>
       <div class="bar"><div style="width:${pct}%"></div></div></li>`;
   }).join('');
 }
@@ -390,11 +409,106 @@ $('#clearDone').onclick = () => { for (let i = queue.length - 1; i >= 0; i--) if
 class Paused extends Error {}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// ---------- USB first: a cable beats the air ----------
+// With the Thor on the Mac's USB (USB debugging on), RomBro keeps `adb forward tcp:7331 tcp:7330`. The panel then
+// sends uploads to 127.0.0.1:7331 instead of over Wi-Fi: checked every 2 s, switched between chunks (cable in → USB,
+// cable out or USB gone → Wi-Fi), so a running upload moves by itself.
+const link = { via: 'wifi', usb: false, uid: '', port: 7331, hint: '' };
+const usbBase = () => `http://127.0.0.1:${link.port}`;
+async function checkLink() {
+  try {
+    const { body } = await api('/api/link');
+    link.usb = !!body.usb; link.uid = body.uid || ''; link.port = body.usbPort || 7331;
+  } catch { return; }
+  if (!link.usb) { setVia('wifi', ''); return; }
+  if (link.via === 'usb') return;
+  try {
+    const r = await fetch(usbBase() + '/api/link', { headers: { Authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(1500) });
+    const b = r.ok ? await r.json() : null;
+    if (b && b.uid && b.uid === link.uid) setVia('usb', '');
+    else setVia('wifi', 'Kabel erkannt, aber kein USB-Weg zum Thor (RomBro auf dem Mac offen?) – sende über WLAN');
+  } catch { setVia('wifi', 'Kabel erkannt, aber kein USB-Weg zum Thor (RomBro auf dem Mac offen?) – sende über WLAN'); }
+}
+function setVia(via, hint) {
+  if (link.via === via && link.hint === hint) return;
+  link.via = via; link.hint = hint;
+  $('#via').textContent = via === 'usb' ? 'Senden über USB' : hint || 'Senden über WLAN';
+  renderQueue();
+}
+setInterval(() => { if (!document.hidden && (!$('#upload').hidden || running)) checkLink(); }, 2000);
+/** api() for upload traffic: over USB while it works, else (and as fallback mid-upload) over Wi-Fi */
+// every upload request has a deadline: after a ThorBro restart an in-flight request over the adb forward would
+// otherwise hang forever (the Mac side of the socket stays open). A timeout counts as a network error → retry / Wi-Fi.
+const upTimeout = (opts) => AbortSignal.timeout(15000 + (opts.body?.size || 0) / 1024); // + 1 s per MB (≥ 1 MB/s)
+const netErr = (err) => err instanceof TypeError || err?.name === 'TimeoutError' || err?.name === 'AbortError';
+async function upApi(path, opts = {}) {
+  if (link.via === 'usb') {
+    try {
+      const r = await fetch(usbBase() + path, { ...opts, signal: upTimeout(opts), headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + token } });
+      const body = await r.json().catch(() => ({}));
+      if (r.ok || r.status === 409) return { status: r.status, body };
+      if (r.status !== 401 && r.status < 500) throw new Error(body.error || r.statusText);
+    } catch (err) { if (!netErr(err)) throw err; }
+    setVia('wifi', 'USB weg – weiter über WLAN'); // network error / 5xx / 401 on the USB way: carry on over the air
+  }
+  return api(path, { ...opts, signal: upTimeout(opts) });
+}
+
 const PARALLEL = 3;
-async function uploadOne(item, file, dest, before) {
-  const probe = (await api('/api/upload?' + q({ path: dest, size: file.size }))).body;
+const FILE_POOL = 8; // small files of a folder in flight at once (+ one big file with its 3 chunks)
+
+// item progress: parallel files add up; "moved" = bytes really sent (skipped files don't count for the speed)
+function progress(item, n, moved) {
+  item.sent += n; if (moved) item.moved += n;
+  scheduleRender();
+}
+// speed over the last 5 s across all files in flight (per-file timing never shows with thousands of small files)
+function measure(item) {
+  const now = performance.now();
+  (item.samples ||= []).push([now, item.moved]);
+  while (item.samples.length > 2 && now - item.samples[0][0] > 5000) item.samples.shift();
+  const [t0, m0] = item.samples[0];
+  if (now - t0 < 900) return;
+  item.speed = ((item.moved - m0) * 1000) / (now - t0);
+  if (item.speed > 0) {
+    const left = (item.total - item.sent) / item.speed;
+    item.eta = left > 90 ? Math.round(left / 60) + ' min' : Math.round(left) + ' s';
+  } else item.eta = '';
+}
+setInterval(() => { const it = queue.find((x) => x.state !== 'wartet' && x.state !== 'fertig' && x.state !== 'fehler' && x.state !== 'pausiert' && x.t0); if (it && running) { measure(it); renderQueue(); } }, 1000);
+let renderTimer = null;
+function scheduleRender() { if (!renderTimer) renderTimer = setTimeout(() => { renderTimer = null; renderQueue(); }, 250); }
+
+class Fatal extends Error {}
+/** a small file in one request (no probe, no finish): thousands of files are bound by requests, not bytes */
+async function uploadWhole(item, file, dest, ow) {
+  let r;
+  for (let tries = 0; ; tries++) {
+    if (item.paused) throw new Paused();
+    try {
+      r = await upApi('/api/upload/whole?' + q({ path: dest, size: file.size, overwrite: ow }), {
+        method: 'PUT', body: file, headers: { 'Content-Type': 'application/octet-stream' },
+      });
+      if (r.status !== 409 || r.body.error === 'file exists' || r.body.error === 'no space') break;
+      throw new Error(r.body.error || 'Konflikt'); // size mismatch: send again
+    } catch (err) {
+      if (err instanceof AuthError || tries >= 9) throw err;
+      item.state = `Verbindung weg, neuer Versuch ${tries + 1}/10`; scheduleRender();
+      await sleep(1000 * (tries + 1));
+    }
+  }
+  item.state = 'läuft';
+  if (r.status === 409 && r.body.error === 'no space') throw new Fatal(`Nicht genug Speicher (${fmt(r.body.free)} frei)`);
+  if (r.status === 409) throw new Fatal(`${dest} gibt es schon (andere Größe). "Überschreiben" aktivieren.`);
+  if (r.body.skipped) return 'skipped';
+  progress(item, file.size, true);
+  return 'ok';
+}
+
+async function uploadOne(item, file, dest) {
+  const probe = (await upApi('/api/upload?' + q({ path: dest, size: file.size }))).body;
   // old servers or a sequential upload already in progress: keep the sequential path
-  if (!probe.parallel || (probe.offset > 0 && !probe.chunks.length) || file.size <= CHUNK) return uploadSeq(item, file, dest, before);
+  if (!probe.parallel || (probe.offset > 0 && !probe.chunks.length) || file.size <= CHUNK) return uploadSeq(item, file, dest);
   if (probe.exists && !$('#overwrite').checked) {
     if (probe.existingSize === file.size) return 'skipped';
     throw new Error(`${dest} gibt es schon (andere Größe). "Überschreiben" aktivieren.`);
@@ -404,14 +518,15 @@ async function uploadOne(item, file, dest, before) {
   for (let off = 0; off < file.size; off += CHUNK) if (!have.has(off)) todo.push(off);
   const doneBytes = () => [...have].reduce((a, o) => a + Math.min(CHUNK, file.size - o), 0);
   if (probe.free >= 0 && probe.free < file.size - doneBytes()) throw new Error(`Nicht genug Speicher (${fmt(probe.free)} frei)`);
-  const t0 = performance.now(), start = doneBytes();
+  let reported = doneBytes();
+  progress(item, reported, false); // chunks that were already there (resume)
   const worker = async () => {
     while (todo.length) {
       if (item.paused) throw new Paused();
       const off = todo.shift();
       for (let tries = 0; ; tries++) {
         try {
-          await api('/api/upload?' + q({ path: dest, offset: off, pos: 1 }), {
+          await upApi('/api/upload?' + q({ path: dest, offset: off, pos: 1 }), {
             method: 'PUT', body: file.slice(off, off + CHUNK), headers: { 'Content-Type': 'application/octet-stream' },
           });
           break;
@@ -423,33 +538,27 @@ async function uploadOne(item, file, dest, before) {
       }
       have.add(off);
       item.state = 'läuft';
-      item.sent = before + doneBytes();
-      const secs = (performance.now() - t0) / 1000;
-      if (secs > 1) {
-        item.speed = (doneBytes() - start) / secs;
-        const left = (item.total - item.sent) / item.speed;
-        item.eta = left > 90 ? Math.round(left / 60) + ' min' : Math.round(left) + ' s';
-      }
-      renderQueue();
+      const d = doneBytes(); progress(item, d - reported, true); reported = d;
     }
   };
   await Promise.all(Array.from({ length: PARALLEL }, worker));
-  await api('/api/upload/finish?' + q({ path: dest, size: file.size, overwrite: $('#overwrite').checked ? 1 : 0 }), { method: 'POST' });
+  await upApi('/api/upload/finish?' + q({ path: dest, size: file.size, overwrite: $('#overwrite').checked ? 1 : 0 }), { method: 'POST' });
   return 'ok';
 }
 
-async function uploadSeq(item, file, dest, before) {
-  let { body: st } = await api('/api/upload?' + q({ path: dest, size: file.size }));
+async function uploadSeq(item, file, dest) {
+  let { body: st } = await upApi('/api/upload?' + q({ path: dest, size: file.size }));
   if (st.exists && !$('#overwrite').checked) {
     if (st.existingSize === file.size) return 'skipped';
     throw new Error(`${dest} gibt es schon (andere Größe). "Überschreiben" aktivieren.`);
   }
   if (st.free >= 0 && st.free < file.size - st.offset) throw new Error(`Nicht genug Speicher (${fmt(st.free)} frei)`);
-  let off = st.offset, tries = 0, t0 = performance.now(), off0 = off;
+  let off = st.offset, tries = 0, reported = off;
+  progress(item, off, false);
   while (off < file.size) {
     if (item.paused) throw new Paused();
     try {
-      const r = await api('/api/upload?' + q({ path: dest, offset: off }), {
+      const r = await upApi('/api/upload?' + q({ path: dest, offset: off }), {
         method: 'PUT', body: file.slice(off, off + CHUNK), headers: { 'Content-Type': 'application/octet-stream' },
       });
       off = r.body.offset; tries = 0;
@@ -457,19 +566,12 @@ async function uploadSeq(item, file, dest, before) {
       if (err instanceof AuthError || ++tries > 6) throw err;
       item.state = `Verbindung weg, neuer Versuch ${tries}/6`; renderQueue();
       await sleep(1000 * tries);
-      ({ body: st } = await api('/api/upload?' + q({ path: dest, size: file.size })));
+      ({ body: st } = await upApi('/api/upload?' + q({ path: dest, size: file.size })));
       off = st.offset; item.state = 'läuft';
     }
-    item.sent = before + off;
-    const secs = (performance.now() - t0) / 1000;
-    if (secs > 1) {
-      item.speed = (off - off0) / secs;
-      const left = (item.total - item.sent) / item.speed;
-      item.eta = left > 90 ? Math.round(left / 60) + ' min' : Math.round(left) + ' s';
-    }
-    renderQueue();
+    progress(item, off - reported, true); reported = off;
   }
-  await api('/api/upload/finish?' + q({ path: dest, size: file.size, overwrite: $('#overwrite').checked ? 1 : 0 }), { method: 'POST' });
+  await upApi('/api/upload/finish?' + q({ path: dest, size: file.size, overwrite: $('#overwrite').checked ? 1 : 0 }), { method: 'POST' });
   return 'ok';
 }
 
@@ -481,20 +583,58 @@ async function runQueue() {
     while ((item = queue.find((x) => x.state === 'wartet'))) {
       item.state = 'läuft'; item.error = ''; renderQueue();
       const dir = targetDir(item);
-      let before = 0;
+      // slow SD card: send at full speed to internal storage first, the Thor puts it into place afterwards
+      let upDir = dir, staged = false;
+      if (!item.isApk) {
+        try {
+          const { body: plan } = await api('/api/upload/plan?' + q({ dir, size: item.total }));
+          if (plan.stage) { upDir = `${plan.staging}/${item.id}`; staged = true; }
+        } catch (err) { if (err instanceof AuthError) throw err; }
+      }
+      item.note = '';
       try {
-        for (const f of item.files) {
-          const dest = `${dir}/${item.isFolder ? item.name + '/' : ''}${f.rel || f.file.name}`;
-          await uploadOne(item, f.file, dest, before);
-          before += f.file.size;
-          item.sent = before;
+        const folder = item.system === 'pc' ? pcName(item) : item.name;
+        const destOf = (f) => `${upDir}/${item.isFolder ? folder + '/' : ''}${f.rel || f.file.name}`;
+        const ow = $('#overwrite').checked ? 1 : 0;
+        item.sent = 0; item.moved = 0; item.filesDone = 0; item.t0 = performance.now(); item.samples = [];
+        // re-drop: one listing of what is already there instead of one request per file; same size = skip
+        let todo = item.files;
+        if (item.isFolder && !ow) {
+          try {
+            const { body } = await upApi('/api/upload/existing?' + q({ dir: `${upDir}/${folder}` }));
+            const have = body.files || {};
+            todo = item.files.filter((f) => have[f.rel] !== f.file.size);
+            const skipped = item.files.length - todo.length;
+            if (skipped) { progress(item, item.files.filter((f) => have[f.rel] === f.file.size).reduce((a, f) => a + f.file.size, 0), false); item.filesDone = skipped; item.note = `${skipped} Dateien schon da – übersprungen`; }
+          } catch (err) { if (err instanceof AuthError) throw err; }
         }
-        if (item.extract) {
-          item.state = 'entpacke auf dem Thor …'; renderQueue();
-          const { body: job } = await api('/api/extract?' + q({ path: `${dir}/${item.name}`, dest: dir, delete: 1 }), { method: 'POST' });
-          const res = await waitJob(job.id, (j) => { item.state = `entpacke ${Math.round(j.progress * 100)} %`; renderQueue(); });
-          if (res.error) throw new Error('Entpacken: ' + res.error);
+        // folders with thousands of small files: FILE_POOL at once, each in one request; big files one by one beside them
+        const small = todo.filter((f) => f.file.size <= CHUNK), big = todo.filter((f) => f.file.size > CHUNK);
+        let failed = null;
+        const lane = async (list) => {
+          while (list.length && !failed) {
+            const f = list.shift();
+            if (item.paused) throw new Paused();
+            const dest = destOf(f);
+            const r = f.file.size <= CHUNK ? await uploadWhole(item, f.file, dest, ow) : await uploadOne(item, f.file, dest);
+            if (r === 'skipped') progress(item, f.file.size, false);
+            item.filesDone++;
+          }
+        };
+        const guard = (p) => p.catch((err) => { if (!failed || (failed instanceof Paused && !(err instanceof Paused))) failed = err; });
+        await Promise.all([lane(big), ...Array.from({ length: FILE_POOL }, () => lane(small))].map(guard));
+        if (failed) throw failed;
+        renderQueue();
+        // copying to the SD card and unpacking run in the Thor's queue: Store › Downloads (native + web)
+        if (staged || item.extract) {
+          await api('/api/transfers/move?' + q({
+            src: `${staged ? upDir : dir}/${item.name}`, dest: dir, name: item.name, size: item.total, system: item.system,
+            extract: item.extract ? 1 : 0, overwrite: $('#overwrite').checked ? 1 : 0,
+          }), { method: 'POST' });
+          item.note = staged ? 'wird jetzt auf die SD-Karte eingespielt' : 'wird jetzt entpackt';
+          item.note += ' – siehe Store › Downloads';
           romData = null;
+          pollTransfers();
         }
         if (item.isApk) {
           item.state = 'installiere (auf dem Thor bestätigen)'; renderQueue();
@@ -905,6 +1045,10 @@ $('#romDetail').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-offload]');
   if (!b) return;
   const paths = JSON.parse(b.dataset.offload);
+  if (actList.some((a) => a.kind === 'offload' && !a.done)) { // already running: a second click stops it
+    if (confirm('Auslagern stoppen? Auf dem Thor bleibt alles, wie es ist.')) { await api('/api/library/offload/cancel', { method: 'POST' }); pollActivity(); }
+    return;
+  }
   const size = +b.dataset.offloadSize;
   if (!confirm((b.dataset.offloadIn === '1' ? '' : 'Das Spiel wird zuerst zu RomM hochgeladen.\n') +
     `Danach wird es vom Thor gelöscht (${fmt(size)} frei). Spielstände bleiben auf dem Thor und kommen nach RomM.\nZurückholen geht im Store.`)) return;
@@ -943,6 +1087,7 @@ async function pollTransfers() {
   if (l) { bar.querySelector('span').textContent = l.text; bar.querySelector('i').style.width = Math.round(l.progress * 100) + '%'; }
   bar.dataset.id = (transfers.items || []).find((t) => t.state === 'running')?.id || '';
   if (!$('#store').hidden) { renderTransfers(); updateStoreCards(); }
+  if (!$('#upload').hidden) renderLinks();
   if (!document.hidden) trTimer = setTimeout(pollTransfers, l ? 1000 : 5000);
 }
 const trState = { running: 'läuft', waiting: 'wartet', later: 'für später', error: 'Fehler', cancelled: 'abgebrochen' };
@@ -950,14 +1095,18 @@ const trState = { running: 'läuft', waiting: 'wartet', later: 'für später', e
 async function cancelTransfer(id) { await api(`/api/transfers/${encodeURIComponent(id)}/cancel`, { method: 'POST' }); pollTransfers(); }
 function renderTransfers() {
   const list = transfers.items || [];
-  $('#trCount').textContent = list.length ? `· ${list.length}` : '';
-  $('#trList').innerHTML = list.length ? `<table class="files"><tbody>${list.map((t) => `<tr>
-    <td>${t.kind === 'upload' ? '⬆ RomM · ' : '⬇ '}${esc(displayTitle(t.name))}<div class="muted">${t.state === 'running'
-      ? `${Math.round((t.progress || 0) * 100)} %${t.transfer ? ' · ' + esc(t.transfer) : ''}` : t.state === 'error' ? '<span class="err">' + esc(t.error) + '</span>' : trState[t.state]}</div>
+  const off = (actList || []).filter((a) => a.kind === 'offload' && !a.done);
+  $('#trCount').textContent = list.length + off.length ? `· ${list.length + off.length}` : '';
+  const offRows = off.map((a) => `<tr><td>📦 Auslagern · ${esc(a.name || '')}<div class="muted">${esc(a.step || '')} ${a.total > 1 ? `· ${a.index}/${a.total}` : ''}</div>
+    <div class="bar"><i style="width:${Math.round((a.progress || 0) * 100)}%"></i></div></td><td class="size"></td>
+    <td class="acts"><button class="small" data-act-stop ${a.stopping ? 'disabled' : ''}>${a.stopping ? 'Wird gestoppt …' : 'Stoppen'}</button></td></tr>`).join('');
+  $('#trList').innerHTML = list.length || off.length ? `<table class="files"><tbody>${offRows}${list.map((t) => `<tr>
+    <td>${t.kind === 'upload' ? '⬆ RomM · ' : t.kind === 'url' ? '🔗 ' : t.kind === 'move' ? '📦 Einspielen · ' : t.kind === 'found' ? '📥 ' : '⬇ '}${esc(['url', 'move', 'found'].includes(t.kind) ? t.name : displayTitle(t.name))}${t.kind === 'move' ? `<span class="muted"> → ${esc(t.dest)}</span>` : ''}<div class="muted">${t.state === 'running'
+      ? `${Math.round((t.progress || 0) * 100)} %${t.transfer ? ' · ' + esc(t.transfer) : ''}` : t.state === 'error' ? '<span class="err">' + esc(t.error) + '</span>' : t.kind === 'found' && t.state === 'later' ? 'bereit zum Installieren · aus dem Download-Ordner' : trState[t.state]}</div>
       ${t.state === 'running' ? `<div class="bar"><i style="width:${Math.round((t.progress || 0) * 100)}%"></i></div>` : ''}</td>
     <td class="size">${fmt(t.size || 0)}</td>
     <td class="acts">${['running', 'waiting', 'later'].includes(t.state) ? `<button class="small" data-tr-cancel="${esc(t.id)}">Abbrechen</button>` : ''}
-      ${['later', 'error', 'cancelled'].includes(t.state) ? `<button class="small" data-tr-start="${esc(t.id)}">${t.state === 'cancelled' ? 'Neu starten' : 'Jetzt starten'}</button>` : ''}
+      ${['later', 'error', 'cancelled'].includes(t.state) ? `<button class="small" data-tr-start="${esc(t.id)}">${t.state === 'cancelled' ? 'Neu starten' : t.kind === 'found' ? 'Installieren' : 'Jetzt starten'}</button>` : ''}
       ${t.state !== 'running' ? `<button class="small" data-tr-remove="${esc(t.id)}">Entfernen</button>` : ''}</td></tr>`).join('')}</tbody></table>`
     : '<p class="muted">Nichts in der Warteschlange. Im Store „Laden“ oder „Später“ wählen.</p>';
 }
@@ -970,7 +1119,52 @@ $('#trList').addEventListener('click', async (e) => {
   pollTransfers();
 });
 $('#transferBar button').onclick = () => { const id = $('#transferBar').dataset.id; if (id && confirm('Übertragung abbrechen?')) cancelTransfer(id); };
+// Downloads settings (same as on the Thor › System › Downloads)
+async function loadDlSettings() {
+  try { const { body } = await api('/api/downloads/settings'); document.querySelectorAll('[data-dl]').forEach((c) => (c.checked = !!body[c.dataset.dl])); } catch {}
+}
+document.querySelectorAll('[data-dl]').forEach((c) => (c.onchange = async () => {
+  await api('/api/downloads/settings?' + q({ [c.dataset.dl]: c.checked ? 1 : 0 }), { method: 'POST' }); loadDlSettings(); pollTransfers();
+}));
 $('#trStartAll').onclick = async () => { await api('/api/transfers/start', { method: 'POST' }); pollTransfers(); };
+
+// ---------- upload per link: the Thor loads the file itself (same transfer queue, survives a restart) ----------
+$('#linkSys').innerHTML = [['', 'automatisch (nach Dateiendung)'], ['-', 'ROM-Ordner selbst'], ['apk', 'APK → installieren'],
+  ...Object.keys(SYSTEMS).map((s) => [s, s])].map(([v, t]) => `<option value="${v}">${esc(t)}</option>`).join('');
+$('#linkForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const url = $('#linkUrl').value.trim();
+  $('#linkMsg').textContent = 'wird angelegt …';
+  try {
+    const { body } = await api('/api/transfers/url?' + q({ url, system: $('#linkSys').value }), { method: 'POST' });
+    if (body.error) throw new Error(body.error);
+    $('#linkUrl').value = '';
+    $('#linkMsg').textContent = `„${body.name}“ ist in der Warteschlange (auch unter Store › Downloads).`;
+  } catch (err) { $('#linkMsg').textContent = 'Fehler: ' + err.message; }
+  pollTransfers();
+};
+function renderLinks() {
+  const list = (transfers.items || []).filter((t) => t.kind === 'url' || t.kind === 'move');
+  $('#linkList').innerHTML = list.map((t) => {
+    const pct = Math.round((t.progress || 0) * 100);
+    const cls = t.state === 'error' ? 'failed' : '';
+    const acts = (['running', 'waiting', 'later'].includes(t.state) ? `<button data-tr-cancel="${esc(t.id)}">Abbrechen</button>` : '')
+      + (['later', 'error', 'cancelled'].includes(t.state) ? `<button data-tr-start="${esc(t.id)}">${t.state === 'cancelled' ? 'Neu starten' : 'Nochmal'}</button>` : '')
+      + (t.state !== 'running' ? `<button data-tr-remove="${esc(t.id)}">✕</button>` : '');
+    return `<li class="${cls}"><div class="qhead"><span class="qname">${t.kind === 'move' ? '📦 Einspielen · ' : '🔗 '}${esc(t.name)}</span>${acts}</div>
+      <div class="qmeta">${t.state === 'running' ? `${pct} %${t.transfer ? ' · ' + esc(t.transfer) : ''}` : t.state === 'error' ? esc(t.error) : trState[t.state]}
+      · <span class="muted">${esc(t.kind === 'move' ? '→ ' + t.dest : t.url)}</span></div>
+      ${t.state === 'running' ? `<div class="bar"><div style="width:${pct}%"></div></div>` : ''}</li>`;
+  }).join('');
+}
+$('#linkList').addEventListener('click', async (e) => {
+  const s = e.target.closest('[data-tr-start]'), r = e.target.closest('[data-tr-remove]'), c = e.target.closest('[data-tr-cancel]');
+  if (c) return cancelTransfer(c.dataset.trCancel);
+  if (s) await api('/api/transfers/start?' + q({ id: s.dataset.trStart }), { method: 'POST' });
+  else if (r) await api('/api/transfers/remove?' + q({ id: r.dataset.trRemove }), { method: 'POST' });
+  else return;
+  pollTransfers();
+});
 
 // ---------- store: games only in RomM ----------
 let storeData = null;
@@ -1639,7 +1833,8 @@ $('#drivers').addEventListener('click', async (e) => {
 $('#drvReload').onclick = () => loadDrivers(true);
 
 // ---------- background activity, top right (offload queue, downloads, RomM upload) ----------
-let actTimer = null, actWasBusy = false;
+let actTimer = null, actWasBusy = false, actList = [];
+document.addEventListener('click', async (e) => { if (e.target.closest('[data-act-stop]')) { await api('/api/library/offload/cancel', { method: 'POST' }); pollActivity(); } });
 async function pollActivity() {
   clearTimeout(actTimer);
   let list = [];
@@ -1651,8 +1846,11 @@ async function pollActivity() {
     const err = a.error && a.error !== 'null' ? a.error : '';
     return `<div class="act ${a.done ? (err ? 'bad' : 'ok') : ''}"><div class="acthead"><span>${a.done ? (err ? '⚠' : '✓') : a.kind === 'download' ? '⬇' : '⬆'} ${esc(a.title)}</span>${n}</div>
       <div class="actname">${esc(a.name || '')}</div>
+      ${!a.done && a.stoppable ? `<button class="small" data-act-stop ${a.stopping ? 'disabled' : ''}>${a.stopping ? 'Wird gestoppt …' : 'Stoppen'}</button>` : ''}
       ${a.done ? (err ? `<div class="err">${esc(err)}</div>` : '') : `${a.step && a.step !== a.name ? `<div class="muted">${esc(a.step)}</div>` : ''}<div class="bar"><i style="width:${Math.round(a.progress * 100)}%"></i></div><div class="muted">${Math.round(a.progress * 100)} %</div>`}</div>`;
   }).join('');
+  actList = list;
+  if (!$('#store').hidden) renderTransfers();
   const busy = list.some((a) => !a.done);
   moodState.busy = busy; moodState.err = list.some((a) => a.done && a.error && a.error !== 'null'); moodState.done = !busy && list.length > 0 && !moodState.err;
   updMood();

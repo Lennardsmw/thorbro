@@ -24,6 +24,7 @@ object Background {
     @Volatile var batchDone = 0; private set
     @Volatile var batchFreed = 0L; private set
     val batchErrors = java.util.Collections.synchronizedList(mutableListOf<String>())
+    @Volatile var batchCancelled = 0; private set
     @Volatile var batchEndedAt = 0L; private set
     /** bumps whenever a game left the device; screens reload their list on change */
     @Volatile var changes = 0; private set
@@ -34,9 +35,18 @@ object Background {
     @Synchronized
     fun offload(ctx: Context, paths: List<String>, name: String, size: Long) {
         if (paths.any { isQueued(it) }) return
-        if (current == null && queue.isEmpty()) { batchTotal = 0; batchDone = 0; batchFreed = 0; batchErrors.clear(); batchEndedAt = 0 }
+        if (current == null && queue.isEmpty()) { batchTotal = 0; batchDone = 0; batchFreed = 0; batchErrors.clear(); batchEndedAt = 0; batchCancelled = 0; stopped = false }
         queue.add(Offload(paths, name, size)); batchTotal++
         if (worker?.isAlive != true) worker = thread(name = "thorbro-offload") { run(ctx.applicationContext) }
+    }
+
+    /** stop the running offload and drop the waiting ones; the local copy is only deleted after RomM confirmed, so a stop leaves everything as it was */
+    @Volatile var stopped = false; private set
+    @Synchronized
+    fun cancel() {
+        stopped = true
+        batchTotal -= queue.size; queue.clear()
+        currentJob?.stop = 2
     }
 
     private fun run(app: Context) {
@@ -49,16 +59,18 @@ object Background {
                 Progress.show(app, "In RomM auslagern ${batchDone + 1}/$batchTotal", j.progress, item.name)
                 Thread.sleep(1000)
             }
-            if (j.error != null) batchErrors += "${item.name}: ${j.error}"
+            if (j.stop == 2 && j.error != null) { batchCancelled++ }
+            else if (j.error != null) batchErrors += "${item.name}: ${j.error}"
             else { batchFreed += j.result?.optLong("freed") ?: 0; changes++ }
             batchDone++
         }
         current = null; currentJob = null; batchEndedAt = System.currentTimeMillis()
-        Progress.done(app, "Auslagern fertig", summary())
+        Progress.done(app, if (stopped) "Auslagern gestoppt" else "Auslagern fertig", summary())
     }
 
     private fun summary(): String {
-        val ok = batchDone - batchErrors.size
+        val ok = batchDone - batchErrors.size - batchCancelled
+        if (stopped && ok == 0 && batchErrors.isEmpty()) return "Abgebrochen – nichts gelöscht"
         return "$ok/$batchTotal ausgelagert, ${fmt(batchFreed)} frei" + (if (batchErrors.isNotEmpty()) " · ${batchErrors.size} Fehler: ${batchErrors.first()}" else "")
     }
 
@@ -86,7 +98,7 @@ object Background {
         val cur = current
         if (cur != null && job != null) out.put(JSONObject().put("kind", "offload").put("title", "In RomM auslagern")
             .put("name", cur.name).put("step", job.message).put("progress", job.progress).also { job.gameJson(it) }
-            .put("index", batchDone + 1).put("total", batchTotal).put("done", false))
+            .put("index", batchDone + 1).put("total", batchTotal).put("done", false).put("stoppable", true).put("stopping", stopped))
         else if (batchEndedAt > 0 && now - batchEndedAt < SHOW_DONE_MS) out.put(JSONObject().put("kind", "offload").put("title", "Auslagern fertig")
             .put("name", summary()).put("progress", 1.0).put("index", batchDone).put("total", batchTotal).put("done", true)
             .put("error", batchErrors.firstOrNull()))

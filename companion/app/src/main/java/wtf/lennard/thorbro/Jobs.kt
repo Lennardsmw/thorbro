@@ -8,6 +8,7 @@ import kotlin.concurrent.thread
 /** Long-running work (extracting, exporting) runs in the background; clients poll GET /api/jobs/{id}. */
 object Jobs {
     class Job(val id: Int, val name: String) {
+        val startedAt = System.currentTimeMillis()
         @Volatile var progress = 0.0
         @Volatile var message = ""
         @Volatile var done = false

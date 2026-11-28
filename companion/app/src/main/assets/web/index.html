@@ -44,7 +44,7 @@
   <section id="upload" class="tab">
     <div id="drop" class="drop">
       <p><strong>Spiele, ROM-Ordner oder APKs hier ablegen</strong></p>
-      <p class="muted">ROMs landen im passenden System-Ordner, APKs werden danach installiert.</p>
+      <p class="muted">Startet sofort. ROMs landen im passenden System-Ordner, APKs werden danach installiert.</p>
       <label class="btn">Dateien wählen<input id="pick" type="file" multiple hidden></label>
       <label class="btn">Ordner wählen<input id="pickDir" type="file" webkitdirectory hidden></label>
     </div>
@@ -52,10 +52,18 @@
       <label>ROM-Ordner <input id="romRoot"></label>
       <label><input id="overwrite" type="checkbox"> Vorhandene Dateien überschreiben</label>
       <span class="grow"></span>
+      <span id="via" class="muted">Senden über WLAN</span>
       <button id="startAll" class="primary">Start</button>
       <button id="clearDone">Fertige entfernen</button>
     </div>
     <ul id="queue" class="queue"></ul>
+    <form id="linkForm" class="row linkrow">
+      <label class="grow">Per Link <input id="linkUrl" type="url" placeholder="https://… – der Thor lädt die Datei selbst" required></label>
+      <label>Ziel <select id="linkSys"></select></label>
+      <button class="primary">Laden</button>
+    </form>
+    <p id="linkMsg" class="muted"></p>
+    <ul id="linkList" class="queue"></ul>
   </section>
 
   <section id="roms" class="tab" hidden>
@@ -100,6 +108,11 @@
     </div>
     <div id="storeList"></div>
     <div class="panel" id="transfers"><h3>Downloads &amp; Uploads <span id="trCount" class="muted"></span></h3>
+      <div class="row dlset">
+        <label><input type="checkbox" data-dl="autoInstall"> Spiele aus dem Download-Ordner automatisch installieren</label>
+        <label><input type="checkbox" data-dl="autoClean"> danach aufräumen</label>
+        <label><input type="checkbox" data-dl="autoUpload"> danach zu RomM hochladen</label>
+      </div>
       <div class="sub">Eins nach dem anderen; geht nach einem Neustart weiter. „Später“ wartet, bis du es startest.</div>
       <div class="row"><button id="trStartAll" class="small">Alle starten</button></div>
       <div id="trList"></div></div>

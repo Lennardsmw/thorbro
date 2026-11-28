@@ -69,6 +69,7 @@ dependencies {
     implementation("org.slf4j:slf4j-nop:2.0.17")
     implementation("org.apache.commons:commons-compress:1.28.0")
     implementation("org.tukaani:xz:1.12")
+    implementation("me.zhanghai.android.libarchive:library:1.1.6") // RAR / RAR5
     implementation("com.google.zxing:core:3.5.3")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303") // the real org.json; android.jar only has stubs

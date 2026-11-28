@@ -11,6 +11,10 @@ import java.net.Inet4Address
 import java.net.NetworkInterface
 
 object Device {
+    /** stable per-device id (Android ID), to tell the same Thor over USB and Wi-Fi from another one */
+    @android.annotation.SuppressLint("HardwareIds")
+    fun uid(ctx: Context): String = android.provider.Settings.Secure.getString(ctx.contentResolver, android.provider.Settings.Secure.ANDROID_ID) ?: ""
+
     /** this device's name for save uploads ("AYN Thor"), safe inside a file name */
     fun label(ctx: Context): String =
         (runCatching { Settings.Global.getString(ctx.contentResolver, "device_name") }.getOrNull()?.takeIf { it.isNotBlank() } ?: Build.MODEL)

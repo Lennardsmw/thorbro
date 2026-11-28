@@ -53,6 +53,11 @@ object Server {
                 allowMethod(HttpMethod.Put)
                 allowMethod(HttpMethod.Delete)
             }
+            // the web panel on the Mac reaches the Thor also over USB (adb forward to 127.0.0.1:7331, set up by RomBro):
+            // Chrome asks before a LAN page may call loopback (Private/Local Network Access), the preflight needs this
+            intercept(io.ktor.server.application.ApplicationCallPipeline.Setup) {
+                context.response.header("Access-Control-Allow-Private-Network", "true")
+            }
             routing {
                 // ---- web UI ----
                 get("/") { asset(ctx, "index.html") }
@@ -76,6 +81,11 @@ object Server {
                 // ---- device ----
                 get("/api/ping") {
                     json(JSONObject().put("name", "ThorBro").put("model", android.os.Build.MODEL))
+                }
+                // which way the web panel should send: usb = cable with USB debugging in; uid tells two Thors apart
+                get("/api/link") {
+                    if (denied(ctx)) return@get
+                    json(JSONObject().put("usb", Streaming.usbAdb(ctx)).put("uid", Device.uid(ctx)).put("usbPort", 7331))
                 }
                 get("/api/info") {
                     if (denied(ctx)) return@get
@@ -595,6 +605,11 @@ object Server {
                     Background.offload(ctx, paths, name, size)
                     json(Background.list())
                 }
+                post("/api/library/offload/cancel") {
+                    if (denied(ctx)) return@post
+                    Background.cancel()
+                    json(Background.list())
+                }
                 get("/api/history") {
                     if (denied(ctx)) return@get
                     json(History.list(ctx, q("limit")?.toIntOrNull() ?: 50))
@@ -612,6 +627,46 @@ object Server {
                     if (denied(ctx)) return@post
                     val id = q("id")?.toIntOrNull() ?: return@post fail("id missing")
                     json(withContext(Dispatchers.IO) { TransferQueue.addDownload(ctx, id, q("name") ?: "Spiel $id", q("size")?.toLongOrNull() ?: 0L, q("system") ?: "", q("later") == "1") })
+                }
+                // two-step upload to a slow SD card: where to send first ({stage, staging}); then /api/transfers/move
+                get("/api/upload/plan") {
+                    if (denied(ctx)) return@get
+                    val dir = Storage.resolve(q("dir")) ?: return@get fail("path not allowed")
+                    json(Staging.plan(dir, q("size")?.toLongOrNull() ?: 0L))
+                }
+                // put an upload into place in the background (Downloads page): copy staged files to dest, or unpack
+                post("/api/transfers/move") {
+                    if (denied(ctx)) return@post
+                    val src = Storage.resolve(q("src")) ?: return@post fail("path not allowed")
+                    val dest = Storage.resolve(q("dest")) ?: return@post fail("path not allowed")
+                    val staged = src.path.startsWith(Staging.dir.path + "/")
+                    if (!staged && !(src.isFile && Archives.isArchive(src))) return@post fail("src must be staged or an archive")
+                    json(withContext(Dispatchers.IO) {
+                        TransferQueue.addMove(ctx, src.path, dest.path, q("name") ?: src.name, q("size")?.toLongOrNull() ?: 0L, q("system") ?: "",
+                            q("extract") == "1", q("overwrite") == "1")!!
+                    })
+                }
+                // Downloads settings (Store › Downloads): auto-install, auto clean-up, auto upload to RomM
+                get("/api/downloads/settings") {
+                    if (denied(ctx)) return@get
+                    json(Prefs.downloadsJson(ctx))
+                }
+                post("/api/downloads/settings") {
+                    if (denied(ctx)) return@post
+                    fun b(n: String) = q(n)?.let { it == "1" }
+                    Prefs.setDownloads(ctx, b("autoInstall"), b("autoClean"), b("autoUpload"))
+                    if (b("autoInstall") == true) withContext(Dispatchers.IO) { TransferQueue.startFound(ctx) }
+                    json(Prefs.downloadsJson(ctx))
+                }
+                // "Upload per Link": the Thor downloads the file itself (transfer queue, survives a restart)
+                post("/api/transfers/url") {
+                    if (denied(ctx)) return@post
+                    val url = q("url")?.trim() ?: return@post fail("url missing")
+                    if (!UrlDownload.validUrl(url)) return@post fail("Nur http- und https-Links")
+                    val dir = q("dir")?.takeIf { it.isNotBlank() }
+                    if (dir != null && Storage.resolve(dir) == null) return@post fail("path not allowed")
+                    val extract = when (q("extract")) { "1" -> true; "0" -> false; else -> null }
+                    json(withContext(Dispatchers.IO) { TransferQueue.addUrl(ctx, url, q("system") ?: "", dir ?: "", extract, q("later") == "1") })
                 }
                 get("/api/transfers") {
                     if (denied(ctx)) return@get
@@ -915,9 +970,9 @@ object Server {
                 post("/api/extract") {
                     if (denied(ctx)) return@post
                     val a = Storage.resolve(q("path")) ?: return@post fail("path not allowed")
-                    if (!a.isFile || !Archives.isArchive(a)) return@post fail("keine .zip/.7z-Datei")
+                    if (!a.isFile || !Archives.isArchive(a)) return@post fail("keine .zip/.7z/.rar-Datei")
                     val dest = Storage.resolve(q("dest") ?: a.parent) ?: return@post fail("dest not allowed")
-                    val j = Jobs.start("Entpacken ${a.name}") { job -> Archives.extract(a, dest, q("delete") == "1", job) }
+                    val j = Jobs.start("Entpacken ${a.name}") { job -> Archives.extract(a, dest, q("delete") == "1", job, sort = ctx) }
                     json(j.json())
                 }
                 get("/api/storage") {
@@ -1035,6 +1090,42 @@ object Server {
                 // 1. GET  /api/upload?path=&size=      -> {offset, exists, free}
                 // 2. PUT  /api/upload?path=&offset=N   raw bytes, appended; 409 + {offset} if N is wrong
                 // 3. POST /api/upload/finish?path=&size=&overwrite=1
+                // What is already there (re-drop of a big folder): every file under dir with its size, in one call
+                get("/api/upload/existing") {
+                    if (denied(ctx)) return@get
+                    val d = Storage.resolve(q("dir")) ?: return@get fail("dir not allowed")
+                    val o = JSONObject()
+                    withContext(Dispatchers.IO) {
+                        if (d.isDirectory) d.walkTopDown().filter { it.isFile && !it.name.endsWith(PART) && !it.name.endsWith(CHUNKS) }
+                            .forEach { o.put(it.relativeTo(d).path, it.length()) }
+                    }
+                    json(JSONObject().put("files", o))
+                }
+                // Small files in one go: PUT /api/upload/whole?path=&size=&overwrite=1 (folders with thousands of files)
+                put("/api/upload/whole") {
+                    if (denied(ctx)) return@put
+                    val f = Storage.resolve(q("path")) ?: return@put fail("path not allowed")
+                    val size = q("size")?.toLongOrNull() ?: return@put fail("size missing")
+                    if (f.exists()) {
+                        if (q("overwrite") != "1") {
+                            if (f.isFile && f.length() == size) return@put json(JSONObject().put("ok", true).put("skipped", true))
+                            return@put fail("file exists", HttpStatusCode.Conflict)
+                        }
+                    }
+                    val free = Storage.free(f)
+                    if (free in 0 until size) return@put json(JSONObject().put("error", "no space").put("free", free), HttpStatusCode.Conflict)
+                    val part = File(f.path + PART)
+                    val n = withContext(Dispatchers.IO) {
+                        f.parentFile?.mkdirs()
+                        FileOutputStream(part).use { out -> call.receiveChannel().toInputStream().use { it.copyTo(out, 1 shl 20) } }
+                    }
+                    if (n != size) { part.delete(); return@put fail("size mismatch ($n of $size)", HttpStatusCode.Conflict) }
+                    if (f.exists()) f.delete()
+                    if (!part.renameTo(f)) return@put fail("rename failed")
+                    Roms.invalidateSoon()
+                    sweepSoon(ctx, f)
+                    json(JSONObject().put("ok", true))
+                }
                 get("/api/upload") {
                     if (denied(ctx)) return@get
                     val f = Storage.resolve(q("path")) ?: return@get fail("path not allowed")
@@ -1111,7 +1202,9 @@ object Server {
                         f.delete()
                     }
                     if (!part.renameTo(f)) return@post fail("rename failed")
-                    Roms.invalidate()
+                    Roms.invalidateSoon()
+                    // loose archive or disc in the ROM folder: unpack / sort it (a little later, the client may still go on)
+                    sweepSoon(ctx, f)
                     json(JSONObject().put("ok", true).put("path", f.path))
                 }
 
@@ -1191,6 +1284,27 @@ object Server {
                 }
             }
         }
+
+    private val sweepPending = java.util.concurrent.atomic.AtomicBoolean(false)
+    @Volatile private var sweepAt = 0L
+
+    /**
+     * An upload landed loose in the ROM folder (or in a folder there that is no console folder, e.g. a PC game):
+     * sort it a little later. One waiting thread for a whole folder of thousands of files; a loose file after 11 s,
+     * a folder after 65 s (Discs.sweep leaves folders younger than a minute alone).
+     */
+    private fun sweepSoon(ctx: Context, f: File) {
+        val root = Library.romsRoot(ctx).canonicalFile
+        val c = f.canonicalFile
+        val top = generateSequence(c) { it.parentFile }.firstOrNull { it.parentFile == root } ?: return
+        if (top != c && Roms.consoleFor(top.name) != null) return
+        sweepAt = maxOf(sweepAt, System.currentTimeMillis() + if (top == c) 11_000 else 65_000)
+        if (!sweepPending.compareAndSet(false, true)) return
+        kotlin.concurrent.thread(isDaemon = true) {
+            try { while (System.currentTimeMillis() < sweepAt) Thread.sleep(2_000) } finally { sweepPending.set(false) }
+            runCatching { Discs.sweep(ctx) }
+        }
+    }
 
     private fun RoutingContext.q(name: String): String? = call.request.queryParameters[name]
 

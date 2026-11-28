@@ -28,4 +28,19 @@ object Prefs {
 
     fun autostart(ctx: Context): Boolean = of(ctx).getBoolean("autostart", true)
     fun setAutostart(ctx: Context, on: Boolean) = of(ctx).edit().putBoolean("autostart", on).apply()
+
+    // ---- Downloads (Store › Downloads, settings native + web) ----
+    /** new finds in the Download folder install by themselves (off = "bereit zum Installieren", one click) */
+    fun autoInstall(ctx: Context): Boolean = of(ctx).getBoolean("downloads.autoInstall", false)
+    /** after installing: delete the archive / source file and leftovers */
+    fun autoClean(ctx: Context): Boolean = of(ctx).getBoolean("downloads.autoClean", true)
+    /** after installing: send the game to RomM (when connected) */
+    fun autoUpload(ctx: Context): Boolean = of(ctx).getBoolean("downloads.autoUpload", false)
+    fun setDownloads(ctx: Context, autoInstall: Boolean?, autoClean: Boolean?, autoUpload: Boolean?) = of(ctx).edit().apply {
+        autoInstall?.let { putBoolean("downloads.autoInstall", it) }
+        autoClean?.let { putBoolean("downloads.autoClean", it) }
+        autoUpload?.let { putBoolean("downloads.autoUpload", it) }
+    }.apply()
+    fun downloadsJson(ctx: Context): org.json.JSONObject = org.json.JSONObject()
+        .put("autoInstall", autoInstall(ctx)).put("autoClean", autoClean(ctx)).put("autoUpload", autoUpload(ctx))
 }

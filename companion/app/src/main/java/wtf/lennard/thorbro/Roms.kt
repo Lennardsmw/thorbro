@@ -42,6 +42,7 @@ object Roms {
         Console("psvita", "PS Vita", setOf("vpk"), listOf("vita", "PlayStation Vita"), folderGames = true),
         Console("xbox", "Xbox", setOf("iso", "xiso"), listOf("Microsoft Xbox")),
         Console("xbox360", "Xbox 360", setOf("iso", "xex", "god"), listOf("Xbox 360")),
+        Console("pc", "PC (Windows)", setOf("exe"), listOf("windows", "pcgames", "Windows Games", "PC Games"), folderGames = true),
         Console("dreamcast", "Dreamcast", setOf("gdi", "cdi", "chd", "cue"), listOf("Sega Dreamcast")),
         Console("saturn", "Saturn", setOf("cue", "chd", "iso"), listOf("Sega Saturn")),
         Console("megadrive", "Mega Drive / Genesis", setOf("md", "gen", "smd", "bin"), listOf("genesis", "Sega Genesis", "Mega Drive", "Sega Mega Drive")),
@@ -59,13 +60,13 @@ object Roms {
     private val byKey = systems.flatMap { s -> s.keys.map { it to s } }.toMap()
     private val archives = setOf("zip", "7z")
     /** Too generic to mean "ROM" outside a console folder (.bin data, .md markdown ...). */
-    private val notUniqueEnough = setOf("bin", "md", "st", "bs", "img", "gz", "pkg", "wad", "god", "ccd", "mds", "ecm", "m3u", "srl", "gen", "ws", "app")
+    private val notUniqueEnough = setOf("bin", "md", "st", "bs", "img", "gz", "pkg", "wad", "god", "ccd", "mds", "ecm", "m3u", "srl", "gen", "ws", "app", "exe")
     /** Extensions that belong to exactly one console. */
     private val unique: Map<String, Console> = systems.flatMap { s -> s.exts.map { it to s } }
         .groupBy({ it.first }, { it.second }).filterValues { it.size == 1 }.mapValues { it.value[0] }
         .filterKeys { it !in notUniqueEnough }
     /** ROM-like extensions that need a console folder to be placed (".iso" could be five consoles). */
-    private val ambiguous = systems.flatMap { it.exts }.toSet() - unique.keys - setOf("bin", "img", "gz", "pkg", "wad", "god")
+    private val ambiguous = systems.flatMap { it.exts }.toSet() - unique.keys - setOf("bin", "img", "gz", "pkg", "wad", "god", "exe")
 
     private val skipDirs = setOf(
         "android", "dcim", "pictures", "movies", "music", "podcasts", "ringtones", "alarms", "notifications",
@@ -77,9 +78,20 @@ object Roms {
 
     @Volatile private var cache: JSONObject? = null
     fun invalidate() { cache = null }
+    @Volatile private var staleAt = 0L
+    /** many files in a row (a folder upload): the list goes stale 5 s after the last one, not with every file */
+    fun invalidateSoon() { staleAt = System.currentTimeMillis() + 5_000 }
+    @Volatile private var lastRoots: List<String>? = null
+    /** the ROM folders of the last scan, without scanning again (null = never scanned) */
+    fun knownRoots(): List<String>? = lastRoots
+    /** the console an extension belongs to when only one has it (.nds → nds; .iso → null) */
+    fun uniqueSystem(ext: String): String? = unique[ext.lowercase()]?.id
+    /** the console a folder name stands for ("PS2", "Game Boy Advance" …), null = none; skipped folders count too */
+    fun consoleFor(name: String): String? = byKey[key(name)]?.id ?: name.lowercase().takeIf { it in skipDirs }
 
     @Synchronized
     fun scan(ctx: Context, refresh: Boolean): JSONObject {
+        if (staleAt in 1..System.currentTimeMillis()) { staleAt = 0; cache = null }
         if (!refresh) cache?.let { return it }
         val found = LinkedHashMap<String, MutableList<JSONObject>>()
         val roots = mutableListOf<String>()
@@ -106,10 +118,11 @@ object Roms {
         return JSONObject()
             .put("scannedAt", System.currentTimeMillis())
             .put("tookMs", System.currentTimeMillis() - t0)
-            .put("romRoots", JSONArray(roots))
+            .put("romRoots", JSONArray(roots.also { lastRoots = it.toList() }))
             .put("systemIds", JSONArray(systems.map { JSONObject().put("id", it.id).put("name", it.name) }))
             .put("systems", list)
             .also { cache = it }
+            .also { if (refresh) kotlin.concurrent.thread(isDaemon = true) { runCatching { Discs.sweep(ctx.applicationContext) } } }
     }
 
     private fun volumes(ctx: Context): List<File> =
@@ -126,6 +139,8 @@ object Roms {
                 val lower = name.lowercase()
                 if (lower in skipDirs || lower.endsWith("-work")) continue
                 val sub = byKey[key(name)] ?: system
+                // PC (Windows): every folder in ROMs/pc is one game, whatever it holds
+                if (system?.id == "pc") { add(out, "pc", f, volume, isDir = true); continue }
                 // Folder games (Wii U, PS3, Vita): a folder without ROM files of its own is one game.
                 if (system != null && system.folderGames && sub === system && !hasRomFiles(f, system)) {
                     add(out, system.id, f, volume, isDir = true)
