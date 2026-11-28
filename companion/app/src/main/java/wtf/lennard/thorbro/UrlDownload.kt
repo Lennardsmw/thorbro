@@ -122,9 +122,10 @@ object UrlDownload {
             val extract = if (e.has("extract") && !e.isNull("extract")) e.optBoolean("extract") else Archives.isArchive(target) && sys !in KEEP_ZIPPED && sys != "apk"
             if (extract && Archives.isArchive(target)) {
                 job.message = "entpacke ${target.name}"
-                Archives.extract(target, target.parentFile!!, deleteAfter = true, job = job)
-                path = target.parentFile!!.path
+                val r = Archives.extract(target, target.parentFile!!, deleteAfter = true, job = job, sort = app)
+                path = r.optJSONArray("paths")?.optString(0)?.takeIf { it.isNotEmpty() } ?: target.parentFile!!.path
             }
+            if (!extract && !target.name.endsWith(".apk", true)) path = Discs.place(app, listOf(target)).first().path
             Roms.invalidate()
             History.add(app, "download", target.name, sys, ms = System.currentTimeMillis() - t0, size = target.length().takeIf { it > 0 } ?: total)
             if (target.name.endsWith(".apk", true) && target.exists()) {

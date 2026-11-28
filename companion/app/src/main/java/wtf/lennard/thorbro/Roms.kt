@@ -77,6 +77,8 @@ object Roms {
 
     @Volatile private var cache: JSONObject? = null
     fun invalidate() { cache = null }
+    /** the console an extension belongs to when only one has it (.nds → nds; .iso → null) */
+    fun uniqueSystem(ext: String): String? = unique[ext.lowercase()]?.id
 
     @Synchronized
     fun scan(ctx: Context, refresh: Boolean): JSONObject {
@@ -110,6 +112,7 @@ object Roms {
             .put("systemIds", JSONArray(systems.map { JSONObject().put("id", it.id).put("name", it.name) }))
             .put("systems", list)
             .also { cache = it }
+            .also { if (refresh) kotlin.concurrent.thread(isDaemon = true) { runCatching { Discs.sweep(ctx.applicationContext) } } }
     }
 
     private fun volumes(ctx: Context): List<File> =

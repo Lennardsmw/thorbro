@@ -11,6 +11,7 @@ import org.json.JSONObject
  */
 object TransferQueue {
     private const val KEY = "transfers.queue"
+    private const val IGNORED = "transfers.sweepIgnored"
     private val lock = Any()
     @Volatile private var worker: Thread? = null
     /** the item running right now and its job (progress, speed, time left) */
@@ -64,9 +65,11 @@ object TransferQueue {
     }
 
     /** an upload that still has to be put into place (staged → SD card, or an archive to unpack): "Einspielen" */
-    fun addMove(ctx: Context, src: String, dest: String, name: String, size: Long, system: String, extract: Boolean, overwrite: Boolean): JSONObject = synchronized(lock) {
+    fun addMove(ctx: Context, src: String, dest: String, name: String, size: Long, system: String, extract: Boolean, overwrite: Boolean, quiet: Boolean = false): JSONObject? = synchronized(lock) {
         val id = "m" + src.hashCode().toUInt().toString(16)
         val l = items(ctx)
+        // quiet = found by Discs.sweep: leave an existing (failed, cancelled) entry alone, skip what the user removed
+        if (quiet && (Prefs.of(ctx).getStringSet(IGNORED, emptySet())!!.contains(src) || l.any { it.optString("id") == id })) return null
         l.firstOrNull { it.optString("id") == id }?.let { e -> e.put("later", false).remove("error"); e.remove("cancelled"); store(ctx, l); kick(ctx); return e }
         val e = JSONObject().put("id", id).put("kind", "move").put("src", src).put("dest", dest).put("name", name).put("size", size)
             .put("system", system).put("extract", extract).put("overwrite", overwrite).put("later", false).put("added", System.currentTimeMillis())
@@ -99,7 +102,11 @@ object TransferQueue {
     fun remove(ctx: Context, id: String) = synchronized(lock) {
         if (current?.optString("id") == id) return@synchronized // the running one finishes (a download keeps its .part for later)
         val l = items(ctx)
-        l.filter { it.optString("id") == id && it.optString("kind") == "move" }.forEach { Staging.discard(it) }
+        l.filter { it.optString("id") == id && it.optString("kind") == "move" }.forEach {
+            Staging.discard(it)
+            // removed by hand: the sweep should not bring it back
+            val p = Prefs.of(ctx); p.edit().putStringSet(IGNORED, p.getStringSet(IGNORED, emptySet())!! + it.optString("src")).apply()
+        }
         store(ctx, l.filter { it.optString("id") != id })
     }
 
@@ -131,7 +138,7 @@ object TransferQueue {
     }
 
     /** after a restart: go on with what was queued */
-    fun resume(ctx: Context) = kick(ctx)
+    fun resume(ctx: Context) { kick(ctx); kotlin.concurrent.thread(isDaemon = true) { runCatching { Discs.sweep(ctx.applicationContext) } } }
 
     private fun kick(ctx: Context) {
         val a = ctx.applicationContext; app = a

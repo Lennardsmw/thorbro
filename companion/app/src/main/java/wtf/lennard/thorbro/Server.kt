@@ -638,7 +638,7 @@ object Server {
                     if (!staged && !(src.isFile && Archives.isArchive(src))) return@post fail("src must be staged or an archive")
                     json(withContext(Dispatchers.IO) {
                         TransferQueue.addMove(ctx, src.path, dest.path, q("name") ?: src.name, q("size")?.toLongOrNull() ?: 0L, q("system") ?: "",
-                            q("extract") == "1", q("overwrite") == "1")
+                            q("extract") == "1", q("overwrite") == "1")!!
                     })
                 }
                 // "Upload per Link": the Thor downloads the file itself (transfer queue, survives a restart)
@@ -953,9 +953,9 @@ object Server {
                 post("/api/extract") {
                     if (denied(ctx)) return@post
                     val a = Storage.resolve(q("path")) ?: return@post fail("path not allowed")
-                    if (!a.isFile || !Archives.isArchive(a)) return@post fail("keine .zip/.7z-Datei")
+                    if (!a.isFile || !Archives.isArchive(a)) return@post fail("keine .zip/.7z/.rar-Datei")
                     val dest = Storage.resolve(q("dest") ?: a.parent) ?: return@post fail("dest not allowed")
-                    val j = Jobs.start("Entpacken ${a.name}") { job -> Archives.extract(a, dest, q("delete") == "1", job) }
+                    val j = Jobs.start("Entpacken ${a.name}") { job -> Archives.extract(a, dest, q("delete") == "1", job, sort = ctx) }
                     json(j.json())
                 }
                 get("/api/storage") {
@@ -1150,6 +1150,8 @@ object Server {
                     }
                     if (!part.renameTo(f)) return@post fail("rename failed")
                     Roms.invalidate()
+                    // loose archive or disc in the ROM folder: unpack / sort it (a little later, the client may still go on)
+                    kotlin.concurrent.thread(isDaemon = true) { Thread.sleep(11_000); runCatching { Discs.sweep(ctx) } }
                     json(JSONObject().put("ok", true).put("path", f.path))
                 }
 

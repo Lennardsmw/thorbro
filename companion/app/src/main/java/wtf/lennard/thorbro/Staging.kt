@@ -34,7 +34,7 @@ object Staging {
      */
     fun start(ctx: Context, e: JSONObject): Jobs.Job {
         val app = ctx.applicationContext
-        return Jobs.start("Einspielen") { job ->
+        return Jobs.start(if (e.optBoolean("extract")) "Entpacken" else "Einspielen") { job ->
             val src = File(e.getString("src"))
             val dest = File(e.getString("dest")).apply { mkdirs() }
             val overwrite = e.optBoolean("overwrite")
@@ -47,7 +47,7 @@ object Staging {
             val stageRoot = if (staged) src.parentFile!! else null
             if (e.optBoolean("extract") && src.isFile && Archives.isArchive(src)) {
                 job.message = "entpacke ${src.name}"
-                Archives.extract(src, dest, deleteAfter = true, job = job)
+                Archives.extract(src, dest, deleteAfter = true, job = job, sort = app)
             } else if (staged) {
                 val files = walk(src)
                 val total = files.sumOf { it.length() }.coerceAtLeast(1)
@@ -90,6 +90,8 @@ object Staging {
                 } finally { Transfers.end() }
             }
             stageRoot?.deleteRecursively()
+            // loose in the ROM folder (no console chosen): into the console folder the file says
+            Discs.place(app, dest.listFiles().orEmpty().filter { it.isFile && !it.name.startsWith(".") && it.lastModified() >= job.startedAt })
             Roms.invalidate()
             History.add(app, "upload", e.optString("name"), e.optString("system"), size = e.optLong("size"))
             Progress.done(app, "Eingespielt", e.optString("name"))

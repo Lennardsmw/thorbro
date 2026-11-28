@@ -313,7 +313,7 @@ const SYSTEMS = {
 const EXT_TO_SYS = {};
 Object.entries(SYSTEMS).forEach(([s, exts]) => exts.forEach((e) => (EXT_TO_SYS[e] = s)));
 const ext = (n) => (n.includes('.') ? n.split('.').pop().toLowerCase() : '');
-const isArchiveName = (n) => ['zip', '7z'].includes(ext(n));
+const isArchiveName = (n) => ['zip', '7z', 'rar'].includes(ext(n));
 // RetroArch cores read these zipped; everything else is unpacked by default
 const KEEP_ZIPPED = new Set(['nes', 'snes', 'gb', 'gbc', 'gba', 'megadrive', 'mastersystem', 'gamegear', 'pcengine', 'atari2600', 'lynx', 'ngp', 'wonderswan', 'arcade', 'n64']);
 const APK_DIR = '/storage/emulated/0/Download/ThorBro';
