@@ -90,6 +90,7 @@ object Library {
         var done = 0L
         var rem = remote(ctx, true)
         for ((sys, rom) in items) {
+            job.check()
             val f = File(rom.getString("path"))
             job.game(rom.optString("name").ifEmpty { f.nameWithoutExtension }, sys, file = f.path)
             if (rem.find(sys, f.name) != null) { done += rom.getLong("size"); continue }
@@ -99,10 +100,11 @@ object Library {
             if (f.isDirectory) {
                 val zip = File(ctx.cacheDir, "offload.zip")
                 RommSync.zipFolder(f, zip)
-                try { RommSync.upload(ctx, pid, f.name + ".zip", zip) { n -> job.progress = 0.9 * (done + n) / total; job.bytes(done + n, total); job.gameBytes(n, zip.length()) } } finally { zip.delete() }
-            } else RommSync.upload(ctx, pid, f.name, f) { n -> job.progress = 0.9 * (done + n) / total; job.bytes(done + n, total); job.gameBytes(n, f.length()) }
+                try { RommSync.upload(ctx, pid, f.name + ".zip", zip) { n -> job.check(); job.progress = 0.9 * (done + n) / total; job.bytes(done + n, total); job.gameBytes(n, zip.length()) } } finally { zip.delete() }
+            } else RommSync.upload(ctx, pid, f.name, f) { n -> job.check(); job.progress = 0.9 * (done + n) / total; job.bytes(done + n, total); job.gameBytes(n, f.length()) }
             done += rom.getLong("size")
         }
+        job.check()
         job.message = "Spielstände hochladen"; job.progress = 0.92
         val sync = runCatching { RommSync.syncSaves(ctx, job) }.getOrElse { JSONObject().put("errors", JSONArray().put(it.message)) }
         // RomM scans uploads in the background; give it a moment before checking
@@ -115,13 +117,14 @@ object Library {
                 !rom.optBoolean("dir") && hit.optLong("fs_size_bytes") > 0 && hit.optLong("fs_size_bytes") != rom.getLong("size")
             }
             if (missing.isEmpty()) break
-            Thread.sleep(3000)
+            Thread.sleep(3000); job.check()
         }
         if (missing.isNotEmpty()) throw IllegalStateException("RomM hat ${missing.joinToString { it.second.getString("file") }} noch nicht vollständig – nichts gelöscht")
         val st = status(ctx, false).getJSONObject("games")
         val unsaved = items.filter { st.optJSONObject(it.second.getString("path"))?.optString("save") in setOf("pending", "local") }
         if (unsaved.isNotEmpty()) throw IllegalStateException("Spielstand von ${unsaved.first().second.getString("name")} ist nicht in RomM " +
             "(${sync.optJSONArray("errors")?.optString(0) ?: "Spiel in RomM noch nicht erkannt"}) – nichts gelöscht")
+        job.check() // last chance to stop: after this the local copies go
         var freed = 0L
         for ((_, rom) in items) {
             val f = File(rom.getString("path"))

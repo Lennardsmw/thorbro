@@ -605,6 +605,11 @@ object Server {
                     Background.offload(ctx, paths, name, size)
                     json(Background.list())
                 }
+                post("/api/library/offload/cancel") {
+                    if (denied(ctx)) return@post
+                    Background.cancel()
+                    json(Background.list())
+                }
                 get("/api/history") {
                     if (denied(ctx)) return@get
                     json(History.list(ctx, q("limit")?.toIntOrNull() ?: 50))

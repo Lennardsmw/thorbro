@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -125,5 +126,10 @@ internal fun ActivityCard(a: JSONObject) {
                 Text("  ${(p * 100).toInt()} %", fontSize = 12.sp, color = Muted)
             }
         } else if (err != null) Text(err, fontSize = 12.sp, color = Bad, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        if (!done && a.optBoolean("stoppable")) {
+            val stopping = a.optBoolean("stopping")
+            Text(if (stopping) "Wird gestoppt …" else "Stoppen", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (stopping) Muted else Bad,
+                modifier = Modifier.padding(top = 8.dp).clip(RoundedCornerShape(8.dp)).clickable(enabled = !stopping) { Background.cancel() }.padding(horizontal = 10.dp, vertical = 6.dp))
+        }
     }
 }

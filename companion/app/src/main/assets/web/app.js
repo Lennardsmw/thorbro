@@ -964,6 +964,10 @@ $('#romDetail').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-offload]');
   if (!b) return;
   const paths = JSON.parse(b.dataset.offload);
+  if (actList.some((a) => a.kind === 'offload' && !a.done)) { // already running: a second click stops it
+    if (confirm('Auslagern stoppen? Auf dem Thor bleibt alles, wie es ist.')) { await api('/api/library/offload/cancel', { method: 'POST' }); pollActivity(); }
+    return;
+  }
   const size = +b.dataset.offloadSize;
   if (!confirm((b.dataset.offloadIn === '1' ? '' : 'Das Spiel wird zuerst zu RomM hochgeladen.\n') +
     `Danach wird es vom Thor gelöscht (${fmt(size)} frei). Spielstände bleiben auf dem Thor und kommen nach RomM.\nZurückholen geht im Store.`)) return;
@@ -1010,8 +1014,12 @@ const trState = { running: 'läuft', waiting: 'wartet', later: 'für später', e
 async function cancelTransfer(id) { await api(`/api/transfers/${encodeURIComponent(id)}/cancel`, { method: 'POST' }); pollTransfers(); }
 function renderTransfers() {
   const list = transfers.items || [];
-  $('#trCount').textContent = list.length ? `· ${list.length}` : '';
-  $('#trList').innerHTML = list.length ? `<table class="files"><tbody>${list.map((t) => `<tr>
+  const off = (actList || []).filter((a) => a.kind === 'offload' && !a.done);
+  $('#trCount').textContent = list.length + off.length ? `· ${list.length + off.length}` : '';
+  const offRows = off.map((a) => `<tr><td>📦 Auslagern · ${esc(a.name || '')}<div class="muted">${esc(a.step || '')} ${a.total > 1 ? `· ${a.index}/${a.total}` : ''}</div>
+    <div class="bar"><i style="width:${Math.round((a.progress || 0) * 100)}%"></i></div></td><td class="size"></td>
+    <td class="acts"><button class="small" data-act-stop ${a.stopping ? 'disabled' : ''}>${a.stopping ? 'Wird gestoppt …' : 'Stoppen'}</button></td></tr>`).join('');
+  $('#trList').innerHTML = list.length || off.length ? `<table class="files"><tbody>${offRows}${list.map((t) => `<tr>
     <td>${t.kind === 'upload' ? '⬆ RomM · ' : t.kind === 'url' ? '🔗 ' : t.kind === 'move' ? '📦 Einspielen · ' : t.kind === 'found' ? '📥 ' : '⬇ '}${esc(['url', 'move', 'found'].includes(t.kind) ? t.name : displayTitle(t.name))}${t.kind === 'move' ? `<span class="muted"> → ${esc(t.dest)}</span>` : ''}<div class="muted">${t.state === 'running'
       ? `${Math.round((t.progress || 0) * 100)} %${t.transfer ? ' · ' + esc(t.transfer) : ''}` : t.state === 'error' ? '<span class="err">' + esc(t.error) + '</span>' : t.kind === 'found' && t.state === 'later' ? 'bereit zum Installieren · aus dem Download-Ordner' : trState[t.state]}</div>
       ${t.state === 'running' ? `<div class="bar"><i style="width:${Math.round((t.progress || 0) * 100)}%"></i></div>` : ''}</td>
@@ -1744,7 +1752,8 @@ $('#drivers').addEventListener('click', async (e) => {
 $('#drvReload').onclick = () => loadDrivers(true);
 
 // ---------- background activity, top right (offload queue, downloads, RomM upload) ----------
-let actTimer = null, actWasBusy = false;
+let actTimer = null, actWasBusy = false, actList = [];
+document.addEventListener('click', async (e) => { if (e.target.closest('[data-act-stop]')) { await api('/api/library/offload/cancel', { method: 'POST' }); pollActivity(); } });
 async function pollActivity() {
   clearTimeout(actTimer);
   let list = [];
@@ -1756,8 +1765,11 @@ async function pollActivity() {
     const err = a.error && a.error !== 'null' ? a.error : '';
     return `<div class="act ${a.done ? (err ? 'bad' : 'ok') : ''}"><div class="acthead"><span>${a.done ? (err ? '⚠' : '✓') : a.kind === 'download' ? '⬇' : '⬆'} ${esc(a.title)}</span>${n}</div>
       <div class="actname">${esc(a.name || '')}</div>
+      ${!a.done && a.stoppable ? `<button class="small" data-act-stop ${a.stopping ? 'disabled' : ''}>${a.stopping ? 'Wird gestoppt …' : 'Stoppen'}</button>` : ''}
       ${a.done ? (err ? `<div class="err">${esc(err)}</div>` : '') : `${a.step && a.step !== a.name ? `<div class="muted">${esc(a.step)}</div>` : ''}<div class="bar"><i style="width:${Math.round(a.progress * 100)}%"></i></div><div class="muted">${Math.round(a.progress * 100)} %</div>`}</div>`;
   }).join('');
+  actList = list;
+  if (!$('#store').hidden) renderTransfers();
   const busy = list.some((a) => !a.done);
   moodState.busy = busy; moodState.err = list.some((a) => a.done && a.error && a.error !== 'null'); moodState.done = !busy && list.length > 0 && !moodState.err;
   updMood();
