@@ -1090,6 +1090,31 @@ object Server {
                 // 1. GET  /api/upload?path=&size=      -> {offset, exists, free}
                 // 2. PUT  /api/upload?path=&offset=N   raw bytes, appended; 409 + {offset} if N is wrong
                 // 3. POST /api/upload/finish?path=&size=&overwrite=1
+                // Small files in one go: PUT /api/upload/whole?path=&size=&overwrite=1 (folders with thousands of files)
+                put("/api/upload/whole") {
+                    if (denied(ctx)) return@put
+                    val f = Storage.resolve(q("path")) ?: return@put fail("path not allowed")
+                    val size = q("size")?.toLongOrNull() ?: return@put fail("size missing")
+                    if (f.exists()) {
+                        if (q("overwrite") != "1") {
+                            if (f.isFile && f.length() == size) return@put json(JSONObject().put("ok", true).put("skipped", true))
+                            return@put fail("file exists", HttpStatusCode.Conflict)
+                        }
+                    }
+                    val free = Storage.free(f)
+                    if (free in 0 until size) return@put json(JSONObject().put("error", "no space").put("free", free), HttpStatusCode.Conflict)
+                    val part = File(f.path + PART)
+                    val n = withContext(Dispatchers.IO) {
+                        f.parentFile?.mkdirs()
+                        FileOutputStream(part).use { out -> call.receiveChannel().toInputStream().use { it.copyTo(out, 1 shl 20) } }
+                    }
+                    if (n != size) { part.delete(); return@put fail("size mismatch ($n of $size)", HttpStatusCode.Conflict) }
+                    if (f.exists()) f.delete()
+                    if (!part.renameTo(f)) return@put fail("rename failed")
+                    Roms.invalidate()
+                    sweepSoon(ctx, f)
+                    json(JSONObject().put("ok", true))
+                }
                 get("/api/upload") {
                     if (denied(ctx)) return@get
                     val f = Storage.resolve(q("path")) ?: return@get fail("path not allowed")
@@ -1168,7 +1193,7 @@ object Server {
                     if (!part.renameTo(f)) return@post fail("rename failed")
                     Roms.invalidate()
                     // loose archive or disc in the ROM folder: unpack / sort it (a little later, the client may still go on)
-                    kotlin.concurrent.thread(isDaemon = true) { Thread.sleep(11_000); runCatching { Discs.sweep(ctx) } }
+                    sweepSoon(ctx, f)
                     json(JSONObject().put("ok", true).put("path", f.path))
                 }
 
@@ -1248,6 +1273,27 @@ object Server {
                 }
             }
         }
+
+    private val sweepPending = java.util.concurrent.atomic.AtomicBoolean(false)
+    @Volatile private var sweepAt = 0L
+
+    /**
+     * An upload landed loose in the ROM folder (or in a folder there that is no console folder, e.g. a PC game):
+     * sort it a little later. One waiting thread for a whole folder of thousands of files; a loose file after 11 s,
+     * a folder after 65 s (Discs.sweep leaves folders younger than a minute alone).
+     */
+    private fun sweepSoon(ctx: Context, f: File) {
+        val root = Library.romsRoot(ctx).canonicalFile
+        val c = f.canonicalFile
+        val top = generateSequence(c) { it.parentFile }.firstOrNull { it.parentFile == root } ?: return
+        if (top != c && Roms.consoleFor(top.name) != null) return
+        sweepAt = maxOf(sweepAt, System.currentTimeMillis() + if (top == c) 11_000 else 65_000)
+        if (!sweepPending.compareAndSet(false, true)) return
+        kotlin.concurrent.thread(isDaemon = true) {
+            try { while (System.currentTimeMillis() < sweepAt) Thread.sleep(2_000) } finally { sweepPending.set(false) }
+            runCatching { Discs.sweep(ctx) }
+        }
+    }
 
     private fun RoutingContext.q(name: String): String? = call.request.queryParameters[name]
 

@@ -387,7 +387,7 @@ function renderQueue() {
     const rm = it.state !== 'läuft' ? `<button data-rm="${it.id}">✕</button>` : '';
     const ex = isArchiveName(it.name) && !it.isFolder ? `<label class="muted"><input type="checkbox" data-extract="${it.id}" ${it.extract ? 'checked' : ''} ${it.state !== 'wartet' ? 'disabled' : ''}> entpacken</label>` : '';
     return `<li class="${cls}"><div class="qhead"><span class="qname">${it.isFolder ? '📁 ' : ''}${esc(it.name)}</span>${sys}${ex}${btn}${rm}</div>
-      <div class="qmeta">${it.files.length > 1 ? it.files.length + ' Dateien · ' : ''}${fmt(it.sent)} / ${fmt(it.total)} · ${esc(it.state)}${it.speed ? ' · ' + fmt(it.speed) + '/s' : ''}${it.eta ? ' · noch ' + it.eta : ''}${it.state === 'läuft' ? (link.via === 'usb' ? ' · über USB' : ' · über WLAN') : ''}
+      <div class="qmeta">${it.files.length > 1 ? (it.filesDone ? it.filesDone + ' / ' : '') + it.files.length + ' Dateien · ' : ''}${fmt(it.sent)} / ${fmt(it.total)} · ${esc(it.state)}${it.speed ? ' · ' + fmt(it.speed) + '/s' : ''}${it.eta ? ' · noch ' + it.eta : ''}${it.state === 'läuft' ? (link.via === 'usb' ? ' · über USB' : ' · über WLAN') : ''}
       → ${esc(it.system === 'pc' && it.isFolder ? `${PC_DIR}/${pcName(it)}` : targetDir(it))}${it.system === 'pc' ? ' (intern, PC-Spiel)' : ''}${it.note ? '<br>' + esc(it.note) : ''}${it.error ? '<br>' + esc(it.error) : ''}</div>
       <div class="bar"><div style="width:${pct}%"></div></div></li>`;
   }).join('');
@@ -451,10 +451,52 @@ async function upApi(path, opts = {}) {
 }
 
 const PARALLEL = 3;
-async function uploadOne(item, file, dest, before) {
+const FILE_POOL = 8; // small files of a folder in flight at once (+ one big file with its 3 chunks)
+
+// item progress: parallel files add up; "moved" = bytes really sent (skipped files don't count for the speed)
+function progress(item, n, moved) {
+  item.sent += n; if (moved) item.moved += n;
+  const secs = (performance.now() - item.t0) / 1000;
+  if (secs > 1 && item.moved > 0) {
+    item.speed = item.moved / secs;
+    const left = (item.total - item.sent) / item.speed;
+    item.eta = left > 90 ? Math.round(left / 60) + ' min' : Math.round(left) + ' s';
+  }
+  scheduleRender();
+}
+let renderTimer = null;
+function scheduleRender() { if (!renderTimer) renderTimer = setTimeout(() => { renderTimer = null; renderQueue(); }, 250); }
+
+class Fatal extends Error {}
+/** a small file in one request (no probe, no finish): thousands of files are bound by requests, not bytes */
+async function uploadWhole(item, file, dest, ow) {
+  let r;
+  for (let tries = 0; ; tries++) {
+    if (item.paused) throw new Paused();
+    try {
+      r = await upApi('/api/upload/whole?' + q({ path: dest, size: file.size, overwrite: ow }), {
+        method: 'PUT', body: file, headers: { 'Content-Type': 'application/octet-stream' },
+      });
+      if (r.status !== 409 || r.body.error === 'file exists' || r.body.error === 'no space') break;
+      throw new Error(r.body.error || 'Konflikt'); // size mismatch: send again
+    } catch (err) {
+      if (err instanceof AuthError || tries >= 5) throw err;
+      item.state = `Verbindung weg, neuer Versuch ${tries + 1}/6`; scheduleRender();
+      await sleep(1000 * (tries + 1));
+    }
+  }
+  item.state = 'läuft';
+  if (r.status === 409 && r.body.error === 'no space') throw new Fatal(`Nicht genug Speicher (${fmt(r.body.free)} frei)`);
+  if (r.status === 409) throw new Fatal(`${dest} gibt es schon (andere Größe). "Überschreiben" aktivieren.`);
+  if (r.body.skipped) return 'skipped';
+  progress(item, file.size, true);
+  return 'ok';
+}
+
+async function uploadOne(item, file, dest) {
   const probe = (await upApi('/api/upload?' + q({ path: dest, size: file.size }))).body;
   // old servers or a sequential upload already in progress: keep the sequential path
-  if (!probe.parallel || (probe.offset > 0 && !probe.chunks.length) || file.size <= CHUNK) return uploadSeq(item, file, dest, before);
+  if (!probe.parallel || (probe.offset > 0 && !probe.chunks.length) || file.size <= CHUNK) return uploadSeq(item, file, dest);
   if (probe.exists && !$('#overwrite').checked) {
     if (probe.existingSize === file.size) return 'skipped';
     throw new Error(`${dest} gibt es schon (andere Größe). "Überschreiben" aktivieren.`);
@@ -464,7 +506,8 @@ async function uploadOne(item, file, dest, before) {
   for (let off = 0; off < file.size; off += CHUNK) if (!have.has(off)) todo.push(off);
   const doneBytes = () => [...have].reduce((a, o) => a + Math.min(CHUNK, file.size - o), 0);
   if (probe.free >= 0 && probe.free < file.size - doneBytes()) throw new Error(`Nicht genug Speicher (${fmt(probe.free)} frei)`);
-  const t0 = performance.now(), start = doneBytes();
+  let reported = doneBytes();
+  progress(item, reported, false); // chunks that were already there (resume)
   const worker = async () => {
     while (todo.length) {
       if (item.paused) throw new Paused();
@@ -483,14 +526,7 @@ async function uploadOne(item, file, dest, before) {
       }
       have.add(off);
       item.state = 'läuft';
-      item.sent = before + doneBytes();
-      const secs = (performance.now() - t0) / 1000;
-      if (secs > 1) {
-        item.speed = (doneBytes() - start) / secs;
-        const left = (item.total - item.sent) / item.speed;
-        item.eta = left > 90 ? Math.round(left / 60) + ' min' : Math.round(left) + ' s';
-      }
-      renderQueue();
+      const d = doneBytes(); progress(item, d - reported, true); reported = d;
     }
   };
   await Promise.all(Array.from({ length: PARALLEL }, worker));
@@ -498,14 +534,15 @@ async function uploadOne(item, file, dest, before) {
   return 'ok';
 }
 
-async function uploadSeq(item, file, dest, before) {
+async function uploadSeq(item, file, dest) {
   let { body: st } = await upApi('/api/upload?' + q({ path: dest, size: file.size }));
   if (st.exists && !$('#overwrite').checked) {
     if (st.existingSize === file.size) return 'skipped';
     throw new Error(`${dest} gibt es schon (andere Größe). "Überschreiben" aktivieren.`);
   }
   if (st.free >= 0 && st.free < file.size - st.offset) throw new Error(`Nicht genug Speicher (${fmt(st.free)} frei)`);
-  let off = st.offset, tries = 0, t0 = performance.now(), off0 = off;
+  let off = st.offset, tries = 0, reported = off;
+  progress(item, off, false);
   while (off < file.size) {
     if (item.paused) throw new Paused();
     try {
@@ -520,14 +557,7 @@ async function uploadSeq(item, file, dest, before) {
       ({ body: st } = await upApi('/api/upload?' + q({ path: dest, size: file.size })));
       off = st.offset; item.state = 'läuft';
     }
-    item.sent = before + off;
-    const secs = (performance.now() - t0) / 1000;
-    if (secs > 1) {
-      item.speed = (off - off0) / secs;
-      const left = (item.total - item.sent) / item.speed;
-      item.eta = left > 90 ? Math.round(left / 60) + ' min' : Math.round(left) + ' s';
-    }
-    renderQueue();
+    progress(item, off - reported, true); reported = off;
   }
   await upApi('/api/upload/finish?' + q({ path: dest, size: file.size, overwrite: $('#overwrite').checked ? 1 : 0 }), { method: 'POST' });
   return 'ok';
@@ -550,15 +580,28 @@ async function runQueue() {
         } catch (err) { if (err instanceof AuthError) throw err; }
       }
       item.note = '';
-      let before = 0;
       try {
-        for (const f of item.files) {
-          const folder = item.system === 'pc' ? pcName(item) : item.name;
-          const dest = `${upDir}/${item.isFolder ? folder + '/' : ''}${f.rel || f.file.name}`;
-          await uploadOne(item, f.file, dest, before);
-          before += f.file.size;
-          item.sent = before;
-        }
+        const folder = item.system === 'pc' ? pcName(item) : item.name;
+        const destOf = (f) => `${upDir}/${item.isFolder ? folder + '/' : ''}${f.rel || f.file.name}`;
+        const ow = $('#overwrite').checked ? 1 : 0;
+        item.sent = 0; item.moved = 0; item.filesDone = 0; item.t0 = performance.now();
+        // folders with thousands of small files: FILE_POOL at once, each in one request; big files one by one beside them
+        const small = item.files.filter((f) => f.file.size <= CHUNK), big = item.files.filter((f) => f.file.size > CHUNK);
+        let failed = null;
+        const lane = async (list) => {
+          while (list.length && !failed) {
+            const f = list.shift();
+            if (item.paused) throw new Paused();
+            const dest = destOf(f);
+            const r = f.file.size <= CHUNK ? await uploadWhole(item, f.file, dest, ow) : await uploadOne(item, f.file, dest);
+            if (r === 'skipped') progress(item, f.file.size, false);
+            item.filesDone++;
+          }
+        };
+        const guard = (p) => p.catch((err) => { if (!failed || (failed instanceof Paused && !(err instanceof Paused))) failed = err; });
+        await Promise.all([lane(big), ...Array.from({ length: FILE_POOL }, () => lane(small))].map(guard));
+        if (failed) throw failed;
+        renderQueue();
         // copying to the SD card and unpacking run in the Thor's queue: Store › Downloads (native + web)
         if (staged || item.extract) {
           await api('/api/transfers/move?' + q({
