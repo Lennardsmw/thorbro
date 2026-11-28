@@ -175,7 +175,8 @@ object Library {
     /** where downloaded/received games go: the folder picked in Settings, else the ROMs folder the scan found (SD preferred), else internal ROMs */
     fun romsRoot(ctx: Context): File =
         Prefs.of(ctx).getString("roms.root", null)?.let(::File)?.takeIf { it.isDirectory }
-            ?: Roms.scan(ctx, false).optJSONArray("romRoots")?.let { a -> (0 until a.length()).map { File(a.getString(it)) }.lastOrNull() }
+            ?: (Roms.knownRoots() ?: Roms.scan(ctx, false).optJSONArray("romRoots").let { a -> (0 until (a?.length() ?: 0)).map { a!!.getString(it) } })
+                .map(::File).lastOrNull()
             ?: File(Storage.primary, "ROMs")
 
     /** the ROM folders to pick from: per storage volume the one the scan found, else <volume>/ROMs (created when picked) */

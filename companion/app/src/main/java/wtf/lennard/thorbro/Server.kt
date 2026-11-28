@@ -1122,7 +1122,7 @@ object Server {
                     if (n != size) { part.delete(); return@put fail("size mismatch ($n of $size)", HttpStatusCode.Conflict) }
                     if (f.exists()) f.delete()
                     if (!part.renameTo(f)) return@put fail("rename failed")
-                    Roms.invalidate()
+                    Roms.invalidateSoon()
                     sweepSoon(ctx, f)
                     json(JSONObject().put("ok", true))
                 }
@@ -1202,7 +1202,7 @@ object Server {
                         f.delete()
                     }
                     if (!part.renameTo(f)) return@post fail("rename failed")
-                    Roms.invalidate()
+                    Roms.invalidateSoon()
                     // loose archive or disc in the ROM folder: unpack / sort it (a little later, the client may still go on)
                     sweepSoon(ctx, f)
                     json(JSONObject().put("ok", true).put("path", f.path))

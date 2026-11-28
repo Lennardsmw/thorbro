@@ -78,6 +78,12 @@ object Roms {
 
     @Volatile private var cache: JSONObject? = null
     fun invalidate() { cache = null }
+    @Volatile private var staleAt = 0L
+    /** many files in a row (a folder upload): the list goes stale 5 s after the last one, not with every file */
+    fun invalidateSoon() { staleAt = System.currentTimeMillis() + 5_000 }
+    @Volatile private var lastRoots: List<String>? = null
+    /** the ROM folders of the last scan, without scanning again (null = never scanned) */
+    fun knownRoots(): List<String>? = lastRoots
     /** the console an extension belongs to when only one has it (.nds → nds; .iso → null) */
     fun uniqueSystem(ext: String): String? = unique[ext.lowercase()]?.id
     /** the console a folder name stands for ("PS2", "Game Boy Advance" …), null = none; skipped folders count too */
@@ -85,6 +91,7 @@ object Roms {
 
     @Synchronized
     fun scan(ctx: Context, refresh: Boolean): JSONObject {
+        if (staleAt in 1..System.currentTimeMillis()) { staleAt = 0; cache = null }
         if (!refresh) cache?.let { return it }
         val found = LinkedHashMap<String, MutableList<JSONObject>>()
         val roots = mutableListOf<String>()
@@ -111,7 +118,7 @@ object Roms {
         return JSONObject()
             .put("scannedAt", System.currentTimeMillis())
             .put("tookMs", System.currentTimeMillis() - t0)
-            .put("romRoots", JSONArray(roots))
+            .put("romRoots", JSONArray(roots.also { lastRoots = it.toList() }))
             .put("systemIds", JSONArray(systems.map { JSONObject().put("id", it.id).put("name", it.name) }))
             .put("systems", list)
             .also { cache = it }
