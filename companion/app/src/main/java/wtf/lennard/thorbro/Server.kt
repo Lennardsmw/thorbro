@@ -1090,6 +1090,17 @@ object Server {
                 // 1. GET  /api/upload?path=&size=      -> {offset, exists, free}
                 // 2. PUT  /api/upload?path=&offset=N   raw bytes, appended; 409 + {offset} if N is wrong
                 // 3. POST /api/upload/finish?path=&size=&overwrite=1
+                // What is already there (re-drop of a big folder): every file under dir with its size, in one call
+                get("/api/upload/existing") {
+                    if (denied(ctx)) return@get
+                    val d = Storage.resolve(q("dir")) ?: return@get fail("dir not allowed")
+                    val o = JSONObject()
+                    withContext(Dispatchers.IO) {
+                        if (d.isDirectory) d.walkTopDown().filter { it.isFile && !it.name.endsWith(PART) && !it.name.endsWith(CHUNKS) }
+                            .forEach { o.put(it.relativeTo(d).path, it.length()) }
+                    }
+                    json(JSONObject().put("files", o))
+                }
                 // Small files in one go: PUT /api/upload/whole?path=&size=&overwrite=1 (folders with thousands of files)
                 put("/api/upload/whole") {
                     if (denied(ctx)) return@put

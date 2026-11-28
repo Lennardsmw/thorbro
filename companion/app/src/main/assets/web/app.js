@@ -437,17 +437,21 @@ function setVia(via, hint) {
 }
 setInterval(() => { if (!document.hidden && (!$('#upload').hidden || running)) checkLink(); }, 2000);
 /** api() for upload traffic: over USB while it works, else (and as fallback mid-upload) over Wi-Fi */
+// every upload request has a deadline: after a ThorBro restart an in-flight request over the adb forward would
+// otherwise hang forever (the Mac side of the socket stays open). A timeout counts as a network error → retry / Wi-Fi.
+const upTimeout = (opts) => AbortSignal.timeout(15000 + (opts.body?.size || 0) / 1024); // + 1 s per MB (≥ 1 MB/s)
+const netErr = (err) => err instanceof TypeError || err?.name === 'TimeoutError' || err?.name === 'AbortError';
 async function upApi(path, opts = {}) {
   if (link.via === 'usb') {
     try {
-      const r = await fetch(usbBase() + path, { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + token } });
+      const r = await fetch(usbBase() + path, { ...opts, signal: upTimeout(opts), headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + token } });
       const body = await r.json().catch(() => ({}));
       if (r.ok || r.status === 409) return { status: r.status, body };
       if (r.status !== 401 && r.status < 500) throw new Error(body.error || r.statusText);
-    } catch (err) { if (!(err instanceof TypeError)) throw err; }
+    } catch (err) { if (!netErr(err)) throw err; }
     setVia('wifi', 'USB weg – weiter über WLAN'); // network error / 5xx / 401 on the USB way: carry on over the air
   }
-  return api(path, opts);
+  return api(path, { ...opts, signal: upTimeout(opts) });
 }
 
 const PARALLEL = 3;
@@ -456,14 +460,22 @@ const FILE_POOL = 8; // small files of a folder in flight at once (+ one big fil
 // item progress: parallel files add up; "moved" = bytes really sent (skipped files don't count for the speed)
 function progress(item, n, moved) {
   item.sent += n; if (moved) item.moved += n;
-  const secs = (performance.now() - item.t0) / 1000;
-  if (secs > 1 && item.moved > 0) {
-    item.speed = item.moved / secs;
-    const left = (item.total - item.sent) / item.speed;
-    item.eta = left > 90 ? Math.round(left / 60) + ' min' : Math.round(left) + ' s';
-  }
   scheduleRender();
 }
+// speed over the last 5 s across all files in flight (per-file timing never shows with thousands of small files)
+function measure(item) {
+  const now = performance.now();
+  (item.samples ||= []).push([now, item.moved]);
+  while (item.samples.length > 2 && now - item.samples[0][0] > 5000) item.samples.shift();
+  const [t0, m0] = item.samples[0];
+  if (now - t0 < 900) return;
+  item.speed = ((item.moved - m0) * 1000) / (now - t0);
+  if (item.speed > 0) {
+    const left = (item.total - item.sent) / item.speed;
+    item.eta = left > 90 ? Math.round(left / 60) + ' min' : Math.round(left) + ' s';
+  } else item.eta = '';
+}
+setInterval(() => { const it = queue.find((x) => x.state !== 'wartet' && x.state !== 'fertig' && x.state !== 'fehler' && x.state !== 'pausiert' && x.t0); if (it && running) { measure(it); renderQueue(); } }, 1000);
 let renderTimer = null;
 function scheduleRender() { if (!renderTimer) renderTimer = setTimeout(() => { renderTimer = null; renderQueue(); }, 250); }
 
@@ -480,8 +492,8 @@ async function uploadWhole(item, file, dest, ow) {
       if (r.status !== 409 || r.body.error === 'file exists' || r.body.error === 'no space') break;
       throw new Error(r.body.error || 'Konflikt'); // size mismatch: send again
     } catch (err) {
-      if (err instanceof AuthError || tries >= 5) throw err;
-      item.state = `Verbindung weg, neuer Versuch ${tries + 1}/6`; scheduleRender();
+      if (err instanceof AuthError || tries >= 9) throw err;
+      item.state = `Verbindung weg, neuer Versuch ${tries + 1}/10`; scheduleRender();
       await sleep(1000 * (tries + 1));
     }
   }
@@ -584,9 +596,20 @@ async function runQueue() {
         const folder = item.system === 'pc' ? pcName(item) : item.name;
         const destOf = (f) => `${upDir}/${item.isFolder ? folder + '/' : ''}${f.rel || f.file.name}`;
         const ow = $('#overwrite').checked ? 1 : 0;
-        item.sent = 0; item.moved = 0; item.filesDone = 0; item.t0 = performance.now();
+        item.sent = 0; item.moved = 0; item.filesDone = 0; item.t0 = performance.now(); item.samples = [];
+        // re-drop: one listing of what is already there instead of one request per file; same size = skip
+        let todo = item.files;
+        if (item.isFolder && !ow) {
+          try {
+            const { body } = await upApi('/api/upload/existing?' + q({ dir: `${upDir}/${folder}` }));
+            const have = body.files || {};
+            todo = item.files.filter((f) => have[f.rel] !== f.file.size);
+            const skipped = item.files.length - todo.length;
+            if (skipped) { progress(item, item.files.filter((f) => have[f.rel] === f.file.size).reduce((a, f) => a + f.file.size, 0), false); item.filesDone = skipped; item.note = `${skipped} Dateien schon da – übersprungen`; }
+          } catch (err) { if (err instanceof AuthError) throw err; }
+        }
         // folders with thousands of small files: FILE_POOL at once, each in one request; big files one by one beside them
-        const small = item.files.filter((f) => f.file.size <= CHUNK), big = item.files.filter((f) => f.file.size > CHUNK);
+        const small = todo.filter((f) => f.file.size <= CHUNK), big = todo.filter((f) => f.file.size > CHUNK);
         let failed = null;
         const lane = async (list) => {
           while (list.length && !failed) {
