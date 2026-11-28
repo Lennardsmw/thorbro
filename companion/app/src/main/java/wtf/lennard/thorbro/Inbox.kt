@@ -27,10 +27,12 @@ object Inbox {
 
     /** does this look like a game (or an archive with one)? */
     fun candidate(f: File): Boolean {
-        if (!f.isFile || f.name.startsWith(".") || f.length() == 0L) return false
+        if (f.name.startsWith(".")) return false
+        if (f.isDirectory) return Discs.isPcGame(f) // a Windows game folder
+        if (!f.isFile || f.length() == 0L) return false
         val ext = f.name.substringAfterLast('.', "").lowercase()
         if (ext in skipExts) return false
-        return Archives.isArchive(f) || Roms.uniqueSystem(ext) != null || ext in discExts
+        return Archives.isArchive(f) || Roms.uniqueSystem(ext) != null || ext in discExts || ext == "exe"
     }
 
     fun start(ctx: Context) {
@@ -53,7 +55,8 @@ object Inbox {
         val now = System.currentTimeMillis()
         for (f in dir.listFiles().orEmpty().sortedBy { it.lastModified() }) {
             if (!candidate(f) || f.path in ignored) continue
-            if (now - f.lastModified() < STABLE_MS) { main.postDelayed({ scanLater(ctx) }, STABLE_MS); continue } // still being written
+            val mtime = if (f.isDirectory) f.walkTopDown().maxDepth(3).maxOf { it.lastModified() } else f.lastModified()
+            if (now - mtime < STABLE_MS) { main.postDelayed({ scanLater(ctx) }, STABLE_MS); continue } // still being written
             TransferQueue.addFound(ctx, f, auto = Prefs.autoInstall(ctx))
         }
     }
@@ -67,11 +70,20 @@ object Inbox {
         val app = ctx.applicationContext
         return Jobs.start("Installieren") { job ->
             val src = File(e.getString("src"))
-            if (!src.isFile) error("Datei ist nicht mehr da: ${src.name}")
+            if (!src.exists()) error("Datei ist nicht mehr da: ${src.name}")
             val root = Library.romsRoot(app).apply { mkdirs() }
             val clean = Prefs.autoClean(app)
             job.game(e.optString("name"), "")
-            val placed: List<File> = if (Archives.isArchive(src)) {
+            val placed: List<File> = if (src.isDirectory || src.name.endsWith(".exe", true)) {
+                // PC (Windows) game: always internal ROMs/pc/<Game>, never the SD card
+                val t = Discs.pcTarget(src)
+                val game = if (src.isDirectory) t else t.parentFile!!
+                if (game.exists()) error("Gibt es schon: ${game.path}")
+                job.message = "kopiere nach ROMs/pc"
+                if (src.isDirectory) copyDir(app, src, t, job, move = clean) else { t.parentFile!!.mkdirs(); copy(app, src, t, job, move = clean) }
+                Roms.invalidate()
+                listOf(game)
+            } else if (Archives.isArchive(src)) {
                 // unpack straight into the ROM folder, then sort what came out into console folders
                 job.message = "entpacke ${src.name}"
                 val r = Archives.extract(src, root, deleteAfter = clean, job = job, sort = app)
@@ -89,9 +101,9 @@ object Inbox {
             if (games.isEmpty()) error("Nichts Spielbares gefunden (unbekannte Konsole?) – liegt in ${root.path}")
             if (clean) cleanup(app)
             if (Prefs.autoUpload(app) && runCatching { Romm.status(app).optBoolean("connected") }.getOrDefault(false)) {
-                for (g in games) TransferQueue.addUpload(app, setOf(g.path), Discs.cleanName(g.name).substringBeforeLast('.'), g.length(), g.parentFile!!.name)
+                for (g in games.filter { !Discs.inPc(it) }) TransferQueue.addUpload(app, setOf(g.path), Discs.cleanName(g.name).substringBeforeLast('.'), g.length(), g.parentFile!!.name)
             }
-            History.add(app, "install", e.optString("name"), games.first().parentFile!!.name, size = games.sumOf { it.length() })
+            History.add(app, "install", e.optString("name"), games.first().parentFile!!.name, size = games.sumOf { g -> g.walkTopDown().filter { it.isFile }.sumOf { it.length() } })
             Progress.done(app, "Installiert", games.joinToString { it.nameWithoutExtension })
             JSONObject().put("paths", org.json.JSONArray(games.map { it.path }))
         }
@@ -103,7 +115,7 @@ object Inbox {
      */
     fun scrape(ctx: Context, placed: List<File>, job: Jobs.Job? = null): List<File> {
         val root = Library.romsRoot(ctx).canonicalFile
-        val inConsole = { f: File -> f.exists() && f.canonicalFile.parentFile?.parentFile == root }
+        val inConsole = { f: File -> f.exists() && (f.canonicalFile.parentFile?.parentFile == root || Discs.inPc(f)) }
         val out = mutableListOf<File>()
         for (p in placed) {
             if (inConsole(p)) { out += p; continue }
@@ -131,6 +143,17 @@ object Inbox {
         val root = Cocoon.roots(ctx).firstOrNull() ?: return
         val d = File(root, "downloaded_media/$sys/icon").apply { mkdirs() }
         cover.copyTo(File(d, game.nameWithoutExtension + "." + cover.extension.ifEmpty { "png" }), overwrite = false)
+    }
+
+    /** a game folder, file by file (with progress and stop) */
+    private fun copyDir(ctx: Context, src: File, t: File, job: Jobs.Job, move: Boolean) {
+        if (move && src.renameTo(t)) return
+        for (f in src.walkTopDown().filter { it.isFile }.toList()) {
+            val d = File(t, f.relativeTo(src).path); d.parentFile!!.mkdirs()
+            job.message = "kopiere ${f.name}"
+            copy(ctx, f, d, job, move = false)
+        }
+        if (move) src.deleteRecursively()
     }
 
     private fun copy(ctx: Context, src: File, t: File, job: Jobs.Job, move: Boolean) {

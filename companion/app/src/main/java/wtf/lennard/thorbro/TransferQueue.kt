@@ -81,7 +81,7 @@ object TransferQueue {
         val id = "f" + f.path.hashCode().toUInt().toString(16)
         val l = items(ctx)
         if (l.any { it.optString("id") == id }) return null
-        val e = JSONObject().put("id", id).put("kind", "found").put("src", f.path).put("name", Discs.cleanName(f.name)).put("size", f.length())
+        val e = JSONObject().put("id", id).put("kind", "found").put("src", f.path).put("name", Discs.cleanName(f.name)).put("size", if (f.isDirectory) f.walkTopDown().filter { it.isFile }.sumOf { it.length() } else f.length())
             .put("system", "").put("later", !auto).put("added", System.currentTimeMillis())
         l += e; store(ctx, l); if (auto) kick(ctx); e
     }

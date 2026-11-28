@@ -310,7 +310,18 @@ const SYSTEMS = {
   nes: ['nes'], snes: ['sfc', 'smc'], n64: ['n64', 'z64', 'v64'], gc: ['rvz', 'gcz'], wii: ['wbfs'],
   switch: ['nsp', 'xci', 'nsz', 'xcz'], psx: ['pbp'], ps2: [], psp: ['cso'], dreamcast: ['gdi', 'cdi'],
   megadrive: ['md', 'gen'], mastersystem: ['sms'], gamegear: ['gg'], saturn: [], pcengine: ['pce'],
+  pc: ['exe'],
 };
+// PC (Windows) games always go to internal storage (the SD card is far too slow for them), one folder per game
+const PC_DIR = '/storage/emulated/0/ROMs/pc';
+// same as Discs.cleanName on the Thor: "Game (site.com)" → "Game"
+function cleanName(n) {
+  const dot = n.lastIndexOf('.'); const e = dot > 0 ? n.slice(dot) : ''; const base = e ? n.slice(0, dot) : n;
+  const c = base.replace(/\s*[\[(][^\])]*\b[\w-]+\.(com|net|org|to|cc|io|ws|me|info|ru|xyz|club|site)\b[^\])]*[\])]/gi, '')
+    .replace(/\s*-?\s*www\.[\w-]+\.[a-z]{2,6}/gi, '').replace(/\s{2,}/g, ' ').trim() || base;
+  return c + e;
+}
+const pcName = (item) => cleanName(item.isFolder ? item.name : item.name.replace(/\.[^.]+$/, ''));
 const EXT_TO_SYS = {};
 Object.entries(SYSTEMS).forEach(([s, exts]) => exts.forEach((e) => (EXT_TO_SYS[e] = s)));
 const ext = (n) => (n.includes('.') ? n.split('.').pop().toLowerCase() : '');
@@ -332,6 +343,8 @@ const queue = [];
 let running = false;
 
 function guessSystem(files) {
+  // a Windows game: an .exe at the top of the dropped folder or one folder down
+  if (files.some((f) => f.rel && ext(f.file.name) === 'exe' && f.rel.split('/').length <= 2)) return 'pc';
   const count = {};
   for (const f of files) { const s = EXT_TO_SYS[ext(f.file.name)]; if (s) count[s] = (count[s] || 0) + 1; }
   const best = Object.entries(count).sort((a, b) => b[1] - a[1])[0];
@@ -356,6 +369,7 @@ let autoStart = null;
 
 function targetDir(item) {
   if (item.isApk) return APK_DIR;
+  if (item.system === 'pc') return item.isFolder ? PC_DIR : `${PC_DIR}/${pcName(item)}`;
   const root = $('#romRoot').value.replace(/\/+$/, '');
   return item.system ? `${root}/${item.system}` : root;
 }
@@ -374,7 +388,7 @@ function renderQueue() {
     const ex = isArchiveName(it.name) && !it.isFolder ? `<label class="muted"><input type="checkbox" data-extract="${it.id}" ${it.extract ? 'checked' : ''} ${it.state !== 'wartet' ? 'disabled' : ''}> entpacken</label>` : '';
     return `<li class="${cls}"><div class="qhead"><span class="qname">${it.isFolder ? '📁 ' : ''}${esc(it.name)}</span>${sys}${ex}${btn}${rm}</div>
       <div class="qmeta">${it.files.length > 1 ? it.files.length + ' Dateien · ' : ''}${fmt(it.sent)} / ${fmt(it.total)} · ${esc(it.state)}${it.speed ? ' · ' + fmt(it.speed) + '/s' : ''}${it.eta ? ' · noch ' + it.eta : ''}${it.state === 'läuft' ? (link.via === 'usb' ? ' · über USB' : ' · über WLAN') : ''}
-      → ${esc(targetDir(it))}${it.note ? '<br>' + esc(it.note) : ''}${it.error ? '<br>' + esc(it.error) : ''}</div>
+      → ${esc(it.system === 'pc' && it.isFolder ? `${PC_DIR}/${pcName(it)}` : targetDir(it))}${it.system === 'pc' ? ' (intern, PC-Spiel)' : ''}${it.note ? '<br>' + esc(it.note) : ''}${it.error ? '<br>' + esc(it.error) : ''}</div>
       <div class="bar"><div style="width:${pct}%"></div></div></li>`;
   }).join('');
 }
@@ -539,7 +553,8 @@ async function runQueue() {
       let before = 0;
       try {
         for (const f of item.files) {
-          const dest = `${upDir}/${item.isFolder ? item.name + '/' : ''}${f.rel || f.file.name}`;
+          const folder = item.system === 'pc' ? pcName(item) : item.name;
+          const dest = `${upDir}/${item.isFolder ? folder + '/' : ''}${f.rel || f.file.name}`;
           await uploadOne(item, f.file, dest, before);
           before += f.file.size;
           item.sent = before;

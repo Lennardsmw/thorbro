@@ -11,6 +11,8 @@ import java.util.concurrent.ConcurrentHashMap
  * GameCube, Wii (disc magic). Site tags like "(axekin.com)" come off the name, so libretro finds the cover.
  * Archives lying loose in a ROM folder are unpacked by themselves ([sweep]): through the transfer queue, so it shows
  * on the Downloads page.
+ * PC (Windows) games: a folder with an .exe (top level or one folder down), or a lone .exe installer, always go to
+ * internal storage ROMs/pc/<Game> ([pcRoot]), even when the ROM folder is on the SD card (it is far too slow for them).
  */
 object Discs {
     private val cache = ConcurrentHashMap<String, String>() // path|size|mtime → system ("" = unknown)
@@ -104,6 +106,43 @@ object Discs {
         return if (ext.isEmpty()) base else "$base.$ext"
     }
 
+    /** PC games always live on internal storage: the SD card is too slow for them */
+    val pcRoot: File get() = File(Storage.primary, "ROMs/pc")
+
+    private fun isExe(f: File) = f.isFile && f.name.endsWith(".exe", true)
+
+    /** a Windows game folder: an .exe at the top or one folder down, nothing still being written */
+    fun isPcGame(dir: File): Boolean {
+        if (!dir.isDirectory) return false
+        val top = dir.listFiles().orEmpty()
+        val exe = top.any(::isExe) || top.any { it.isDirectory && it.listFiles().orEmpty().any(::isExe) }
+        return exe && dir.walkTopDown().maxDepth(3).none { it.name.endsWith(".thorbro-part") }
+    }
+
+    /** where a PC game goes: ROMs/pc/<Game> for a folder, ROMs/pc/<Setup>/<setup.exe> for a lone installer */
+    fun pcTarget(f: File): File = if (f.isDirectory) File(pcRoot, cleanName(f.name))
+        else File(File(pcRoot, cleanName(f.name).substringBeforeLast('.')), f.name)
+
+    /** is [f] a PC game (folder or loose .exe) in ROMs/pc? */
+    fun inPc(f: File): Boolean {
+        val pc = pcRoot.canonicalFile; val c = f.canonicalFile
+        return c.parentFile == pc || (c.isFile && c.parentFile?.parentFile == pc)
+    }
+
+    /** moves a PC game into [pcTarget] (rename on the same volume, else copy + delete); null = target taken / failed */
+    fun toPc(f: File): File? {
+        val t = pcTarget(f)
+        val game = if (f.isDirectory) t else t.parentFile!!
+        if (game.exists() && (f.isDirectory || t.exists())) return null
+        t.parentFile!!.mkdirs()
+        if (!f.renameTo(t)) {
+            if (!runCatching { f.copyRecursively(t, overwrite = false) }.getOrDefault(false)) { t.deleteRecursively(); return null }
+            f.deleteRecursively()
+        }
+        Roms.invalidate()
+        return game
+    }
+
     /** the ROM folder a file lies loose in (not in a console folder), null = somewhere else */
     private fun looseIn(ctx: Context, f: File): File? {
         val root = Library.romsRoot(ctx).canonicalFile
@@ -113,8 +152,10 @@ object Discs {
     /** moves loose games into their console folder; returns where each one went (unknown ones stay) */
     fun place(ctx: Context, files: List<File>): List<File> = files.map { f ->
         val root = looseIn(ctx, f) ?: return@map f
+        if (f.isDirectory) return@map if (Roms.consoleFor(f.name) == null && isPcGame(f)) toPc(f) ?: f else f
         if (!f.isFile) return@map f
         val ext = f.name.substringAfterLast('.', "").lowercase()
+        if (ext == "exe") return@map toPc(f) ?: f
         val sys = Roms.uniqueSystem(ext) ?: sniff(f) ?: return@map f
         val dir = File(root, sys).apply { mkdirs() }
         var t = File(dir, cleanName(f.name))
@@ -139,6 +180,9 @@ object Discs {
             }
             // loose games that are already unpacked (an .iso uploaded to the ROM folder itself)
             place(ctx, root.listFiles().orEmpty().filter { it.isFile && !it.name.startsWith(".") && !Archives.isArchive(it) && !it.name.endsWith(".thorbro-part") })
+            // loose PC game folders (dropped into the ROM folder itself) → internal ROMs/pc
+            place(ctx, root.listFiles().orEmpty().filter { it.isDirectory && !it.name.startsWith(".") &&
+                System.currentTimeMillis() - it.lastModified() > 60_000 && Roms.consoleFor(it.name) == null && isPcGame(it) })
         } finally { running.set(false) }
     }
 }

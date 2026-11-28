@@ -143,6 +143,7 @@ object UrlDownload {
         return when (sys) {
             "apk" -> File(APK_DIR)
             "", "-" -> Library.romsRoot(ctx)
+            "pc" -> File(Discs.pcRoot, Discs.cleanName(name).substringBeforeLast('.')) // internal, one folder per game
             else -> File(Library.romsRoot(ctx), sys)
         }
     }
