@@ -80,7 +80,8 @@ fun TransfersScreen() {
             listOf(
                 "Läuft" to items.filter { it.optString("state") == "running" },
                 "Wartet" to items.filter { it.optString("state") == "waiting" },
-                "Für später" to items.filter { it.optString("state") == "later" },
+                "Bereit zum Installieren · aus dem Download-Ordner" to items.filter { it.optString("state") == "later" && it.optString("kind") == "found" },
+                "Für später" to items.filter { it.optString("state") == "later" && it.optString("kind") != "found" },
                 "Fehlgeschlagen" to items.filter { it.optString("state") == "error" },
                 "Abgebrochen" to items.filter { it.optString("state") == "cancelled" },
             ).filter { it.second.isNotEmpty() }.forEach { (title, group) ->
@@ -90,16 +91,17 @@ fun TransfersScreen() {
                             val up = e.optString("kind") == "upload"
                             val link = e.optString("kind") == "url"
                             val move = e.optString("kind") == "move"
+                            val found = e.optString("kind") == "found"
                             val state = e.optString("state")
                             val sub = when (state) {
                                 "running" -> listOfNotNull("${(e.optDouble("progress", 0.0) * 100).toInt()} %", e.optString("transfer").takeIf { e.has("transfer") && it.isNotEmpty() }).joinToString(" · ")
                                 "error" -> e.optString("error")
-                                "later" -> (if (link) e.optString("url").take(60) else fmtBytes(e.optLong("size"))) + " · A = jetzt starten"
+                                "later" -> if (found) fmtBytes(e.optLong("size")) + " · A = installieren (entpacken, einsortieren, Cover)" else (if (link) e.optString("url").take(60) else fmtBytes(e.optLong("size"))) + " · A = jetzt starten"
                                 "cancelled" -> "abgebrochen · A = neu starten oder entfernen"
                                 else -> if (link) e.optString("url").take(80) else if (move) "→ " + e.optString("dest") else fmtBytes(e.optLong("size"))
                             }
                             val canCancel = state in listOf("running", "waiting", "later")
-                            SettingRow((if (up) "⬆ RomM · " else if (link) "🔗 " else if (move) "📦 Einspielen · " else "⬇ ") + e.optString("name"), sub,
+                            SettingRow((if (up) "⬆ RomM · " else if (link) "🔗 " else if (move) "📦 Einspielen · " else if (found) "📥 " else "⬇ ") + e.optString("name"), sub,
                                 when { state == "error" -> Icons.Filled.ErrorOutline; state == "later" -> Icons.Filled.WatchLater; up -> Icons.Filled.CloudUpload; else -> Icons.Filled.CloudDownload },
                                 warn = state == "error", value = if (canCancel) "X Abbrechen" else "Optionen",
                                 // X on a row = cancel it right away (also the running one)
@@ -124,7 +126,7 @@ fun TransfersScreen() {
             else -> fmtBytes(e.optLong("size"))
         }, options = buildList {
             if (state in listOf("running", "waiting", "later")) add("Abbrechen" to { act { TransferQueue.cancel(ctx, id) }; menu = null })
-            if (state == "later" || state == "error" || state == "cancelled") add((if (state == "cancelled") "Neu starten" else "Jetzt starten") to { act { TransferQueue.start(ctx, id) }; menu = null })
+            if (state == "later" || state == "error" || state == "cancelled") add((if (state == "cancelled") "Neu starten" else if (e.optString("kind") == "found") "Installieren" else "Jetzt starten") to { act { TransferQueue.start(ctx, id) }; menu = null })
             if (state != "running") add("Aus der Liste nehmen" to { act { TransferQueue.remove(ctx, id) }; menu = null })
         }) { menu = null }
     }

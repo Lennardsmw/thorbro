@@ -641,6 +641,18 @@ object Server {
                             q("extract") == "1", q("overwrite") == "1")!!
                     })
                 }
+                // Downloads settings (Store › Downloads): auto-install, auto clean-up, auto upload to RomM
+                get("/api/downloads/settings") {
+                    if (denied(ctx)) return@get
+                    json(Prefs.downloadsJson(ctx))
+                }
+                post("/api/downloads/settings") {
+                    if (denied(ctx)) return@post
+                    fun b(n: String) = q(n)?.let { it == "1" }
+                    Prefs.setDownloads(ctx, b("autoInstall"), b("autoClean"), b("autoUpload"))
+                    if (b("autoInstall") == true) withContext(Dispatchers.IO) { TransferQueue.startFound(ctx) }
+                    json(Prefs.downloadsJson(ctx))
+                }
                 // "Upload per Link": the Thor downloads the file itself (transfer queue, survives a restart)
                 post("/api/transfers/url") {
                     if (denied(ctx)) return@post

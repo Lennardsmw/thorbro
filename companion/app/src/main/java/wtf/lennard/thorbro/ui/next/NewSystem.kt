@@ -90,6 +90,8 @@ fun SystemScreenNew() {
     val grants = remember(tick) { wtf.lennard.thorbro.Emulators.trees(ctx).size }
     var autoUpdate by remember { mutableStateOf(Updater.auto(ctx)) }
     var autostart by remember { mutableStateOf(Prefs.autostart(ctx)) }
+    var dlTick by remember { mutableIntStateOf(0) }
+    val dl = remember(dlTick) { Prefs.downloadsJson(ctx) }
     var updMsg by remember { mutableStateOf("") }
     var dataTick by remember { mutableIntStateOf(0) }
     var modeMenu by remember { mutableStateOf(false) }
@@ -170,6 +172,18 @@ fun SystemScreenNew() {
                     }
                 }
                 item {
+                    SettingsGroup("Downloads · Spiele aus dem Download-Ordner") {
+                        SettingRow("Automatisch installieren", "neue Spiele sofort entpacken und einsortieren, sonst ein Klick unter Store › Downloads",
+                            Icons.Filled.Autorenew, on = dl.optBoolean("autoInstall")) {
+                            Prefs.setDownloads(ctx, !dl.optBoolean("autoInstall"), null, null)
+                            if (!dl.optBoolean("autoInstall")) scope.launch(Dispatchers.IO) { wtf.lennard.thorbro.TransferQueue.startFound(ctx) }
+                            dlTick++
+                        }
+                        SettingRow("Automatisch aufräumen", "nach dem Installieren Archiv und Reste löschen",
+                            Icons.Filled.Autorenew, on = dl.optBoolean("autoClean")) { Prefs.setDownloads(ctx, null, !dl.optBoolean("autoClean"), null); dlTick++ }
+                        SettingRow("Nach dem Installieren zu RomM hochladen", if (rommConnected) "nur wenn RomM verbunden ist" else "RomM ist nicht verbunden",
+                            Icons.Filled.Autorenew, on = dl.optBoolean("autoUpload")) { Prefs.setDownloads(ctx, null, null, !dl.optBoolean("autoUpload")); dlTick++ }
+                    }
                     SettingsGroup("Freunde") {
                         SettingRow("Dein Name", "so sehen dich deine Freunde · ID $myId", Icons.Filled.Badge, value = myName,
                             modifier = Modifier.focusRequester(friendsFirst)) { rename = true }

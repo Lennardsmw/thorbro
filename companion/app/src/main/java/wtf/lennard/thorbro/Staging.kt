@@ -47,7 +47,9 @@ object Staging {
             val stageRoot = if (staged) src.parentFile!! else null
             if (e.optBoolean("extract") && src.isFile && Archives.isArchive(src)) {
                 job.message = "entpacke ${src.name}"
-                Archives.extract(src, dest, deleteAfter = true, job = job, sort = app)
+                val r = Archives.extract(src, dest, deleteAfter = staged || Prefs.autoClean(app), job = job, sort = app)
+                val a = r.optJSONArray("paths") ?: org.json.JSONArray()
+                Inbox.scrape(app, (0 until a.length()).map { File(a.getString(it)) }, job)
             } else if (staged) {
                 val files = walk(src)
                 val total = files.sumOf { it.length() }.coerceAtLeast(1)

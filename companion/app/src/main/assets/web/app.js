@@ -49,6 +49,7 @@ function showTab(name) {
   if (name === 'roms' && !romData) loadRoms(false);
   if (name === 'apps') loadApps();
   if (name === 'upload') pollTransfers();
+  if (name === 'store') loadDlSettings();
   if (name === 'saves') loadSaves();
   if (name === 'library') loadLibrary();
   if (name === 'screen') screenStatus();
@@ -1011,12 +1012,12 @@ function renderTransfers() {
   const list = transfers.items || [];
   $('#trCount').textContent = list.length ? `· ${list.length}` : '';
   $('#trList').innerHTML = list.length ? `<table class="files"><tbody>${list.map((t) => `<tr>
-    <td>${t.kind === 'upload' ? '⬆ RomM · ' : t.kind === 'url' ? '🔗 ' : t.kind === 'move' ? '📦 Einspielen · ' : '⬇ '}${esc(t.kind === 'url' || t.kind === 'move' ? t.name : displayTitle(t.name))}${t.kind === 'move' ? `<span class="muted"> → ${esc(t.dest)}</span>` : ''}<div class="muted">${t.state === 'running'
-      ? `${Math.round((t.progress || 0) * 100)} %${t.transfer ? ' · ' + esc(t.transfer) : ''}` : t.state === 'error' ? '<span class="err">' + esc(t.error) + '</span>' : trState[t.state]}</div>
+    <td>${t.kind === 'upload' ? '⬆ RomM · ' : t.kind === 'url' ? '🔗 ' : t.kind === 'move' ? '📦 Einspielen · ' : t.kind === 'found' ? '📥 ' : '⬇ '}${esc(['url', 'move', 'found'].includes(t.kind) ? t.name : displayTitle(t.name))}${t.kind === 'move' ? `<span class="muted"> → ${esc(t.dest)}</span>` : ''}<div class="muted">${t.state === 'running'
+      ? `${Math.round((t.progress || 0) * 100)} %${t.transfer ? ' · ' + esc(t.transfer) : ''}` : t.state === 'error' ? '<span class="err">' + esc(t.error) + '</span>' : t.kind === 'found' && t.state === 'later' ? 'bereit zum Installieren · aus dem Download-Ordner' : trState[t.state]}</div>
       ${t.state === 'running' ? `<div class="bar"><i style="width:${Math.round((t.progress || 0) * 100)}%"></i></div>` : ''}</td>
     <td class="size">${fmt(t.size || 0)}</td>
     <td class="acts">${['running', 'waiting', 'later'].includes(t.state) ? `<button class="small" data-tr-cancel="${esc(t.id)}">Abbrechen</button>` : ''}
-      ${['later', 'error', 'cancelled'].includes(t.state) ? `<button class="small" data-tr-start="${esc(t.id)}">${t.state === 'cancelled' ? 'Neu starten' : 'Jetzt starten'}</button>` : ''}
+      ${['later', 'error', 'cancelled'].includes(t.state) ? `<button class="small" data-tr-start="${esc(t.id)}">${t.state === 'cancelled' ? 'Neu starten' : t.kind === 'found' ? 'Installieren' : 'Jetzt starten'}</button>` : ''}
       ${t.state !== 'running' ? `<button class="small" data-tr-remove="${esc(t.id)}">Entfernen</button>` : ''}</td></tr>`).join('')}</tbody></table>`
     : '<p class="muted">Nichts in der Warteschlange. Im Store „Laden“ oder „Später“ wählen.</p>';
 }
@@ -1029,6 +1030,13 @@ $('#trList').addEventListener('click', async (e) => {
   pollTransfers();
 });
 $('#transferBar button').onclick = () => { const id = $('#transferBar').dataset.id; if (id && confirm('Übertragung abbrechen?')) cancelTransfer(id); };
+// Downloads settings (same as on the Thor › System › Downloads)
+async function loadDlSettings() {
+  try { const { body } = await api('/api/downloads/settings'); document.querySelectorAll('[data-dl]').forEach((c) => (c.checked = !!body[c.dataset.dl])); } catch {}
+}
+document.querySelectorAll('[data-dl]').forEach((c) => (c.onchange = async () => {
+  await api('/api/downloads/settings?' + q({ [c.dataset.dl]: c.checked ? 1 : 0 }), { method: 'POST' }); loadDlSettings(); pollTransfers();
+}));
 $('#trStartAll').onclick = async () => { await api('/api/transfers/start', { method: 'POST' }); pollTransfers(); };
 
 // ---------- upload per link: the Thor loads the file itself (same transfer queue, survives a restart) ----------
