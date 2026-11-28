@@ -96,6 +96,9 @@ object Discs {
         return if ("BOOT2" in txt) "ps2" else "psx"
     }
 
+    /** a folder name has no extension: "Game (axekin.com)" → "Game" */
+    fun cleanDir(name: String): String = cleanName("$name.d").removeSuffix(".d")
+
     /** "Grand Theft Auto IV (axekin.com).iso" → "Grand Theft Auto IV.iso" */
     fun cleanName(name: String): String {
         val ext = name.substringAfterLast('.', "")
@@ -120,7 +123,7 @@ object Discs {
     }
 
     /** where a PC game goes: ROMs/pc/<Game> for a folder, ROMs/pc/<Setup>/<setup.exe> for a lone installer */
-    fun pcTarget(f: File): File = if (f.isDirectory) File(pcRoot, cleanName(f.name))
+    fun pcTarget(f: File): File = if (f.isDirectory) File(pcRoot, cleanDir(f.name))
         else File(File(pcRoot, cleanName(f.name).substringBeforeLast('.')), f.name)
 
     /** is [f] a PC game (folder or loose .exe) in ROMs/pc? */

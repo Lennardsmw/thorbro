@@ -321,7 +321,7 @@ function cleanName(n) {
     .replace(/\s*-?\s*www\.[\w-]+\.[a-z]{2,6}/gi, '').replace(/\s{2,}/g, ' ').trim() || base;
   return c + e;
 }
-const pcName = (item) => cleanName(item.isFolder ? item.name : item.name.replace(/\.[^.]+$/, ''));
+const pcName = (item) => (item.isFolder ? cleanName(item.name + '.d').slice(0, -2) : cleanName(item.name).replace(/\.[^.]+$/, ''));
 const EXT_TO_SYS = {};
 Object.entries(SYSTEMS).forEach(([s, exts]) => exts.forEach((e) => (EXT_TO_SYS[e] = s)));
 const ext = (n) => (n.includes('.') ? n.split('.').pop().toLowerCase() : '');
@@ -346,7 +346,7 @@ function guessSystem(files) {
   // a Windows game: an .exe at the top of the dropped folder or one folder down
   if (files.some((f) => f.rel && ext(f.file.name) === 'exe' && f.rel.split('/').length <= 2)) return 'pc';
   const count = {};
-  for (const f of files) { const s = EXT_TO_SYS[ext(f.file.name)]; if (s) count[s] = (count[s] || 0) + 1; }
+  for (const f of files) { const s = EXT_TO_SYS[ext(f.file.name)]; if (s && !(s === 'pc' && f.rel)) count[s] = (count[s] || 0) + 1; }
   const best = Object.entries(count).sort((a, b) => b[1] - a[1])[0];
   return best ? best[0] : '';
 }
