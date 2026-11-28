@@ -151,9 +151,9 @@ object Inbox {
         if (move) src.delete()
     }
 
-    /** leftovers: empty .thorbro-part files (older than 1 h) in the ROM folder root and Download, old staging copies */
+    /** leftovers: empty .thorbro-part files (older than 10 min) in the ROM folder root and Download, old staging copies */
     fun cleanup(ctx: Context) {
-        val old = System.currentTimeMillis() - 3_600_000
+        val old = System.currentTimeMillis() - 600_000
         for (d in listOf(Library.romsRoot(ctx), dir)) d.listFiles().orEmpty()
             .filter { it.isFile && it.name.endsWith(".thorbro-part") && it.length() == 0L && it.lastModified() < old }
             .forEach { it.delete() }
